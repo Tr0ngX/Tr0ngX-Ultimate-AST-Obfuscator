@@ -3569,6 +3569,122 @@ banner = f"""
 ⠠⣈⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⢁⠄
 """
 
+
+# ═══════════════════════════════════════════════════════════════
+# ADVANCED PROFILER & REAL-TIME DIAGNOSTIC LOGGER
+# ═══════════════════════════════════════════════════════════════
+
+_VERBOSE_DEBUG = False
+_PROFILE_MODE = False
+_STRICT_MODE = False
+_LOG_FILE_PATH = None
+_LOG_ENTRIES = []
+_STAGE_ERRORS = []
+
+def _get_current_ram_mb() -> float:
+    try:
+        import psutil
+        return psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+    except Exception:
+        return 0.0
+
+def _log_debug(msg: str, stage: str = None, duration: float = None, error: Exception = None, level: str = "INFO"):
+    global _LOG_ENTRIES
+    ts = time.strftime("%H:%M:%S")
+    dur_str = f" [took {duration:.4f}s]" if duration is not None else ""
+    stg_str = f" [{stage}]" if stage else ""
+    entry = f"[{ts}][{level}]{stg_str} {msg}{dur_str}"
+    _LOG_ENTRIES.append(entry)
+
+    if _VERBOSE_DEBUG or level in ("ERROR", "WARNING") or _PROFILE_MODE:
+        if level == "ERROR":
+            _v(f" [91m[ERROR]{stg_str} {msg}{dur_str}[0m")
+            if error is not None:
+                tb_lines = traceback.format_exc().strip()
+                _LOG_ENTRIES.append(tb_lines)
+                if _VERBOSE_DEBUG:
+                    for l in tb_lines.splitlines():
+                        _v(f"   [90m│ {l}[0m")
+        elif level == "WARNING":
+            _v(f" [93m[WARNING]{stg_str} {msg}{dur_str}[0m")
+        elif _VERBOSE_DEBUG:
+            _v(f" [96m[DEBUG]{stg_str} {msg}{dur_str}[0m")
+
+def _log_stage_error(stage_name: str, exc: Exception):
+    global _STAGE_ERRORS
+    tb = traceback.format_exc()
+    _STAGE_ERRORS.append({
+        "stage": stage_name,
+        "exception_type": type(exc).__name__,
+        "message": str(exc),
+        "traceback": tb,
+        "timestamp": time.time()
+    })
+    _log_debug(f"{type(exc).__name__}: {exc}", stage=stage_name, error=exc, level="ERROR")
+    if _STRICT_MODE:
+        _v(f" [91m[STRICT MODE ABORT] Terminating due to error in stage '{stage_name}'[0m")
+        sys.exit(1)
+
+def _print_profile_waterfall(total_elapsed: float, original_size: int, final_size: int):
+    stages = _DEBUG_MAP.get("stages", [])
+    if not stages and not _STAGE_ERRORS:
+        return
+
+    _v("")
+    _v(" ══════════════════════ PERFORMANCE & BOTTLENECK PROFILE ══════════════════════")
+    _v(f" {'STAGE':<32} {'TIME (s)':<12} {'% TOTAL':<10} {'SIZE DELTA':<14} {'STATUS'}")
+    _v(" ─────────────────────────────────────────────────────────────────────────────")
+
+    slowest_stage = None
+    max_duration = -1.0
+
+    for s in stages:
+        stg_name = s.get("stage", "Unknown")
+        dur = s.get("duration_seconds", 0.0)
+        pct = (dur / total_elapsed * 100) if total_elapsed > 0 else 0
+        delta = s.get("delta_bytes", 0)
+        delta_str = f"+{delta:,} B" if delta >= 0 else f"-{abs(delta):,} B"
+        status = "[92m[OK][0m"
+
+        if dur > max_duration:
+            max_duration = dur
+            slowest_stage = (stg_name, dur, pct)
+
+        _v(f" {stg_name:<32} {dur:>8.4f}s    {pct:>6.1f}%    {delta_str:>12}    {status}")
+
+    for err in _STAGE_ERRORS:
+        _v(f" [91m{err['stage']:<32} {'FAILED':>8}        --               --    [ERROR][0m")
+
+    _v(" ─────────────────────────────────────────────────────────────────────────────")
+    current_ram = _get_current_ram_mb()
+    ram_str = f" | PEAK RAM: {current_ram:.1f} MB" if current_ram > 0 else ""
+    _v(f" TOTAL TIME: {total_elapsed:.4f}s | EXPANSION: {original_size:,} B -> {final_size:,} B ({final_size/original_size if original_size>0 else 0:.1f}x){ram_str}")
+
+    if slowest_stage and slowest_stage[1] > 0.1 and slowest_stage[2] >= 25.0:
+        _v(f" [93m[BOTTLENECK ADVISORY] Stage '{slowest_stage[0]}' took the longest ({slowest_stage[1]:.3f}s, {slowest_stage[2]:.1f}% of total).[0m")
+    if _STAGE_ERRORS:
+        _v(f" [91m[WARNING] Encountered {len(_STAGE_ERRORS)} stage exception(s). Run with --debug or inspect log file for tracebacks.[0m")
+    _v(" ═════════════════════════════════════════════════════════════════════════════")
+    _v("")
+
+def _export_log_file():
+    if not _LOG_FILE_PATH:
+        return
+    try:
+        with open(_LOG_FILE_PATH, "w", encoding="utf-8") as lf:
+            lf.write(f"=== TR0NGX OBFUSCATOR EXECUTION & DIAGNOSTIC LOG ===\n")
+            lf.write(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            for entry in _LOG_ENTRIES:
+                lf.write(entry + "\n")
+            if _STAGE_ERRORS:
+                lf.write("\n=== STAGE ERROR TRACEBACKS ===\n")
+                for err in _STAGE_ERRORS:
+                    lf.write(f"\n--- Stage: {err['stage']} ({err['exception_type']}) ---\n")
+                    lf.write(err['traceback'] + "\n")
+        _v(f" ✓ DIAGNOSTIC LOG SAVED: {_LOG_FILE_PATH}")
+    except Exception as e:
+        _v(f" WARNING: Failed to export log file: {e}")
+
 _DEBUG_MAP = {
     "version": "4.0",
     "timestamp": None,
@@ -3582,12 +3698,15 @@ _DEBUG_MAP = {
 }
 
 def _track_debug_stage(name: str, duration_sec: float, initial_size: int, final_size: int, details: dict = None):
+    delta = final_size - initial_size
+    delta_str = f"+{delta:,} B" if delta >= 0 else f"-{abs(delta):,} B"
+    _log_debug(f"Completed ({duration_sec:.4f}s, size: {initial_size:,} -> {final_size:,} B [{delta_str}])", stage=name, duration=duration_sec)
     _DEBUG_MAP["stages"].append({
         "stage": name,
         "duration_seconds": round(duration_sec, 4),
         "initial_size_bytes": initial_size,
         "final_size_bytes": final_size,
-        "delta_bytes": final_size - initial_size,
+        "delta_bytes": delta,
         "details": details or {}
     })
 
@@ -3750,6 +3869,10 @@ VÍ DỤ SỬ DỤNG:
     
     # Debug & Environment controls
     parser.add_argument("--debug-map", nargs="?", const="AUTO", default=None, help="Xuất bản đồ ánh xạ ký hiệu & thời gian từng stage ra file JSON (vd: --debug-map map.json)")
+    parser.add_argument("--debug", "-d", action="store_true", help="Bật chế độ debug chi tiết (in log micro-stages, traceback và cảnh báo lỗi)")
+    parser.add_argument("--profile", action="store_true", help="Hiển thị bảng phân tích chi tiết hiệu năng (Profiling Waterfall & Bottleneck Analysis)")
+    parser.add_argument("--log-file", type=str, default=None, help="Ghi toàn bộ log và chẩn đoán chi tiết ra file riêng (vd: --log-file debug.log)")
+    parser.add_argument("--strict", action="store_true", help="Dừng tiến trình ngay khi gặp lỗi ở bất kỳ stage nào thay vì âm thầm bỏ qua")
     parser.add_argument("--no-art", "--quiet", "-q", action="store_true", help="Tắt banner ASCII art và hiệu ứng màu để chạy sạch trong CLI/Agent")
     
     # Resource limiting (RAM & CPU Cores)
@@ -3765,6 +3888,16 @@ VÍ DỤ SỬ DỤNG:
 
     cli_args, unknown = parser.parse_known_args()
     is_cli_mode = bool(cli_args.input is not None)
+
+    global _VERBOSE_DEBUG, _PROFILE_MODE, _STRICT_MODE, _LOG_FILE_PATH
+    if getattr(cli_args, 'debug', False):
+        _VERBOSE_DEBUG = True
+    if getattr(cli_args, 'profile', False):
+        _PROFILE_MODE = True
+    if getattr(cli_args, 'strict', False):
+        _STRICT_MODE = True
+    if getattr(cli_args, 'log_file', None):
+        _LOG_FILE_PATH = cli_args.log_file.strip().strip('"').strip("'")
 
     global _CLI_QUIET_MODE
     if cli_args.no_art or is_cli_mode:
@@ -3995,7 +4128,7 @@ def main():
         code = _syntax(code)
         _track_debug_stage("1_syntax_transform", time.time() - t0, sz0, len(code))
     except Exception as e:
-        _v(f" WARNING: Syntax transform skipped: {e}")
+        _log_stage_error("1_syntax_transform", e)
 
     # ═══ Step 2: AST junk injection ═══
     if moreobf.upper() == "Y":
@@ -4007,7 +4140,7 @@ def main():
             check = 5
             _track_debug_stage("2_ast_junk_injection", time.time() - t0, sz0, len(code))
         except Exception as e:
-            _v(f" WARNING: AST junk issue: {e}")
+            _log_stage_error("2_ast_junk_injection", e)
             check = 5
 
     # ═══ Step 3: Version check (Forced or Current) ═══
@@ -4278,7 +4411,7 @@ if not sys.version.startswith('{target_ver_str}'):
             _v("        ✓ Fast In-Memory Reconstruction Pipeline")
             _track_debug_stage("8_fused_matrix_shield", time.time() - t0, sz0, len(code))
         except Exception as e:
-            _v(f" WARNING: Fused matrix shield error: {e}")
+            _log_stage_error("8_fused_matrix_shield", e)
     else:
         # Single outer shield path
         if kramer_wrap_choice.upper() == "Y":
@@ -4395,6 +4528,9 @@ if not sys.version.startswith('{target_ver_str}'):
         if _new_modes:
             _v(f" ✓ FUSION: {' + '.join(_new_modes)}")
         _v(" ═══════════════════════════════════════")
+        if _PROFILE_MODE or _VERBOSE_DEBUG:
+            _print_profile_waterfall(elapsed, original_size, file_size)
+        _export_log_file()
         _v(" OBFUSCATION COMPLETE!")
     except Exception as e:
         _v(f" ERROR SAVING: {e}")
