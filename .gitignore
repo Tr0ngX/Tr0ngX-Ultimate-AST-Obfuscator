@@ -1,0 +1,16 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Large generated benchmark output files
+obf_*.py
+test_cjk_*.py
+trongdepzai-dev-sample_complex.py
+*.debug.json
+
+# Logs & temp
+*.log
+scratch/
+.system_generated/
+*.lnk

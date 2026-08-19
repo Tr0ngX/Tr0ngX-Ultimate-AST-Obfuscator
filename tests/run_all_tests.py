@@ -1,0 +1,101 @@
+"""
+Tr0ngX Ultimate Obfuscator - Automated End-to-End Test Runner
+Obfuscates all test suites under multiple combinations and validates 100% semantic correctness.
+"""
+import os, sys, subprocess, tempfile
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+TEST_FILES = [
+    "tests/test_01_core_features.py",
+    "tests/test_02_crypto_math.py",
+    "tests/test_03_data_structures.py",
+    "tests/test_04_dynamic_reflection.py",
+    "complex_benchmark.py"
+]
+
+OBF_CONFIGS = [
+    {
+        "name": "Standard Mode 1 (Fast AST + Strings)",
+        "args": ["-m", "1", "--force-py", "off", "--no-art"]
+    },
+    {
+        "name": "Medium Mode 2 + Double Compile + Matrix Fused",
+        "args": ["-m", "2", "--compile", "y", "--velimatix", "y", "--veli-level", "2", "--double-compile", "y", "--matrix", "y", "--kramer", "y", "--cjk-vars", "y", "--force-py", "off", "--no-art"]
+    },
+    {
+        "name": "MAXIMUM POWER Mode 3 + Anti-Debug + SelfMod + Double Compile + Fused Matrix + Unicode",
+        "args": ["-m", "3", "--moreobf", "y", "--antidebug", "y", "--selfmod", "y", "--compile", "y", "--velimatix", "y", "--veli-level", "3", "--double-compile", "y", "--matrix", "y", "--kramer", "y", "--emoji-obf", "y", "--whitespace-obf", "y", "--cjk-vars", "y", "--rare-unicode", "y", "--homoglyph", "y", "--force-py", "off", "--no-art", "--max-ram", "2048", "--cores", "2"]
+    }
+]
+
+def main():
+    print("=" * 70)
+    print(" TR0NGX OBFUSCATOR - AUTOMATED INTEGRATION & STRESS TEST HARNESS")
+    print("=" * 70)
+    
+    total_passed = 0
+    total_failed = 0
+
+    # 1. Native Execution Verification
+    print("\n[PHASE 1] Verifying Native Test Suites Execution...")
+    for tf in TEST_FILES:
+        if not os.path.exists(tf):
+            print(f"  [!] Missing test file: {tf}")
+            continue
+        p = subprocess.run([sys.executable, tf], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if p.returncode == 0:
+            print(f"  [PASS] Native: {tf}")
+            total_passed += 1
+        else:
+            print(f"  [FAIL] Native: {tf}\n    {p.stderr}")
+            total_failed += 1
+
+    # 2. Obfuscation and Post-Obfuscation Execution Verification
+    print("\n[PHASE 2] Obfuscating & Verifying Functional Invariance Across Matrix Configs...")
+    obf_script = "tr0ngx_obfuscator.py"
+    
+    for cfg in OBF_CONFIGS:
+        print(f"\n---> Testing Configuration: {cfg['name']}")
+        for tf in TEST_FILES:
+            if not os.path.exists(tf):
+                continue
+            with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as tmp_out:
+                out_path = tmp_out.name
+
+            try:
+                # Run obfuscation
+                cmd = [sys.executable, obf_script, "-i", tf, "-o", out_path] + cfg["args"]
+                p_obf = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+                if p_obf.returncode != 0:
+                    print(f"  [FAIL] OBFUSCATION ERROR on {tf}: {p_obf.stderr.strip() or p_obf.stdout.strip()}")
+                    total_failed += 1
+                    continue
+
+                # Run obfuscated file
+                p_run = subprocess.run([sys.executable, out_path], capture_output=True, text=True, encoding="utf-8", errors="replace")
+                if p_run.returncode == 0:
+                    print(f"  [PASS] VERIFIED: {tf} -> {os.path.basename(out_path)} ({os.path.getsize(out_path):,} bytes)")
+                    total_passed += 1
+                else:
+                    print(f"  [FAIL] EXECUTION FAILURE on {tf} [Return Code {p_run.returncode}]:\n{p_run.stderr.strip()}")
+                    total_failed += 1
+            finally:
+                if os.path.exists(out_path):
+                    try:
+                        os.remove(out_path)
+                    except:
+                        pass
+
+    print("\n" + "=" * 70)
+    print(f" TEST RUN COMPLETED: {total_passed} PASSED | {total_failed} FAILED")
+    print("=" * 70)
+    
+    if total_failed > 0:
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
