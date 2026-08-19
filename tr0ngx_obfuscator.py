@@ -2245,7 +2245,7 @@ def _anti_debugger():
     t1 = time.perf_counter_ns()
     _dummy = sum(range(5000))
     t2 = time.perf_counter_ns()
-    if (t2 - t1) > 50_000_000:  # 50ms for trivial op = debugger
+    if (t2 - t1) > 500_000_000:  # 50ms for trivial op = debugger
         _obliterate()
 
 # ═══ ANTI-IMPORT HOOK ═══
