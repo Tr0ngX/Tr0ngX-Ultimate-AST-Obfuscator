@@ -40,6 +40,18 @@ except Exception:
 # DEPENDENCY RESOLUTION WITH DETERMINISTIC ZERO-CRASH FALLBACKS
 # ═══════════════════════════════════════════════════════════════
 
+
+class _EngineState:
+    verbose_debug = False
+    profile_mode = False
+    strict_mode = False
+    log_file_path = None
+    cli_quiet_mode = False
+    use_cjk_names = False
+    use_homoglyph_names = False
+    use_rare_unicode_names = False
+    use_fused_names = False
+
 _HAS_PYSTYLE = False
 _HAS_PSUTIL = False
 
@@ -154,7 +166,7 @@ def _rd():
 def _rd1():
     return "".join(random.sample([chr(i) for i in range(97, 123)], k=1))
 
-_USE_FUSED_NAMES = False
+_EngineState.use_fused_names = False
 
 def _gen_fused_name(scope='general'):
     """Tạo tên biến lai ma trận (Hybrid Blended Identifier):
@@ -182,14 +194,13 @@ def _gen_fused_name(scope='general'):
             return _gen_homoglyph_name(random.randint(6, 10))
 
 def rd(scope='general'):
-    global _USE_CJK_NAMES, _USE_HOMOGLYPH_NAMES, _USE_RARE_UNICODE_NAMES, _USE_FUSED_NAMES
-    if _USE_FUSED_NAMES:
+    if _EngineState.use_fused_names:
         return _gen_fused_name(scope)
-    if _USE_RARE_UNICODE_NAMES:
+    if _EngineState.use_rare_unicode_names:
         return _gen_rare_unicode_name()
-    if _USE_HOMOGLYPH_NAMES:
+    if _EngineState.use_homoglyph_names:
         return _gen_homoglyph_name()
-    if _USE_CJK_NAMES:
+    if _EngineState.use_cjk_names:
         return _gen_cjk_name()
     while True:
         name = "_" + "".join(random.sample([str(i) for i in range(1, 50)], k=random.randint(3, 5)))
@@ -242,7 +253,7 @@ def _gen_mixed_name():
 # ═══════════════════════════════════════════════════════════════
 
 _CJK_CHARS = [chr(i) for i in range(0x4e00, 0x9fa5)]
-_USE_CJK_NAMES = False
+_EngineState.use_cjk_names = False
 
 def _gen_cjk_name(min_len=6, max_len=12):
     """Generate valid Python 3 CJK Ideograph identifiers (PyCool style)"""
@@ -256,7 +267,7 @@ def _gen_cjk_name(min_len=6, max_len=12):
 # HOMOGLYPH OBFUSCATION - CYRILLIC / GREEK LOOKALIKE NAMES
 # ═══════════════════════════════════════════════════════════════
 
-_USE_HOMOGLYPH_NAMES = False
+_EngineState.use_homoglyph_names = False
 
 # Characters that look identical to ASCII but are different Unicode codepoints
 _HOMOGLYPH_MAP = {
@@ -288,16 +299,17 @@ def _gen_homoglyph_name(length=10):
 # RARE UNICODE OBFUSCATION - CJK EXTENSION B / KANGXI / RARE
 # ═══════════════════════════════════════════════════════════════
 
-_USE_RARE_UNICODE_NAMES = False
+_EngineState.use_rare_unicode_names = False
 
 # CJK Extension B (U+20000-U+2A6DF) — very rare, valid Python identifiers
 # Kangxi Radicals (U+2F00-U+2FDF) — valid identifiers
 # CJK Compatibility Ideographs (U+F900-U+FAFF)
-_RARE_CHARS_POOL = None  # Lazy-init to save startup time
+
+class _RareChars:
+    pool = None
 
 def _init_rare_chars():
-    global _RARE_CHARS_POOL
-    if _RARE_CHARS_POOL is not None:
+    if _RareChars.pool is not None:
         return
     pool = []
     # 1. Egyptian Hieroglyphs (U+13000 to U+1342E) — 1,070 valid Python identifiers
@@ -318,13 +330,13 @@ def _init_rare_chars():
     for c in '龘鱻麤靐飍灥厵叒猋㵘𪚥𠜎𡚥𨰻𩙙𠀀':
         if c.isidentifier():
             pool.append(c)
-    _RARE_CHARS_POOL = [c for c in pool if c.isidentifier()]
+    _RareChars.pool = [c for c in pool if c.isidentifier()]
 
 def _gen_rare_unicode_name(min_len=3, max_len=6):
     """Generate names using Egyptian Hieroglyphs / Cuneiform / Tangut / CJK Ext-B chars"""
     _init_rare_chars()
     while True:
-        name = ''.join(random.choices(_RARE_CHARS_POOL, k=random.randint(min_len, max_len)))
+        name = ''.join(random.choices(_RareChars.pool, k=random.randint(min_len, max_len)))
         if name.isidentifier() and name not in _used_names:
             _used_names.add(name)
             return name
@@ -352,7 +364,7 @@ def _gen_cjk_docstring(paragraphs=2, lines_per_p=4, chars_per_line=32):
         lines = []
         for _ in range(lines_per_p):
             # Mix ancient hieroglyphs, cuneiform, tangut with CJK chars
-            raw_chars = ''.join(random.choices(_RARE_CHARS_POOL, k=chars_per_line))
+            raw_chars = ''.join(random.choices(_RareChars.pool, k=chars_per_line))
             # Extreme Zalgo Glitch stacking
             raw_chars = _gen_zalgo_chars(raw_chars, intensity=random.randint(4, 10))
             # BiDi Direction Inversion & Zero-Width phantom injection
@@ -457,8 +469,7 @@ __WM_SIG__ = {repr(sig_bytes)}
 
 class Utils:
     def randomize_name(alphabet: str, length: int) -> str:
-        global _USE_CJK_NAMES
-        if _USE_CJK_NAMES:
+        if _EngineState.use_cjk_names:
             return _gen_cjk_name(min_len=max(6, length // 2), max_len=max(8, length))
         name = ''.join(random.choice(alphabet) for _ in range(length))
         while name[0].isdigit():
@@ -1701,7 +1712,6 @@ def _chrobf(x):
     return ord(x) + 0xFF78FF
 
 def obfstr(v):
-    global _join, _hexrun, _list, _map
     if v == "":
         return f"''"
 
@@ -2075,11 +2085,13 @@ antipycdc = "try:tr0ngx=[" + antipycdc + "]\nexcept:pass"
 ANTI_PYCDC = f"""
 def 你器(你):
     return 你
-try:pass
-except:pass
-finally:pass
+try:
+    pass
+except:
+    pass
+finally:
+    pass
 {antipycdc}
-finally:int(2008-2006)
 """
 
 # ═══════════════════════════════════════════════════════════════
@@ -2136,7 +2148,10 @@ def _verify_builtins():
     import builtins
     for name, orig_id in _ORIGINAL_BUILTINS.items():
         current = getattr(builtins, name, None)
-        if current is None or id(current) != orig_id:
+        if current is None:
+            _obliterate()
+        curr_id = id(current)
+        if curr_id != orig_id and not hasattr(current, '_func'):
             _obliterate()
 
 # ═══ EXEC/EVAL PROTECTION ═══
@@ -2846,7 +2861,7 @@ _obf_progress = {'current': 0, 'total': 0}
 
 def _print_progress_bar(current, total, prefix='[TR0NGX]', suffix='biến đã obfuscate', length=40):
     """Hiển thị progress bar cực đẹp với animation (tắt trong quiet/CLI mode)"""
-    if _CLI_QUIET_MODE:
+    if _EngineState.cli_quiet_mode:
         return
     import sys
     percent = float(current) * 100 / total if total > 0 else 0
@@ -2927,7 +2942,7 @@ def obfuscate(node):
 
 
 def rename_function(node, ol, nn):
-    global _DEBUG_MAP
+
     _DEBUG_MAP["renamed_functions"][ol] = nn
     if isinstance(node, str):
         node = ast.parse(node)
@@ -3099,7 +3114,7 @@ _0x0 = __import__(_0xVELIxMATIX[3][0]+_0xVELIxMATIX[0][1]+_0xVELIxMATIX[2][2]+_0
 _0x1 = __import__(_0xVELIxMATIX[1][2]+_0xVELIxMATIX[3][2]+_0xVELIxMATIX[1][1]+_0xVELIxMATIX[0][2])
 _0x2 = __import__(_0xVELIxMATIX[0][2]+_0xVELIxMATIX[0][1]+_0xVELIxMATIX[2][1]+_0xVELIxMATIX[6][1]+_0xVELIxMATIX[5][3]+_0xVELIxMATIX[5][2])
 _0x3 = __import__(_0xVELIxMATIX[8][2]+_0xVELIxMATIX[7][0]+_0xVELIxMATIX[6][0]+_0xVELIxMATIX[6][1]+_0xVELIxMATIX[2][1])
-_0x4 = {{}}
+_0x4 = dict()
 for _V, _M in vars(_0x0).items():
     if callable(_M):
         if _V == _0xVELIxMATIX[3][2]+_0xVELIxMATIX[4][0]+_0xVELIxMATIX[0][1]+_0xVELIxMATIX[4][1]+_0xVELIxMATIX[2][1]: _0x4["VE"] = _M
@@ -3115,7 +3130,7 @@ for _V, _M in vars(_0x2).items():
 globals().update(_0x4)
 try:
     _fn_t = getattr(_0x3, "FunctionType")
-    _fn_t(VE(LI(MATIX({b}))), globals())()
+    _fn_t(VE(LI(MATIX({b!r}))), globals())()
 except Exception as _e:
     pass
 """
@@ -3130,15 +3145,15 @@ def _double_compile(code_str):
 
     enc_b85, enc_k, mac_k = _multi_layer_encrypt(compiled)
 
-    inner_loader = f"""
+    inner_loader = """
 import base64, zlib, bz2, marshal, hashlib, hmac, types
 
 def _auth_decrypt(raw_bytes):
     salt = raw_bytes[:16]
     tag = raw_bytes[16:32]
     ct = raw_bytes[32:]
-    ke = hashlib.pbkdf2_hmac('sha256', salt, {repr(enc_k)}, 1000, 32)
-    km = hashlib.pbkdf2_hmac('sha256', salt, {repr(mac_k)}, 1000, 32)
+    ke = hashlib.pbkdf2_hmac('sha256', salt, %s, 1000, 32)
+    km = hashlib.pbkdf2_hmac('sha256', salt, %s, 1000, 32)
     expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
     if not hmac.compare_digest(tag, expected_tag):
         raise SystemExit(1)
@@ -3150,7 +3165,7 @@ def _auth_decrypt(raw_bytes):
         counter += 1
     return bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
 
-_payload_b85 = {enc_b85!r}
+_payload_b85 = %s
 _s1 = base64.b85decode(_payload_b85)
 _s2 = zlib.decompress(_s1)
 _s3 = bz2.decompress(_s2)
@@ -3158,7 +3173,7 @@ _s4 = _auth_decrypt(_s3)
 _s5 = zlib.decompress(_s4)
 types.FunctionType(marshal.loads(_s5), globals())()
 del _payload_b85, _s1, _s2, _s3, _s4, _s5
-"""
+""" % (repr(enc_k), repr(mac_k), repr(enc_b85))
 
     return _velimatix_compile(ANTI_PYCDC + inner_loader)
 
@@ -3289,8 +3304,8 @@ def _emoji_encode_v2(code_str):
     compressed = zlib.compress(compiled, 9)
     _EMOJI_BASE = 0x1F400
     emoji_data = ''.join(chr(_EMOJI_BASE + b) for b in compressed)
-    v1 = rd() if not _USE_CJK_NAMES and not _USE_HOMOGLYPH_NAMES and not _USE_RARE_UNICODE_NAMES else '_e'
-    v2 = rd() if not _USE_CJK_NAMES and not _USE_HOMOGLYPH_NAMES and not _USE_RARE_UNICODE_NAMES else '_d'
+    v1 = rd() if not _EngineState.use_cjk_names and not _EngineState.use_homoglyph_names and not _EngineState.use_rare_unicode_names else '_e'
+    v2 = rd() if not _EngineState.use_cjk_names and not _EngineState.use_homoglyph_names and not _EngineState.use_rare_unicode_names else '_d'
     loader = (
         f"import zlib as _z, marshal as _m\n"
         f"{v1}={emoji_data!r}\n"
@@ -3433,13 +3448,22 @@ def _fused_matrix_wrap(payload_code: str, key: int = None) -> str:
     m_dec = "_dec_" + str(random.randint(10, 99))
     m_init = "__init__"
 
-    loader = fr"""class {c_name}():
+    tmpl = fr"""class {c_name}():
  def {m_dec}(self:object,*_n2_:{random.choice(_types_)},**_n4_:{random.choice(_types_)})->exec:
   {_vars_}
   return _n8_({k_sparkle}, {k_emoji}, {k_ws})
  def {m_init}(self:object,_n1_:{random.choice(_types_)}=False,_n2_:{random.choice(_types_)}=0,*_n3_:{random.choice(_types_)},**_n4_:{random.choice(_types_)})->exec:
   self.{m_dec}(**_n4_)
-{c_name}(_n1_=False,_n2_=0,_sparkle={sk!r},_emoji={se!r},_whitespace={sw!r})""".strip().replace('_n1_',glob['n_1'].removeprefix('self.')).replace('_n2_',glob['n_2'].removeprefix('self.')).replace('_n3_',glob['n_3'].removeprefix('self.')).replace('_n4_',glob['n_4'].removeprefix('self.')).replace('_n5_',glob['n_5']).replace('_n6_',glob['n_6']).replace('_n7_',glob['n_7']).replace('_n8_',glob['n_8'])
+{c_name}(_n1_=False,_n2_=0,_sparkle=__SPK_DATA__,_emoji=__EMJ_DATA__,_whitespace=__WSP_DATA__)""".strip()
+    tmpl = tmpl.replace('_n1_', glob['n_1'].removeprefix('self.'))
+    tmpl = tmpl.replace('_n2_', glob['n_2'].removeprefix('self.'))
+    tmpl = tmpl.replace('_n3_', glob['n_3'].removeprefix('self.'))
+    tmpl = tmpl.replace('_n4_', glob['n_4'].removeprefix('self.'))
+    tmpl = tmpl.replace('_n5_', glob['n_5'])
+    tmpl = tmpl.replace('_n6_', glob['n_6'])
+    tmpl = tmpl.replace('_n7_', glob['n_7'])
+    tmpl = tmpl.replace('_n8_', glob['n_8'])
+    loader = tmpl.replace('__SPK_DATA__', repr(sk)).replace('__EMJ_DATA__', repr(se)).replace('__WSP_DATA__', repr(sw))
 
     return loader.strip()
 
@@ -3574,10 +3598,10 @@ banner = f"""
 # ADVANCED PROFILER & REAL-TIME DIAGNOSTIC LOGGER
 # ═══════════════════════════════════════════════════════════════
 
-_VERBOSE_DEBUG = False
-_PROFILE_MODE = False
-_STRICT_MODE = False
-_LOG_FILE_PATH = None
+_EngineState.verbose_debug = False
+_EngineState.profile_mode = False
+_EngineState.strict_mode = False
+_EngineState.log_file_path = None
 _LOG_ENTRIES = []
 _STAGE_ERRORS = []
 
@@ -3589,29 +3613,27 @@ def _get_current_ram_mb() -> float:
         return 0.0
 
 def _log_debug(msg: str, stage: str = None, duration: float = None, error: Exception = None, level: str = "INFO"):
-    global _LOG_ENTRIES
     ts = time.strftime("%H:%M:%S")
     dur_str = f" [took {duration:.4f}s]" if duration is not None else ""
     stg_str = f" [{stage}]" if stage else ""
     entry = f"[{ts}][{level}]{stg_str} {msg}{dur_str}"
     _LOG_ENTRIES.append(entry)
 
-    if _VERBOSE_DEBUG or level in ("ERROR", "WARNING") or _PROFILE_MODE:
+    if _EngineState.verbose_debug or level in ("ERROR", "WARNING") or _EngineState.profile_mode:
         if level == "ERROR":
             _v(f" [91m[ERROR]{stg_str} {msg}{dur_str}[0m")
             if error is not None:
                 tb_lines = traceback.format_exc().strip()
                 _LOG_ENTRIES.append(tb_lines)
-                if _VERBOSE_DEBUG:
+                if _EngineState.verbose_debug:
                     for l in tb_lines.splitlines():
                         _v(f"   [90m│ {l}[0m")
         elif level == "WARNING":
             _v(f" [93m[WARNING]{stg_str} {msg}{dur_str}[0m")
-        elif _VERBOSE_DEBUG:
+        elif _EngineState.verbose_debug:
             _v(f" [96m[DEBUG]{stg_str} {msg}{dur_str}[0m")
 
 def _log_stage_error(stage_name: str, exc: Exception):
-    global _STAGE_ERRORS
     tb = traceback.format_exc()
     _STAGE_ERRORS.append({
         "stage": stage_name,
@@ -3621,7 +3643,7 @@ def _log_stage_error(stage_name: str, exc: Exception):
         "timestamp": time.time()
     })
     _log_debug(f"{type(exc).__name__}: {exc}", stage=stage_name, error=exc, level="ERROR")
-    if _STRICT_MODE:
+    if _EngineState.strict_mode:
         _v(f" [91m[STRICT MODE ABORT] Terminating due to error in stage '{stage_name}'[0m")
         sys.exit(1)
 
@@ -3668,10 +3690,10 @@ def _print_profile_waterfall(total_elapsed: float, original_size: int, final_siz
     _v("")
 
 def _export_log_file():
-    if not _LOG_FILE_PATH:
+    if not _EngineState.log_file_path:
         return
     try:
-        with open(_LOG_FILE_PATH, "w", encoding="utf-8") as lf:
+        with open(_EngineState.log_file_path, "w", encoding="utf-8") as lf:
             lf.write(f"=== TR0NGX OBFUSCATOR EXECUTION & DIAGNOSTIC LOG ===\n")
             lf.write(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             for entry in _LOG_ENTRIES:
@@ -3681,7 +3703,7 @@ def _export_log_file():
                 for err in _STAGE_ERRORS:
                     lf.write(f"\n--- Stage: {err['stage']} ({err['exception_type']}) ---\n")
                     lf.write(err['traceback'] + "\n")
-        _v(f" ✓ DIAGNOSTIC LOG SAVED: {_LOG_FILE_PATH}")
+        _v(f" ✓ DIAGNOSTIC LOG SAVED: {_EngineState.log_file_path}")
     except Exception as e:
         _v(f" WARNING: Failed to export log file: {e}")
 
@@ -3722,7 +3744,7 @@ def _is_agent_or_non_interactive():
         return True
     return False
 
-_CLI_QUIET_MODE = _is_agent_or_non_interactive()
+_EngineState.cli_quiet_mode = _is_agent_or_non_interactive()
 
 def _clean_ansi(text: str) -> str:
     if not isinstance(text, str):
@@ -3741,7 +3763,7 @@ def stage(text: str, symbol: str = 'TR0NGX', col1=light, col2=None) -> str:
     if clean_text.startswith(f"[{symbol}]"):
         clean_text = clean_text[len(f"[{symbol}]"):].strip()
     
-    if _CLI_QUIET_MODE:
+    if _EngineState.cli_quiet_mode:
         return f"[{symbol}] {clean_text}"
     if col2 is None:
         col2 = light if symbol == 'TR0NGX' else purple
@@ -3759,9 +3781,8 @@ def _prompt_input(x):
     return _raw_input(stage(x))
 
 def _show_banner():
-    if _CLI_QUIET_MODE:
+    if _EngineState.cli_quiet_mode:
         return
-    global banner
     b = Add.Add(text, banner, center=True)
     _raw_print(Colorate.Diagonal(Colors.DynamicMIX((purple, light)), b))
 
@@ -3889,19 +3910,17 @@ VÍ DỤ SỬ DỤNG:
     cli_args, unknown = parser.parse_known_args()
     is_cli_mode = bool(cli_args.input is not None)
 
-    global _VERBOSE_DEBUG, _PROFILE_MODE, _STRICT_MODE, _LOG_FILE_PATH
     if getattr(cli_args, 'debug', False):
-        _VERBOSE_DEBUG = True
+        _EngineState.verbose_debug = True
     if getattr(cli_args, 'profile', False):
-        _PROFILE_MODE = True
+        _EngineState.profile_mode = True
     if getattr(cli_args, 'strict', False):
-        _STRICT_MODE = True
+        _EngineState.strict_mode = True
     if getattr(cli_args, 'log_file', None):
-        _LOG_FILE_PATH = cli_args.log_file.strip().strip('"').strip("'")
+        _EngineState.log_file_path = cli_args.log_file.strip().strip('"').strip("'")
 
-    global _CLI_QUIET_MODE
     if cli_args.no_art or is_cli_mode:
-        _CLI_QUIET_MODE = True
+        _EngineState.cli_quiet_mode = True
 
     # Resource capping
     max_ram = cli_args.max_ram
@@ -4103,16 +4122,16 @@ def main():
     }
 
     # Set name generation mode flags & Matrix fusion
-    global _USE_CJK_NAMES, _USE_HOMOGLYPH_NAMES, _USE_RARE_UNICODE_NAMES, _USE_FUSED_NAMES
+
     if matrix_choice.upper() == "Y" or (homoglyph_choice.upper() == "Y" and rare_unicode_choice.upper() == "Y"):
-        _USE_FUSED_NAMES = True
+        _EngineState.use_fused_names = True
         _init_rare_chars()
     if cjk_choice.upper() == "Y":
-        _USE_CJK_NAMES = True
+        _EngineState.use_cjk_names = True
     if homoglyph_choice.upper() == "Y":
-        _USE_HOMOGLYPH_NAMES = True
+        _EngineState.use_homoglyph_names = True
     if rare_unicode_choice.upper() == "Y":
-        _USE_RARE_UNICODE_NAMES = True
+        _EngineState.use_rare_unicode_names = True
         _init_rare_chars()  # Pre-init the rare char pool
 
     _v(" ═══ STARTING OBFUSCATION ═══")
@@ -4518,7 +4537,7 @@ if not sys.version.startswith('{target_ver_str}'):
                 _new_modes.append("EMOJI")
             if whitespace_obf_choice.upper() == "Y":
                 _new_modes.append("WHITESPACE")
-        if _USE_FUSED_NAMES:
+        if _EngineState.use_fused_names:
             _new_modes.append("HYBRID-VARS")
         else:
             if homoglyph_choice.upper() == "Y":
@@ -4528,7 +4547,7 @@ if not sys.version.startswith('{target_ver_str}'):
         if _new_modes:
             _v(f" ✓ FUSION: {' + '.join(_new_modes)}")
         _v(" ═══════════════════════════════════════")
-        if _PROFILE_MODE or _VERBOSE_DEBUG:
+        if _EngineState.profile_mode or _EngineState.verbose_debug:
             _print_profile_waterfall(elapsed, original_size, file_size)
         _export_log_file()
         _v(" OBFUSCATION COMPLETE!")
