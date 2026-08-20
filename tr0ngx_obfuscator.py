@@ -2062,10 +2062,9 @@ def {chunk_func}(chunks, keys):
 """
 
 # ═══════════════════════════════════════════════════════════════
-# RUNTIME VARIABLE SETUP - ENHANCED
-# ═══════════════════════════════════════════════════════════════
-
-var = fr"""
+def _generate_var_block():
+    global var
+    var = fr"""
 
 globals()['{_bool}'] = {varsobf('bool')}
 globals()['{_str}'] = {varsobf('str')}
@@ -2158,6 +2157,44 @@ if {obfint(True)}:
 else:
     "tr0ngx"
 """
+    return var
+
+def _refresh_runtime_symbols():
+    global _str, _bool, _type, _int, _bytes, _vars, _ip, ___import__, _movdiv, _hexrun, _argshexrun
+    global _eval, _list, _map, _exec, _chr, _ord, _len, _range, _getattr, _setattr, _isinstance
+    global _join, __bool, __exx, _temp, _temp1, _wt, _exp, var
+    _str = rd()
+    _bool = rd()
+    _type = rd()
+    _int = rd()
+    _bytes = rd()
+    _vars = rd()
+    _ip = rd()
+    ___import__ = rd()
+    _movdiv = rd()
+    _hexrun = rd()
+    _argshexrun = rd()
+    _eval = rd()
+    _list = rd()
+    _map = rd()
+    _exec = rd()
+    _chr = rd()
+    _ord = rd()
+    _len = rd()
+    _range = rd()
+    _getattr = rd()
+    _setattr = rd()
+    _isinstance = rd()
+    _join = rd()
+    __bool = rd()
+    __exx = rd()
+    _temp = rd()
+    _temp1 = rd()
+    _wt = rd()
+    _exp = rd()
+    _generate_var_block()
+
+_generate_var_block()
 
 # ═══════════════════════════════════════════════════════════════
 # ANTI-PYCDC ENHANCED (COMPACT & FAST DECOMPILER KILLER)
@@ -3538,12 +3575,11 @@ def _emoji_encode(code_str):
     # Use U+1F400 as base — Animals & Nature + Objects block (256 chars)
     _EMOJI_BASE = 0x1F400
     emoji_data = ''.join(chr(_EMOJI_BASE + b) for b in compressed)
-    # Build compact loader
+    # Build compact loader with literal UTF-8 emoji stream
     loader = (
+        f"# -*- coding: utf-8 -*-\n"
         f"import zlib as _z\n"
-        f"exec(_z.decompress(bytes(ord(_c)-{_EMOJI_BASE} for _c in "
-        f"{emoji_data!r}"
-        f")).decode('utf-8'))\n"
+        f"exec(_z.decompress(bytes(ord(_c)-{_EMOJI_BASE} for _c in \"\"\"{emoji_data}\"\"\")).decode('utf-8'))\n"
     )
     return loader
 
@@ -3560,11 +3596,12 @@ def _emoji_encode_v2(code_str):
     v1 = rd() if not _EngineState.use_cjk_names and not _EngineState.use_homoglyph_names and not _EngineState.use_rare_unicode_names else '_e'
     v2 = rd() if not _EngineState.use_cjk_names and not _EngineState.use_homoglyph_names and not _EngineState.use_rare_unicode_names else '_d'
     loader = (
+        f"# -*- coding: utf-8 -*-\n"
         f"import zlib as _z, marshal as _m\n"
-        f"{v1}={emoji_data!r}\n"
-        f"{v2}=_z.decompress(bytes(ord(_c)-{_EMOJI_BASE} for _c in {v1}))\n"
+        f"{v1} = \"\"\"{emoji_data}\"\"\"\n"
+        f"{v2} = _z.decompress(bytes(ord(_c)-{_EMOJI_BASE} for _c in {v1}))\n"
         f"exec(_m.loads({v2}))\n"
-        f"del {v1},{v2}\n"
+        f"del {v1}, {v2}\n"
     )
     return loader
 
@@ -3583,13 +3620,14 @@ def _whitespace_encode(code_str):
         for bit_pos in range(7, -1, -1):
             ws_bits.append('\t' if (b >> bit_pos) & 1 else ' ')
     ws_data = ''.join(ws_bits)
-    # Build self-decoding loader
+    # Build self-decoding loader with literal tabs and spaces
     loader = (
+        f"# -*- coding: utf-8 -*-\n"
         f"import zlib as _z\n"
-        f"_w={ws_data!r}\n"
+        f"_w = \"\"\"{ws_data}\"\"\"\n"
         f"exec(_z.decompress(bytes("
-        f"int(''.join('1'if c=='\\t'else'0'for c in _w[i:i+8]),2)"
-        f"for i in range(0,len(_w),8))).decode('utf-8'))\n"
+        f"int(''.join('1' if c == '\\t' else '0' for c in _w[i:i+8]), 2) "
+        f"for i in range(0, len(_w), 8))).decode('utf-8'))\n"
     )
     return loader
 
@@ -3607,11 +3645,12 @@ def _whitespace_encode_v2(code_str):
             ws_bits.append('\t' if (b >> bit_pos) & 1 else ' ')
     ws_data = ''.join(ws_bits)
     loader = (
-        f"import zlib as _z,marshal as _m\n"
-        f"_w={ws_data!r}\n"
+        f"# -*- coding: utf-8 -*-\n"
+        f"import zlib as _z, marshal as _m\n"
+        f"_w = \"\"\"{ws_data}\"\"\"\n"
         f"exec(_m.loads(_z.decompress(bytes("
-        f"int(''.join('1'if c=='\\t'else'0'for c in _w[i:i+8]),2)"
-        f"for i in range(0,len(_w),8)))))\n"
+        f"int(''.join('1' if c == '\\t' else '0' for c in _w[i:i+8]), 2) "
+        f"for i in range(0, len(_w), 8)))))\n"
     )
     return loader
 # ═══════════════════════════════════════════════════════════════
@@ -4162,7 +4201,7 @@ def _fused_matrix_wrap(payload_code: str, key: int = None) -> str:
     tmpl = tmpl.replace('_n6_', glob['n_6'])
     tmpl = tmpl.replace('_n7_', glob['n_7'])
     tmpl = tmpl.replace('_n8_', glob['n_8'])
-    loader = tmpl.replace('__SPK_DATA__', repr(sk)).replace('__EMJ_DATA__', repr(se)).replace('__WSP_DATA__', repr(sw))
+    loader = tmpl.replace('__SPK_DATA__', repr(sk)).replace('__EMJ_DATA__', f'"""{se}"""').replace('__WSP_DATA__', f'"""{sw}"""')
 
     return loader.strip()
 
@@ -4690,9 +4729,10 @@ VÍ DỤ SỬ DỤNG:
     if cli_args.no_art or is_cli_mode:
         _EngineState.cli_quiet_mode = True
 
-    # Resource capping
+    # Resource capping and output destination
     max_ram = cli_args.max_ram
     max_cores = cli_args.cores
+    custom_out = cli_args.output
 
     # 1. File input
     if is_cli_mode:
@@ -4819,8 +4859,6 @@ VÍ DỤ SỬ DỤNG:
 
     # Apply resource capping
     _apply_resource_limits(max_ram, max_cores)
-
-    custom_out = cli_args.output
 
     return {
         "file": _file,
@@ -4958,6 +4996,9 @@ def main():
         _EngineState.use_hyperion = True
     if camouflage_choice.upper() == "Y":
         _EngineState.use_camouflage = True
+
+    # Regenerate all runtime AST variable symbols using chosen character set
+    _refresh_runtime_symbols()
 
     _v(" 🚀 ═══ STARTING OBFUSCATION ═══")
     start_time = time.time()
@@ -5283,6 +5324,21 @@ except Exception as _e:
     multi_shield_count = sum(1 for c in [kramer_wrap_choice, emoji_obf_choice, whitespace_obf_choice] if c.upper() == "Y")
     is_fused_shield = (matrix_choice.upper() == "Y") or (multi_shield_count >= 2)
 
+    # ═══ Intermediate Camouflage Layer (if enabled) ═══
+    if camouflage_choice.upper() == "Y":
+        _v(" 🎭 [12] Applying Hyperion Scientific Class Camouflage...")
+        try:
+            t0 = time.time()
+            sz0 = len(code)
+            code = _hyperion_camouflage(code)
+            _v("        ✨ Fake Simulation Class Generation")
+            _v("        ✨ Polymorphic Property & Memory Emulation")
+            _v("        ✨ Dynamic Payload Reconstructor")
+            _track_debug_stage("12_hyperion_camouflage", time.time() - t0, sz0, len(code))
+        except Exception as e:
+            _v(f" ⚠️ WARNING: Camouflage error: {e}")
+
+    # ═══ Outer Dynamic Shield Matrix ═══
     if is_fused_shield:
         _v(" 🌀 [9/9] Applying Fused Matrix Shield (Kyrie + Emoji + Whitespace Symbiotic)...")
         try:
@@ -5342,23 +5398,9 @@ except Exception as _e:
             except Exception as e:
                 _v(f" ⚠️ WARNING: Whitespace encoding error: {e}")
 
-    # ═══ Hyperion Scientific Class Camouflage Layer ═══
-    if camouflage_choice.upper() == "Y":
-        _v(" 🎭 [12] Applying Hyperion Scientific Class Camouflage...")
-        try:
-            t0 = time.time()
-            sz0 = len(code)
-            code = _hyperion_camouflage(code)
-            _v("        ✨ Fake Simulation Class Generation")
-            _v("        ✨ Polymorphic Property & Memory Emulation")
-            _v("        ✨ Dynamic Payload Reconstructor")
-            _track_debug_stage("12_hyperion_camouflage", time.time() - t0, sz0, len(code))
-        except Exception as e:
-            _v(f" ⚠️ WARNING: Camouflage error: {e}")
-
     if zalgo_choice.upper() == "Y":
         code = _gen_tr0ngx_header() + "\n" + _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=6, chars_per_line=12, marks_per_char=50) + "\n" + code + "\n" + _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=4, chars_per_line=12, marks_per_char=50)
-    elif cjk_choice.upper() == "Y":
+    elif cjk_choice.upper() == "Y" or matrix_choice.upper() == "Y" or rare_unicode_choice.upper() == "Y":
         code = _gen_tr0ngx_header() + "\n" + _gen_cjk_docstring(paragraphs=1, lines_per_p=5, chars_per_line=36) + "\n" + code + "\n" + _gen_cjk_docstring(paragraphs=1, lines_per_p=4, chars_per_line=36)
     else:
         code = _gen_tr0ngx_header() + "\n" + code
