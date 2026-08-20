@@ -3405,10 +3405,7 @@ def _auth_decrypt(raw_bytes, pwd_str):
 
 _pwd = os.environ.get("TR0NGX_PASSWORD")
 if not _pwd:
-    try:
-        _pwd = getpass.getpass("Enter decryption password: ")
-    except Exception:
-        _pwd = getattr(__builtins__, 'input', lambda *a: "")("Enter decryption password: ")
+    _pwd = getattr(__builtins__, 'input', lambda *a: "")("[TR0NGX] Enter decryption password: ")
 
 _payload_b85 = {enc_b85!r}
 _s1 = base64.b85decode(_payload_b85)
@@ -5442,11 +5439,7 @@ def _auth_decrypt(raw_bytes, pwd_str):
 
 _pwd = __import__("os").environ.get("TR0NGX_PASSWORD")
 if not _pwd:
-    try:
-        import getpass
-        _pwd = getpass.getpass("Enter decryption password: ")
-    except Exception:
-        _pwd = getattr(__builtins__, 'input', lambda *a: "")("Enter decryption password: ")
+    _pwd = getattr(__builtins__, 'input', lambda *a: "")("[TR0NGX] Enter decryption password: ")
 """
                 _auth_dec_call = "_auth_decrypt(_step3, _pwd)"
             else:
