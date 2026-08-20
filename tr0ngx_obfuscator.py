@@ -20,6 +20,7 @@ import logging
 import traceback
 import threading
 import string
+import tempfile
 
 # Ensure Windows console supports Unicode / ANSI characters & Virtual Terminal Processing
 try:
@@ -265,6 +266,31 @@ def _gen_mixed_name():
         if name not in _used_names:
             _used_names.add(name)
             return name
+
+def _safe_atomic_write(filepath: str, content: str):
+    """Safely write content to filepath atomically, strictly refusing symlinks to prevent symlink traversal/overwrite (TRX-CLI-001/005)."""
+    filepath = os.path.abspath(filepath)
+    if os.path.islink(filepath):
+        err_str = f" [SECURITY ALERT] Refusing to write to symbolic link target: {filepath}"
+        _v(_gradient_text(err_str, (255, 40, 40), (255, 120, 40)))
+        sys.exit(1)
+
+    out_dir = os.path.dirname(filepath)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+
+    temp_fd, temp_path = tempfile.mkstemp(dir=out_dir if out_dir else None, prefix=".tr0ngx_tmp_")
+    try:
+        with os.fdopen(temp_fd, "w", encoding="utf-8", errors="replace") as f:
+            f.write(str(content))
+        os.replace(temp_path, filepath)
+    except Exception:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+        raise
 
 # ═══════════════════════════════════════════════════════════════
 # CJK / PYCOOL CHINESE IDENTIFIER & JUNK DOCSTRING GENERATOR
@@ -1406,23 +1432,65 @@ class DeadCodeInjector():
         var2 = Utils.randomize_name(self.alphabet, self.length)
         var3 = Utils.randomize_name(self.alphabet, self.length)
 
+        k_val = random.randint(11, 9999)
         impossible = random.choice([
+            # Fermat / Euler invariant: (k^3 - k) % 3 != 0 is ALWAYS FALSE for any integer k
             ast.Compare(
-                left=ast.Call(func=ast.Name(id='type'), args=[ast.Constant(value="")], keywords=[]),
+                left=ast.BinOp(
+                    left=ast.BinOp(
+                        left=ast.BinOp(left=ast.Constant(value=k_val), op=ast.Pow(), right=ast.Constant(value=3)),
+                        op=ast.Sub(),
+                        right=ast.Constant(value=k_val)
+                    ),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=3)
+                ),
+                ops=[ast.NotEq()],
+                comparators=[ast.Constant(value=0)]
+            ),
+            # Parity invariant: (k^2 + k) % 2 != 0 is ALWAYS FALSE for any integer k
+            ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(
+                        left=ast.BinOp(left=ast.Constant(value=k_val), op=ast.Pow(), right=ast.Constant(value=2)),
+                        op=ast.Add(),
+                        right=ast.Constant(value=k_val)
+                    ),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=2)
+                ),
+                ops=[ast.NotEq()],
+                comparators=[ast.Constant(value=0)]
+            ),
+            # Odd square modulo 8 invariant: ((2*k + 1)^2) % 8 == 0 is ALWAYS FALSE (always 1)
+            ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(
+                        left=ast.BinOp(
+                            left=ast.BinOp(left=ast.Constant(value=k_val), op=ast.Mult(), right=ast.Constant(value=2)),
+                            op=ast.Add(),
+                            right=ast.Constant(value=1)
+                        ),
+                        op=ast.Pow(),
+                        right=ast.Constant(value=2)
+                    ),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=8)
+                ),
                 ops=[ast.Eq()],
-                comparators=[ast.Call(func=ast.Name(id='type'), args=[ast.Constant(value=0)], keywords=[])]
+                comparators=[ast.Constant(value=0)]
+            ),
+            # Non-negative square invariant: (k^2 + 1) < 0 is ALWAYS FALSE
+            ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(left=ast.Constant(value=k_val), op=ast.Pow(), right=ast.Constant(value=2)),
+                    op=ast.Add(),
+                    right=ast.Constant(value=1)
+                ),
+                ops=[ast.Lt()],
+                comparators=[ast.Constant(value=0)]
             ),
             ast.Call(func=ast.Name(id='isinstance'), args=[ast.Constant(value=0), ast.Name(id='str')], keywords=[]),
-            ast.Compare(
-                left=ast.Call(func=ast.Name(id='len'), args=[ast.Constant(value="")], keywords=[]),
-                ops=[ast.Gt()],
-                comparators=[ast.Constant(value=random.randint(999, 99999))]
-            ),
-            ast.Compare(
-                left=ast.Constant(value=random.randint(100, 999)),
-                ops=[ast.Eq()],
-                comparators=[ast.Constant(value=random.randint(1000, 9999))]
-            ),
         ])
 
         body_choices = [
@@ -1673,17 +1741,12 @@ def OBF_Import(code):
             if imp[1] == '*':
                 result_lines.insert(0, f'from {imp[0]} import *')
             elif imp[2]:
-                if '.' in imp[0]:
-                    result_lines.insert(0, f'from {imp[0]} import {imp[1]} as {imp[2]}')
-                else:
-                    result_lines.insert(0, f"{imp[2]} = __import__('{imp[0]}').{imp[1]}")
+                result_lines.insert(0, f"{imp[2]} = getattr(__import__({imp[0]!r}, fromlist=[{imp[1]!r}]), {imp[1]!r})")
             else:
-                if '.' in imp[0]:
-                    result_lines.insert(0, f'from {imp[0]} import {imp[1]}')
-                else:
-                    result_lines.insert(0, f"{imp[1]} = __import__('{imp[0]}').{imp[1]}")
+                result_lines.insert(0, f"{imp[1]} = getattr(__import__({imp[0]!r}, fromlist=[{imp[1]!r}]), {imp[1]!r})")
         else:
-            result_lines.insert(0, f"{imp.asname if imp.asname else imp.name} = __import__('{imp.name}')")
+            as_target = imp.asname if imp.asname else imp.name
+            result_lines.insert(0, f"{as_target} = __import__({imp.name!r})")
     return '\n'.join(result_lines)
 
 def _velimatix_obf(code, mode=2):
@@ -2268,78 +2331,66 @@ def _snapshot_builtins():
 
 def _verify_builtins():
     '''Detect if any builtin was hooked/replaced'''
-    import builtins
+    import builtins, marshal
+    _safe_names = ('_safe_exec', '_safe_eval', '_guarded_loads', '_safe_loads', '_wrapped', '<lambda>', 'exec', 'eval', 'loads', 'compile')
     for name, orig_id in _ORIGINAL_BUILTINS.items():
-        current = getattr(builtins, name, None)
+        if name == 'marshal.loads':
+            current = getattr(marshal, 'loads', None)
+        else:
+            current = getattr(builtins, name, None)
         if current is None:
             _obliterate()
         curr_id = id(current)
-        if curr_id != orig_id and not hasattr(current, '_func'):
+        # Allow nested Tr0ngX safe closures
+        if curr_id != orig_id and not (hasattr(current, '__name__') and current.__name__ in _safe_names):
             _obliterate()
 
-# ═══ EXEC/EVAL PROTECTION ═══
+# ═══ EXEC/EVAL PROTECTION (ZERO-ATTRIBUTE-LEAK CLOSURES) ═══
 def _protect_exec_eval():
-    '''Make exec/eval tamper-resistant'''
+    '''Make exec/eval tamper-resistant using closed lexical closures with zero inspectable attribute leaks (TRX-DEOB-007)'''
     import builtins
+    import hashlib
+
     _real_exec = builtins.exec
     _real_eval = builtins.eval
-
-    # Compute bytecode checksum for integrity verification if available
-    import hashlib
+    _real_exec_id = id(_real_exec)
+    _real_eval_id = id(_real_eval)
     _exec_checksum = hashlib.sha256(_real_exec.__code__.co_code).digest()[:8] if hasattr(_real_exec, '__code__') else None
     _eval_checksum = hashlib.sha256(_real_eval.__code__.co_code).digest()[:8] if hasattr(_real_eval, '__code__') else None
 
-    class _ExecGuard:
-        '''Descriptor that prevents exec replacement'''
-        def __init__(self):
-            self._func = _real_exec
-            self._id = id(_real_exec)
-            self._checksum = _exec_checksum
-
-        def __call__(self, *args, **kwargs):
-            if id(self._func) != self._id:
+    def _safe_exec(*args, **kwargs):
+        if id(_real_exec) != _real_exec_id:
+            _obliterate()
+        if _exec_checksum is not None and hasattr(_real_exec, '__code__'):
+            if hashlib.sha256(_real_exec.__code__.co_code).digest()[:8] != _exec_checksum:
                 _obliterate()
-            # Verify bytecode integrity
-            if self._checksum is not None and hasattr(self._func, '__code__'):
-                current_checksum = hashlib.sha256(self._func.__code__.co_code).digest()[:8]
-                if current_checksum != self._checksum:
-                    _obliterate()
-            return self._func(*args, **kwargs)
+        return _real_exec(*args, **kwargs)
 
-    class _EvalGuard:
-        def __init__(self):
-            self._func = _real_eval
-            self._id = id(_real_eval)
-            self._checksum = _eval_checksum
-
-        def __call__(self, *args, **kwargs):
-            if id(self._func) != self._id:
+    def _safe_eval(*args, **kwargs):
+        if id(_real_eval) != _real_eval_id:
+            _obliterate()
+        if _eval_checksum is not None and hasattr(_real_eval, '__code__'):
+            if hashlib.sha256(_real_eval.__code__.co_code).digest()[:8] != _eval_checksum:
                 _obliterate()
-            # Verify bytecode integrity
-            if self._checksum is not None and hasattr(self._func, '__code__'):
-                current_checksum = hashlib.sha256(self._func.__code__.co_code).digest()[:8]
-                if current_checksum != self._checksum:
-                    _obliterate()
-            return self._func(*args, **kwargs)
+        return _real_eval(*args, **kwargs)
 
-    builtins.exec = _ExecGuard()
-    builtins.eval = _EvalGuard()
+    builtins.exec = _safe_exec
+    builtins.eval = _safe_eval
     _ORIGINAL_BUILTINS['exec'] = id(builtins.exec)
     _ORIGINAL_BUILTINS['eval'] = id(builtins.eval)
 
-# ═══ MARSHAL PROTECTION ═══
+# ═══ MARSHAL PROTECTION (ZERO-ATTRIBUTE-LEAK CLOSURE) ═══
 def _protect_marshal():
-    '''Deep marshal.loads protection'''
+    '''Deep marshal.loads protection without __wrapped__ or exposed function references (TRX-DEOB-007)'''
     _real_loads = marshal.loads
     _real_loads_id = id(_real_loads)
 
     def _guarded_loads(data, *args, **kwargs):
-        # Verify marshal.loads hasn't been swapped
-        if id(marshal.loads.__wrapped__ if hasattr(marshal.loads, '__wrapped__') else marshal.loads) != id(_guarded_loads):
-            pass  # Self-reference check
+        if id(_real_loads) != _real_loads_id:
+            _obliterate()
         # Walk up frame stack to find real caller (skip wrapper layers)
         frame = sys._getframe(1)
-        for _depth in range(5):
+        for _depth in range(6):
             if frame is None:
                 break
             caller_file = frame.f_code.co_filename
@@ -2349,8 +2400,8 @@ def _protect_marshal():
             frame = frame.f_back
         return _real_loads(data, *args, **kwargs)
 
-    _guarded_loads.__wrapped__ = _real_loads
     marshal.loads = _guarded_loads
+    _ORIGINAL_BUILTINS['marshal.loads'] = id(_guarded_loads)
 
 # ═══ ANTI-DEBUGGER (MULTI-VECTOR) ═══
 
@@ -2375,20 +2426,21 @@ def _anti_debugger():
     if hasattr(sys, 'getprofile') and sys.getprofile() is not None:
         _obliterate()
 
-    # Vector 3: Monitoring detection (Python 3.12+)
+    # Vector 3: Monitoring detection (Python 3.12+) - only block known debugger/tracing tools
     if hasattr(sys, 'monitoring') and hasattr(sys.monitoring, 'get_tool'):
+        _debug_tool_names = {'debugpy', 'pydevd', 'coverage', 'pdb', 'trace', 'profiler'}
         for tool_id in range(6):
             try:
                 tool = sys.monitoring.get_tool(tool_id)
-                if tool and tool != '':
+                if tool and isinstance(tool, str) and tool.lower() in _debug_tool_names:
                     _obliterate()
             except Exception:
                 pass
 
     # Vector 4: Known debugger modules
     poison = {'pydevd', 'pydevd_frame_evaluator', '_pydevd_bundle',
-              'debugpy', 'pdb', 'ipdb', 'pudb', 'rpdb', 'wdb',
-              'pydevd_plugins', 'pydevd_tracing', 'coverage',
+              'debugpy', 'ipdb', 'pudb', 'rpdb', 'wdb',
+              'pydevd_plugins', 'pydevd_tracing',
               'hunter', 'snooper', 'snoop', 'objgraph',
               'pympler', 'line_profiler', 'memory_profiler'}
     loaded = set(sys.modules.keys())
@@ -2399,15 +2451,15 @@ def _anti_debugger():
     frame = sys._getframe(0)
     while frame is not None:
         fn = frame.f_code.co_filename.lower()
-        if any(d in fn for d in ['pydevd', 'debugpy', 'pdb', 'tracer_hook', 'spy_dump']):
+        if any(d in fn for d in ['pydevd', 'debugpy', 'tracer_hook', 'spy_dump']):
             _obliterate()
         frame = frame.f_back
 
-    # Vector 6: Timing attack detection
+    # Vector 6: Timing attack detection (5s threshold to avoid false positives on loaded machines)
     t1 = time.perf_counter_ns()
     _dummy = sum(range(5000))
     t2 = time.perf_counter_ns()
-    if (t2 - t1) > 500_000_000:  # 50ms for trivial op = debugger
+    if (t2 - t1) > 5_000_000_000:  # 5000ms for trivial op = heavily single-stepped debugger
         _obliterate()
 
     # Vector 7: Frame depth anomaly detection
@@ -2476,22 +2528,23 @@ def _anti_debugger():
 
 # ═══ ANTI-IMPORT HOOK ═══
 class _ImportBlocker:
-    '''Block dangerous imports at meta_path level (PEP 451 compatible)'''
+    '''Block dangerous decompilation & debugger imports at meta_path level (PEP 451 compatible) (TRX-DEOB-009/010)'''
     _BLOCKED = frozenset({
-        'uncompyle6', 'decompyle3', 'xdis', 'pycdc', 'bytecode_tools',
-        'pydevd', 'debugpy', 'coverage',
-        'hunter', 'snooper', 'snoop', 'objgraph', 'pympler',
-        'unpyc', 'easy_python_decompiler'
+        'uncompyle6', 'decompyle3', 'decompyle++', 'decompyle', 'xdis', 'pycdc', 'bytecode_tools',
+        'pydevd', 'debugpy', 'coverage', 'hunter', 'snooper', 'snoop', 'objgraph', 'pympler',
+        'unpyc', 'easy_python_decompiler', 'pickletools', 'pydevd_tracing', 'pydevd_bundle'
     })
 
     def find_spec(self, name, path=None, target=None):
-        if any(blocked in name for blocked in self._BLOCKED):
+        name_lower = name.lower()
+        if any(name_lower == blocked or name_lower.startswith(blocked + '.') for blocked in self._BLOCKED):
             _obliterate()
         return None
 
     # Legacy fallback for Python < 3.4
     def find_module(self, name, path=None):
-        if any(blocked in name for blocked in self._BLOCKED):
+        name_lower = name.lower()
+        if any(name_lower == blocked or name_lower.startswith(blocked + '.') for blocked in self._BLOCKED):
             return self
         return None
 
@@ -2503,15 +2556,29 @@ def _install_import_blocker():
     if blocker not in sys.meta_path:
         sys.meta_path.insert(0, blocker)
 
-# ═══ ANTI-MEMORY DUMP & C-LEVEL TRACE PURGE ═══
+# ═══ ANTI-MEMORY DUMP, REFLECTION NEUTRALIZATION & C-LEVEL TRACE PURGE ═══
 def _anti_memory_analysis():
-    '''Make memory analysis harder, wipe linecache, clear tracebacks and wipe C-level trace hooks'''
+    '''Make memory analysis harder, neutralize reflection/bytecode dumpers, wipe linecache, clear tracebacks and wipe C-level trace hooks (TRX-DEOB-009/010)'''
     try:
         gc.collect()
         if hasattr(gc, 'set_debug'):
             gc.set_debug(0)
     except Exception:
         pass
+
+    # Neutralize pure disassembly and debugging tools if already loaded
+    for _mod_name, _func_names in [
+        ('dis', ['dis', 'show_code', 'disassemble', 'distb', 'disco']),
+        ('pdb', ['set_trace', 'Pdb']),
+    ]:
+        if _mod_name in sys.modules and sys.modules[_mod_name] is not None:
+            try:
+                _m = sys.modules[_mod_name]
+                for _fn in _func_names:
+                    if hasattr(_m, _fn):
+                        setattr(_m, _fn, lambda *a, **k: None)
+            except Exception:
+                pass
 
     # Clear source line cache to prevent debuggers/inspect from extracting original source lines
     try:
@@ -2535,13 +2602,6 @@ def _anti_memory_analysis():
         sys.settrace(None)
         if hasattr(sys, 'setprofile'):
             sys.setprofile(None)
-    except Exception:
-        pass
-
-    # C-Level PyEval SetTrace purge (kills pdb, pydevd, debugpy at CPython core)
-    try:
-        import ctypes
-        ctypes.pythonapi.PyEval_SetTrace(ctypes.c_void_p(0), ctypes.c_void_p(0))
     except Exception:
         pass
 
@@ -2580,7 +2640,7 @@ def _start_watchdog():
             except SystemExit:
                 os._exit(1)
             except Exception:
-                _obliterate()
+                pass
 
     t = threading.Thread(target=_monitor, daemon=True, name=''.join(
         random.choices('abcdefghijklmnop', k=12)))
@@ -2602,10 +2662,15 @@ def _freeze_critical():
 
     # Verify periodically
     def _check_hidden():
-        if id(_hidden._e) != id(builtins.exec):
-            _obliterate()
-        if id(_hidden._v) != id(builtins.eval):
-            _obliterate()
+        _safe_names = ('_safe_exec', '_safe_eval', '_guarded_loads', '_safe_loads', '_wrapped', '<lambda>', 'exec', 'eval', 'loads', 'compile')
+        _cur_e = getattr(builtins, 'exec', None)
+        _cur_v = getattr(builtins, 'eval', None)
+        if _cur_e is not None and id(_hidden._e) != id(_cur_e):
+            if not (hasattr(_cur_e, '__name__') and _cur_e.__name__ in _safe_names):
+                _obliterate()
+        if _cur_v is not None and id(_hidden._v) != id(_cur_v):
+            if not (hasattr(_cur_v, '__name__') and _cur_v.__name__ in _safe_names):
+                _obliterate()
         if id(_hidden._m) != id(marshal.loads.__wrapped__ if hasattr(marshal.loads, '__wrapped__') else marshal.loads):
             pass  # We wrapped it ourselves
 
@@ -2657,9 +2722,8 @@ class _VeliGuard_:
         if callable(func) and hasattr(func, '__module__'):
             mod = func.__module__
             if mod and isinstance(mod, str):
-                # Blocklist - only block known bad modules
-                blocked = ['decompil', 'uncompyl', 'pycdc', 'debug', 'hook',
-                           'inject', 'dump', 'xdis', 'bytecode', 'crack', 'extract']
+                # Blocklist - only block known bad reversing modules
+                blocked = ['uncompyle', 'decompyle', 'pycdc', 'xdis', 'pydevd', 'debugpy', 'frida']
                 if any(bad in mod.lower() for bad in blocked):
                     _VeliGuard_._HOOKED.add(mod)
                     _VeliGuard_._terminate()
@@ -2676,11 +2740,15 @@ class _VeliGuard_:
 
     @staticmethod
     def verify_stack():
-        stack = _tb_.extract_stack()
-        for frame in stack[:-2]:
-            fn = frame.filename.lower()
-            if any(bad in fn for bad in ['decompil', 'uncompyl', 'pycdc', 'debug', 'hook', 'inject', 'dump']):
-                _VeliGuard_._terminate()
+        try:
+            stack = _tb_.extract_stack()
+            if stack and isinstance(stack, list):
+                for frame in stack[:-2]:
+                    fn = frame.filename.lower()
+                    if any(bad in fn for bad in ['uncompyle', 'decompyle', 'pycdc', 'xdis', 'pydevd', 'debugpy', 'frida']):
+                        _VeliGuard_._terminate()
+        except Exception:
+            pass
 
     @staticmethod
     def verify_type_integrity(module_name, func_name):
@@ -2693,13 +2761,15 @@ class _VeliGuard_:
 
     @staticmethod
     def check_type_changed():
-        for key, expected_type in _VeliGuard_._FUNC_TYPES.items():
+        for key, expected_type in list(_VeliGuard_._FUNC_TYPES.items()):
             parts = key.split('.', 1)
             try:
                 mod = __import__(parts[0])
                 func = getattr(mod, parts[1], None)
-                if func is not None and type(func) != expected_type:
-                    _VeliGuard_._terminate()
+                if func is not None:
+                    # Allow builtins/functions wrapped by internal guard closures
+                    if type(func) != expected_type and not callable(func):
+                        _VeliGuard_._terminate()
             except Exception:
                 pass
 
@@ -2712,7 +2782,7 @@ class _VeliGuard_:
         def _safe_loads(data, *args, **kwargs):
             frame = _s_._getframe(1)
             caller = frame.f_code.co_filename.lower()
-            if any(x in caller for x in ['decompil', 'uncompyl', 'pycdc', 'xdis', 'debug', 'hook']):
+            if any(x in caller for x in ['uncompyle', 'decompyle', 'pycdc', 'xdis', 'pydevd', 'debugpy', 'frida']):
                 _VeliGuard_._terminate()
             if id(_real_loads) != _real_loads_id:
                 _VeliGuard_._terminate()
@@ -2726,6 +2796,7 @@ class _VeliGuard_:
     @staticmethod
     def anti_monkey_patch():
         import builtins as _b
+        _safe_names = ('_safe_exec', '_safe_eval', '_guarded_loads', '_safe_loads', '_wrapped', '<lambda>', 'exec', 'eval', 'loads', 'compile')
         _snapshot = {
             'exec': id(_b.exec),
             'eval': id(_b.eval),
@@ -2741,9 +2812,13 @@ class _VeliGuard_:
                 if current is None:
                     _VeliGuard_._terminate()
                 curr_id = id(current)
-                # Allow wrapped builtins (e.g. _ExecGuard/_EvalGuard from anti-debug shield)
-                # that expose a _func attribute pointing to the real builtin.
-                if curr_id != orig_id and not hasattr(current, '_func'):
+                # Allow internal Tr0ngX guard closures and recognized safe wrappers
+                _is_known_guard = (
+                    hasattr(current, '_func') or
+                    curr_id in globals().get('_ORIGINAL_BUILTINS', {}).values() or
+                    (hasattr(current, '__name__') and current.__name__ in _safe_names)
+                )
+                if curr_id != orig_id and not _is_known_guard:
                     _VeliGuard_._terminate()
             _VeliGuard_.check_type_changed()
 
@@ -2782,7 +2857,7 @@ class _VeliGuard_:
                 except SystemExit:
                     __import__('os')._exit(1)
                 except Exception:
-                    _VeliGuard_._terminate()
+                    pass
 
         t = threading.Thread(target=_patrol, daemon=True,
                              name=''.join(_rnd.choices('abcdefghijklmnop', k=16)))
@@ -3325,8 +3400,8 @@ def _derive_runtime_keys(salt: bytes):
     combined = b''.join(parts)
     enc_k = hashlib.sha256(combined + b'__enc__').digest()
     mac_k = hashlib.sha256(combined + b'__mac__').digest()
-    ke = hashlib.pbkdf2_hmac('sha256', salt, enc_k, 1000, 32)
-    km = hashlib.pbkdf2_hmac('sha256', salt, mac_k, 1000, 32)
+    ke = hashlib.pbkdf2_hmac('sha256', salt, enc_k, 50000, 32)
+    km = hashlib.pbkdf2_hmac('sha256', salt, mac_k, 50000, 32)
     return ke, km
 
 def _auth_stream_encrypt(data: bytes, salt: bytes, ke: bytes, km: bytes):
@@ -3359,39 +3434,71 @@ def _multi_layer_encrypt(data: bytes, password: str = None):
 
 
 def _velimatix_compile(code_str):
-    """Velimatix-style marshal compilation with FunctionType Anti-Funnel loader."""
+    """Velimatix-style marshal compilation with FunctionType Anti-Funnel loader and dynamic token randomization (TRX-OBF-006/DEOB-014)."""
     b = marshal.dumps(compile(code_str, "<velimatix>", "exec"))
     b = zlib.compress(b, 9)
     b = base64.b64encode(b)
 
+    v_matrix = rd('table')
+    v_mod0 = rd('mod0')
+    v_mod1 = rd('mod1')
+    v_mod2 = rd('mod2')
+    v_mod3 = rd('mod3')
+    v_dict = rd('dict')
+    v_k_ve = rd('key_ve')
+    v_k_li = rd('key_li')
+    v_k_matix = rd('key_matix')
+    v_fnt = rd('fn_t')
+    v_loop_k = rd('loop_k')
+    v_loop_v = rd('loop_v')
+
+    # Dynamic character pool matrix
+    chars_pool = list("abcdefghijklmnopqrstuvwxyz0123456789_[]")
+    random.shuffle(chars_pool)
+    row_size = 5
+    matrix = [chars_pool[i:i + row_size] for i in range(0, len(chars_pool), row_size)]
+
+    def _get_path(word):
+        coords = []
+        for ch in word:
+            for r_idx, row in enumerate(matrix):
+                if ch in row:
+                    coords.append(f"{v_matrix}[{r_idx}][{row.index(ch)}]")
+                    break
+        return "+".join(coords)
+
+    path_marshal = _get_path("marshal")
+    path_zlib = _get_path("zlib")
+    path_base64 = _get_path("base64")
+    path_types = _get_path("types")
+    path_loads = _get_path("loads")
+    path_decompress = _get_path("decompress")
+    path_b64decode = _get_path("b64decode")
+
     return f"""
-_0xVELIxMATIX = [
-    ["k","a","b"],["j","i","z"],["h","s","r"],["m","2","l"],
-    ["o","d"],["1","3","4","6"],["p","e","c"],["y","u","n","g"],
-    ["v","[","t","x"]
-]
-_0x0 = __import__(_0xVELIxMATIX[3][0]+_0xVELIxMATIX[0][1]+_0xVELIxMATIX[2][2]+_0xVELIxMATIX[2][1]+_0xVELIxMATIX[2][0]+_0xVELIxMATIX[0][1]+_0xVELIxMATIX[3][2])
-_0x1 = __import__(_0xVELIxMATIX[1][2]+_0xVELIxMATIX[3][2]+_0xVELIxMATIX[1][1]+_0xVELIxMATIX[0][2])
-_0x2 = __import__(_0xVELIxMATIX[0][2]+_0xVELIxMATIX[0][1]+_0xVELIxMATIX[2][1]+_0xVELIxMATIX[6][1]+_0xVELIxMATIX[5][3]+_0xVELIxMATIX[5][2])
-_0x3 = __import__(_0xVELIxMATIX[8][2]+_0xVELIxMATIX[7][0]+_0xVELIxMATIX[6][0]+_0xVELIxMATIX[6][1]+_0xVELIxMATIX[2][1])
-_0x4 = dict()
-for _V, _M in vars(_0x0).items():
-    if callable(_M):
-        if _V == _0xVELIxMATIX[3][2]+_0xVELIxMATIX[4][0]+_0xVELIxMATIX[0][1]+_0xVELIxMATIX[4][1]+_0xVELIxMATIX[2][1]: _0x4["VE"] = _M
-        else: _0x4[_V] = _M
-for _V, _M in vars(_0x1).items():
-    if callable(_M):
-        if _V == _0xVELIxMATIX[4][1]+_0xVELIxMATIX[6][1]+_0xVELIxMATIX[6][2]+_0xVELIxMATIX[4][0]+_0xVELIxMATIX[3][0]+_0xVELIxMATIX[6][0]+_0xVELIxMATIX[2][2]+_0xVELIxMATIX[6][1]+_0xVELIxMATIX[2][1]+_0xVELIxMATIX[2][1]: _0x4["LI"] = _M
-        else: _0x4[_V] = _M
-for _V, _M in vars(_0x2).items():
-    if callable(_M):
-        if _V == _0xVELIxMATIX[0][2]+_0xVELIxMATIX[5][3]+_0xVELIxMATIX[5][2]+_0xVELIxMATIX[4][1]+_0xVELIxMATIX[6][1]+_0xVELIxMATIX[6][2]+_0xVELIxMATIX[4][0]+_0xVELIxMATIX[4][1]+_0xVELIxMATIX[6][1]: _0x4["MATIX"] = _M
-        else: _0x4[_V] = _M
-globals().update(_0x4)
+{v_matrix} = {matrix!r}
+{v_mod0} = __import__({path_marshal})
+{v_mod1} = __import__({path_zlib})
+{v_mod2} = __import__({path_base64})
+{v_mod3} = __import__({path_types})
+{v_dict} = dict()
+for {v_loop_k}, {v_loop_v} in vars({v_mod0}).items():
+    if callable({v_loop_v}):
+        if {v_loop_k} == {path_loads}: {v_dict}[{v_k_ve!r}] = {v_loop_v}
+        else: {v_dict}[{v_loop_k}] = {v_loop_v}
+for {v_loop_k}, {v_loop_v} in vars({v_mod1}).items():
+    if callable({v_loop_v}):
+        if {v_loop_k} == {path_decompress}: {v_dict}[{v_k_li!r}] = {v_loop_v}
+        else: {v_dict}[{v_loop_k}] = {v_loop_v}
+for {v_loop_k}, {v_loop_v} in vars({v_mod2}).items():
+    if callable({v_loop_v}):
+        if {v_loop_k} == {path_b64decode}: {v_dict}[{v_k_matix!r}] = {v_loop_v}
+        else: {v_dict}[{v_loop_k}] = {v_loop_v}
+globals().update({v_dict})
 try:
-    _fn_t = getattr(_0x3, "FunctionType")
-    _fn_t(VE(LI(MATIX({b!r}))), globals())()
-except Exception as _e:
+    {v_fnt} = getattr({v_mod3}, "FunctionType")
+    {v_fnt}({v_dict}[{v_k_ve!r}]({v_dict}[{v_k_li!r}]({v_dict}[{v_k_matix!r}]({b!r}))), globals())()
+except Exception:
     pass
 """
 
@@ -3409,7 +3516,7 @@ def _double_compile(code_str, target_ver=None, password=None):
 
     if password:
         inner_loader = f"""
-import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, os, getpass
+import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, os, getpass, gc
 
 sys.dont_write_bytecode = True
 _target_ver = {target_ver!r}
@@ -3454,11 +3561,19 @@ _s3 = bz2.decompress(_s2)
 _s4 = _auth_decrypt(_s3, _pwd)
 _s5 = zlib.decompress(_s4)
 exec(marshal.loads(_s5), globals(), globals())
+try:
+    for _b_item in [_s1, _s2, _s3, _s4, _s5]:
+        if isinstance(_b_item, (bytearray, bytes)):
+            _ba = bytearray(_b_item)
+            for _zi in range(len(_ba)): _ba[_zi] = 0
+except Exception:
+    pass
 del _payload_b85, _s1, _s2, _s3, _s4, _s5, _pwd
+gc.collect()
 """
     else:
         inner_loader = f"""
-import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, platform
+import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, platform, gc
 
 sys.dont_write_bytecode = True
 _target_ver = {target_ver!r}
@@ -3485,8 +3600,8 @@ def _auth_decrypt(raw_bytes):
     tag = raw_bytes[16:32]
     ct = raw_bytes[32:]
     enc_k, mac_k = _derive_runtime_keys(salt)
-    ke = hashlib.pbkdf2_hmac('sha256', salt, enc_k, 1000, 32)
-    km = hashlib.pbkdf2_hmac('sha256', salt, mac_k, 1000, 32)
+    ke = hashlib.pbkdf2_hmac('sha256', salt, enc_k, 50000, 32)
+    km = hashlib.pbkdf2_hmac('sha256', salt, mac_k, 50000, 32)
     expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
     if not hmac.compare_digest(tag, expected_tag):
         raise SystemExit(1)
@@ -3505,7 +3620,15 @@ _s3 = bz2.decompress(_s2)
 _s4 = _auth_decrypt(_s3)
 _s5 = zlib.decompress(_s4)
 exec(marshal.loads(_s5), globals(), globals())
+try:
+    for _b_item in [_s1, _s2, _s3, _s4, _s5]:
+        if isinstance(_b_item, (bytearray, bytes)):
+            _ba = bytearray(_b_item)
+            for _zi in range(len(_ba)): _ba[_zi] = 0
+except Exception:
+    pass
 del _payload_b85, _s1, _s2, _s3, _s4, _s5
+gc.collect()
 """
 
     return _velimatix_compile(ANTI_PYCDC + inner_loader)
@@ -5404,36 +5527,9 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
 )
 """
 
-    # ═══ Step 4: Anti-debug ═══
-    if antidebug.upper() == "Y":
-        _v(" [3/8] Injecting anti-debug shield...")
-        t0 = time.time()
-        sz0 = len(code)
-        if velimatix.upper() == "Y":
-            _v("        - Adding Velimatix anti-hook layer...")
-            code = velimatix_anti_hook + code
-        code = anti + code
-        _track_debug_stage("3_anti_debug_injection", time.time() - t0, sz0, len(code))
-
-    # ═══ Step 4.2: Anti-VM & Sandbox Detection ═══
-    if antivm.upper() == "Y":
-        _v(" [3.2/8] Injecting Anti-VM & Sandbox detection shield...")
-        t0 = time.time()
-        sz0 = len(code)
-        code = _generate_anti_vm_shield() + code
-        _track_debug_stage("3.2_anti_vm_injection", time.time() - t0, sz0, len(code))
-
-    # ═══ Step 5: Self-modifying ═══
-    if selfmodify.upper() == "Y":
-        _v(" [3.5/8] Adding self-modifying layer...")
-        t0 = time.time()
-        sz0 = len(code)
-        code = _generate_self_modify_wrapper() + code
-        _track_debug_stage("3.5_self_modify_layer", time.time() - t0, sz0, len(code))
-
-    # ═══ Step 6: VELIMATIX ENGINE ═══
+    # ═══ Step 4: VELIMATIX ENGINE ═══
     if velimatix.upper() == "Y":
-        _v(f" [4/8] Velimatix engine (level {veli_level})...")
+        _v(f" [3/8] Velimatix engine (level {veli_level})...")
         try:
             t0 = time.time()
             sz0 = len(code)
@@ -5450,12 +5546,12 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
                 _v("        - Constant mutation (XOR chain)")
                 _v("        - Method cloning")
                 _v("        - String bytewise encoding")
-            _track_debug_stage(f"4_velimatix_level_{veli_level}", time.time() - t0, sz0, len(code))
+            _track_debug_stage(f"3_velimatix_level_{veli_level}", time.time() - t0, sz0, len(code))
         except Exception as e:
             _v(f" WARNING: Velimatix partial: {e}")
 
-    # ═══ Step 7: Main obfuscation layers ═══
-    _v(f" [5/8] Applying {mode}-layer tr0ngx obfuscation...")
+    # ═══ Step 5: Main obfuscation layers ═══
+    _v(f" [4/8] Applying {mode}-layer tr0ngx obfuscation...")
     for i in range(mode):
         try:
             t0 = time.time()
@@ -5463,11 +5559,38 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
             new_code = obf(code)
             compile(new_code, "<test_layer>", "exec")
             code = new_code
-            _track_debug_stage(f"5_tr0ngx_layer_{i+1}_of_{mode}", time.time() - t0, sz0, len(code))
+            _track_debug_stage(f"4_tr0ngx_layer_{i+1}_of_{mode}", time.time() - t0, sz0, len(code))
             _v(f"        - Layer {i + 1}/{mode} complete")
         except Exception as e:
             _v(f" WARNING: Layer {i + 1} issue: {e}")
             break
+
+    # ═══ Step 6: Anti-debug & Anti-Analysis Shield Matrix ═══
+    if antidebug.upper() == "Y":
+        _v(" [5/8] Injecting anti-debug shield...")
+        t0 = time.time()
+        sz0 = len(code)
+        if velimatix.upper() == "Y":
+            _v("        - Adding Velimatix anti-hook layer...")
+            code = velimatix_anti_hook + code
+        code = anti + code
+        _track_debug_stage("5_anti_debug_injection", time.time() - t0, sz0, len(code))
+
+    # ═══ Step 6.2: Anti-VM & Sandbox Detection ═══
+    if antivm.upper() == "Y":
+        _v(" [5.2/8] Injecting Anti-VM & Sandbox detection shield...")
+        t0 = time.time()
+        sz0 = len(code)
+        code = _generate_anti_vm_shield() + code
+        _track_debug_stage("5.2_anti_vm_injection", time.time() - t0, sz0, len(code))
+
+    # ═══ Step 6.5: Self-modifying ═══
+    if selfmodify.upper() == "Y":
+        _v(" [5.5/8] Adding self-modifying layer...")
+        t0 = time.time()
+        sz0 = len(code)
+        code = _generate_self_modify_wrapper() + code
+        _track_debug_stage("5.5_self_modify_layer", time.time() - t0, sz0, len(code))
 
     # ═══ Step 8: Compile or output ═══
     if method.upper() != "Y":
@@ -5532,8 +5655,7 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
                 code = var + code
                 _dir_n, _base_n = os.path.split(_file)
                 output_file = os.path.join(_dir_n, "tr0ngx-" + _base_n) if _dir_n else ("tr0ngx-" + _base_n)
-                with open(output_file, "w", encoding="utf8") as f:
-                    f.write(str(code))
+                _safe_atomic_write(output_file, str(code))
                 elapsed = time.time() - start_time
                 _v(f" [SAVED] {output_file} ({elapsed:.2f}s)")
                 sys.exit()
@@ -5620,8 +5742,8 @@ def _auth_decrypt(raw_bytes):
     tag = raw_bytes[16:32]
     ct = raw_bytes[32:]
     _enc_k, _mac_k = _derive_runtime_keys(salt)
-    ke = hashlib.pbkdf2_hmac('sha256', salt, _enc_k, 1000, 32)
-    km = hashlib.pbkdf2_hmac('sha256', salt, _mac_k, 1000, 32)
+    ke = hashlib.pbkdf2_hmac('sha256', salt, _enc_k, 50000, 32)
+    km = hashlib.pbkdf2_hmac('sha256', salt, _mac_k, 50000, 32)
     expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
     if not hmac.compare_digest(tag, expected_tag):
         raise SystemExit(1)
@@ -5776,8 +5898,7 @@ except Exception as _e:
         output_file = os.path.join(_dir_n, "tr0ngx-" + _base_n) if _dir_n else ("tr0ngx-" + _base_n)
 
     try:
-        with open(output_file, "w", encoding="utf8") as f:
-            f.write(str(code))
+        _safe_atomic_write(output_file, str(code))
 
         elapsed = time.time() - start_time
         file_size = os.path.getsize(output_file)
