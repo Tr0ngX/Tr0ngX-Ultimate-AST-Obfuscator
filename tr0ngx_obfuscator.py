@@ -267,13 +267,59 @@ def _gen_mixed_name():
             _used_names.add(name)
             return name
 
-def _safe_atomic_write(filepath: str, content: str):
-    """Safely write content to filepath atomically, strictly refusing symlinks to prevent symlink traversal/overwrite (TRX-CLI-001/005)."""
-    filepath = os.path.abspath(filepath)
-    if os.path.islink(filepath):
+_FORBIDDEN_SYSTEM_PREFIXES = [
+    '/etc', '/usr', '/bin', '/sbin', '/lib', '/lib64', '/boot', '/root', '/dev', '/proc', '/sys',
+    'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)', 'C:\\Windows\\System32'
+]
+
+def _validate_and_sanitize_output_path(filepath: str, input_file: str = None) -> str:
+    """Strictly canonicalize and validate output paths to prevent arbitrary path traversal, system directory clobbering, and dangerous symlink attacks (TRX-AST-401/402)."""
+    norm_path = os.path.normpath(os.path.abspath(filepath))
+    real_path = os.path.realpath(norm_path)
+
+    # Check symlinks
+    if os.path.islink(norm_path) or os.path.islink(real_path):
         err_str = f" [SECURITY ALERT] Refusing to write to symbolic link target: {filepath}"
         _v(_gradient_text(err_str, (255, 40, 40), (255, 120, 40)))
         sys.exit(1)
+
+    # Check system directory blacklist
+    for prefix in _FORBIDDEN_SYSTEM_PREFIXES:
+        norm_prefix = os.path.normpath(prefix).lower()
+        if real_path.lower().startswith(norm_prefix):
+            err_str = f" [SECURITY ALERT] Refusing to write to protected system path: {filepath}"
+            _v(_gradient_text(err_str, (255, 40, 40), (255, 120, 40)))
+            sys.exit(1)
+
+    # Check input file clobbering without explicit overwrite
+    if input_file:
+        real_input = os.path.realpath(os.path.abspath(input_file))
+        if real_path.lower() == real_input.lower():
+            err_str = f" [SECURITY ALERT] Refusing to overwrite input source file directly: {filepath}. Please specify a distinct output path."
+            _v(_gradient_text(err_str, (255, 40, 40), (255, 120, 40)))
+            sys.exit(1)
+
+    return real_path
+
+def _validate_input_source(code: str, max_size_mb: int = 25, max_ast_depth: int = 500):
+    """Validate input source file to prevent memory exhaustion DoS and AST recursion crashes (TRX-AST-404/405)."""
+    raw_bytes_len = len(code.encode('utf-8', errors='ignore'))
+    if raw_bytes_len > max_size_mb * 1024 * 1024:
+        raise ValueError(f"Input source size ({raw_bytes_len:,} bytes) exceeds maximum security limit of {max_size_mb} MB.")
+    
+    tree = ast.parse(code)
+    
+    def _calc_depth(node, cur=0):
+        if cur > max_ast_depth:
+            raise RecursionError(f"AST recursion depth exceeded {max_ast_depth} levels. Script is too deeply nested for safe transformation.")
+        depths = [_calc_depth(child, cur + 1) for child in ast.iter_child_nodes(node)]
+        return max(depths, default=cur)
+    
+    _calc_depth(tree)
+
+def _safe_atomic_write(filepath: str, content: str, input_file: str = None):
+    """Safely write content to filepath atomically, strictly refusing symlinks and protected system paths."""
+    filepath = _validate_and_sanitize_output_path(filepath, input_file=input_file)
 
     out_dir = os.path.dirname(filepath)
     if out_dir and not os.path.exists(out_dir):
@@ -1395,6 +1441,7 @@ class BuiltinRenamerTransformer():
             if isinstance(node, ast.Name) and node.id in self.mapping:
                 node.id = self.mapping[node.id]
 
+        xor_key = secrets.randbelow(200) + 55
         setup_stmts = []
         for original, renamed in self.mapping.items():
             try:
@@ -1403,13 +1450,23 @@ class BuiltinRenamerTransformer():
                     _ = __builtins__[original]
                 else:
                     _ = getattr(__builtins__, original)
-                stmt = ast.parse(f"{renamed} = __import__('builtins').__dict__['{original}']").body[0]
+                enc_bytes = [b ^ xor_key for b in original.encode('utf-8')]
+                # Dynamic stealth resolver with zero plaintext string literals
+                res_expr = f"{renamed} = getattr(__import__('builtins'), bytes([_b ^ {xor_key} for _b in {enc_bytes}]).decode('utf-8'))"
+                stmt = ast.parse(res_expr).body[0]
                 setup_stmts.append(stmt)
                 if "_DEBUG_MAP" in globals():
                     _DEBUG_MAP["renamed_builtins"][original] = renamed
             except (KeyError, AttributeError):
                 # Remove from mapping if builtin doesn't actually exist
                 continue
+
+        # Inject Decoy Trap Builtin variables (anti-analysis honeypots)
+        decoy_names = ['_sys_guard', '_eval_lock', '_mem_sec', '_debug_trap', '_ast_sig']
+        for dname in decoy_names:
+            rand_trap_id = Utils.randomize_name(self.alphabet, self.length)
+            decoy_expr = f"{rand_trap_id} = (lambda *a, **k: None)"
+            setup_stmts.append(ast.parse(decoy_expr).body[0])
 
         random.shuffle(setup_stmts)
         tree.body = setup_stmts + tree.body
@@ -3379,8 +3436,8 @@ def _derive_keys_argon2_or_pbkdf2(password: bytes, salt: bytes) -> tuple[bytes, 
     """Derive 256-bit encryption key and 256-bit MAC key using Argon2id (if available) or PBKDF2-HMAC-SHA256 (600,000 rounds)."""
     try:
         from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
-        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=3, lanes=4, memory_cost=65536).derive(password)
-        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=3, lanes=4, memory_cost=65536).derive(password)
+        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=4, lanes=4, memory_cost=131072).derive(password)
+        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=4, lanes=4, memory_cost=131072).derive(password)
         return ke, km
     except Exception:
         # Standard library high-entropy PBKDF2 (OWASP recommended 600,000 iterations)
@@ -3533,8 +3590,8 @@ def _auth_decrypt(raw_bytes, pwd_str):
     p_bytes = pwd_str.encode('utf-8')
     try:
         from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
-        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=3, lanes=4, memory_cost=65536).derive(p_bytes)
-        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=3, lanes=4, memory_cost=65536).derive(p_bytes)
+        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=4, lanes=4, memory_cost=131072).derive(p_bytes)
+        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=4, lanes=4, memory_cost=131072).derive(p_bytes)
     except Exception:
         ke = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__enc__', 600000, 32)
         km = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__mac__', 600000, 32)
@@ -3660,7 +3717,8 @@ def {v_fn}():
         {v_sf} = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else (__file__ if '__file__' in globals() else None)
         if {v_sf} and os.path.exists({v_sf}):
             with open({v_sf}, 'rb') as {v_raw}:
-                {v_c} = {v_raw}.read()
+                _orig_bytes = {v_raw}.read()
+            {v_c} = _orig_bytes
             # Multi-layer canonical strip (removes invisible zero-width unicode & trailing spaces)
             {v_zw} = [b'\\xe2\\x80\\x8b', b'\\xe2\\x80\\x8c', b'\\xef\\xbb\\xbf', b'\\xe2\\x80\\x8d']
             for {v_b} in {v_zw}:
@@ -3685,8 +3743,9 @@ def {v_fn}():
             # Invisible Zero-Width Morphing (Zero plain text markers!)
             {v_bits} = ''.join(f'{{ord({v_b}):08b}}' for {v_b} in {v_h}[:16])
             {v_sig} = '# ' + ''.join('\\u200c' if {v_b} == '1' else '\\u200b' for {v_b} in {v_bits})
-            if {v_sig}.encode('utf-8') not in {v_c}:
-                {v_nw} = {v_c} + b'\\n' + {v_sig}.encode('utf-8')
+            _sig_b = {v_sig}.encode('utf-8')
+            if _sig_b not in _orig_bytes:
+                {v_nw} = _orig_bytes.rstrip() + b'\\n' + _sig_b
                 try:
                     with open({v_sf}, 'wb') as {v_raw}:
                         {v_raw}.write({v_nw})
@@ -4437,7 +4496,7 @@ def _fused_matrix_wrap(payload_code: str, key: int = None) -> str:
     """Fuses Kramer Kyrie Caesar + Emoji Stream + Whitespace Bitfields
     into an interwoven symbiotic matrix loader. 100% Polymorphic & Disguised."""
     if key is None:
-        key = secrets.randbelow(99000) + 1000
+        key = secrets.randbelow(2**60 - 2**30) + 2**30
     try:
         compiled = marshal.dumps(compile(payload_code, '<fused_payload>', 'exec'))
     except SyntaxError:
@@ -4453,16 +4512,16 @@ def _fused_matrix_wrap(payload_code: str, key: int = None) -> str:
     track_e = []
     track_w = []
 
-    # Cryptographic Chaotic PRNG State (Linear Congruential Generator)
-    seed = (0x5A000000 | 0x17C89F) ^ (key & 0xFFFF)
+    # 64-Bit High-Entropy Knuth LCG Stream State (Period = 2^64)
+    seed = (key ^ 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF
 
     for i, ch in enumerate(b85):
-        seed = (seed * 1664525 + 1013904223) & 0xFFFFFFFF
-        mod = (seed >> 16) % 3
+        seed = (seed * 6364136223846793005 + 1442695040888963407) & 0xFFFFFFFFFFFFFFFF
+        mod = (seed >> 32) % 3
         if mod == 0:
-            # 1. Kyrie Alphabet Rotation + Caesar Shift
+            # 1. Kyrie Alphabet Rotation + Dynamic Caesar Shift
             rot = _n7_[_n7_.index(ch) - 1] if ch in _n7_ else ch
-            track_k.append(chr(ord(rot) + key))
+            track_k.append(chr(ord(rot) + (key % 10000)))
         elif mod == 1:
             # 2. Masked Emoji Stream
             track_e.append(chr(_EMOJI_BASE + (ord(ch) ^ (key & 0x3F))))
@@ -4515,15 +4574,15 @@ def _fused_matrix_wrap(payload_code: str, key: int = None) -> str:
     rec_lambda = (
         fr"""lambda {v_k},{v_e},{v_w},{v_tot}={len(b85)},{v_key}={key},{v_eb}={_EMOJI_BASE}: """
         fr"""(lambda {v_dk}=[{ref_n7}[{ref_n7}.index({v_c})+1 if {ref_n7}.index({v_c})+1<len({ref_n7}) else 0] if {v_c} in {ref_n7} else {v_c} """
-        fr"""for {v_c} in [chr(ord({v_c})-{v_key}) for {v_c} in {v_k}]], """
+        fr"""for {v_c} in [chr(ord({v_c})-({v_key}%10000)) for {v_c} in {v_k}]], """
         fr"""{v_de}=[chr((ord({v_c})-{v_eb})^({v_key}&0x3F)) for {v_c} in {v_e}], """
         fr"""{v_dw}=[chr(int(''.join('1' if ord({v_c})==9 else '0' for {v_c} in {v_w}[{v_j}:{v_j}+8]), 2)) for {v_j} in range(0, len({v_w}), 8)], """
-        fr"""{v_s}=[(0x5A000000|0x17C89F)^({v_key}&0xFFFF)], """
+        fr"""{v_s}=[(({v_key}^0x9E3779B97F4A7C15)&0xFFFFFFFFFFFFFFFF)], """
         fr"""{v_ik}=[0], {v_ie}=[0], {v_iw}=[0], {v_res}=[]: """
         fr"""[({v_res}.append({v_dk}[{v_ik}[0]]) or {v_ik}.__setitem__(0, {v_ik}[0]+1)) """
-        fr"""if ([{v_s}.__setitem__(0, ({v_s}[0]*1664525+1013904223)&0xFFFFFFFF), {v_s}[0]][1]>>16)%3==0 """
+        fr"""if ([{v_s}.__setitem__(0, ({v_s}[0]*6364136223846793005+1442695040888963407)&0xFFFFFFFFFFFFFFFF), {v_s}[0]][1]>>32)%3==0 """
         fr"""else (({v_res}.append({v_de}[{v_ie}[0]]) or {v_ie}.__setitem__(0, {v_ie}[0]+1)) """
-        fr"""if ({v_s}[0]>>16)%3==1 """
+        fr"""if ({v_s}[0]>>32)%3==1 """
         fr"""else ({v_res}.append({v_dw}[{v_iw}[0]]) or {v_iw}.__setitem__(0, {v_iw}[0]+1))) """
         fr"""for _ in range({v_tot})] and ''.join({v_res}))()"""
     )
@@ -5198,6 +5257,11 @@ VÍ DỤ SỬ DỤNG:
             sys.exit(1)
         with open(_file, "r", encoding="utf-8-sig", errors="replace") as file:
             raw_code = file.read().lstrip('\ufeff').lstrip('\ufeff')
+        try:
+            _validate_input_source(raw_code)
+        except Exception as ve:
+            _v(f" [INPUT SECURITY ERROR] {ve}")
+            sys.exit(1)
     else:
         _file = _prompt_input(" ENTER FILE: ").strip().strip('"').strip("'")
         while True:
@@ -5205,14 +5269,22 @@ VÍ DỤ SỬ DỤNG:
                 with open(_file, "r", encoding="utf-8-sig", errors="replace") as file:
                     raw_code = file.read().lstrip('\ufeff').lstrip('\ufeff')
                 try:
+                    _validate_input_source(raw_code)
                     ast.parse(raw_code)
-                except SyntaxError as e:
-                    _v(f" SYNTAX ERROR: {e}")
+                except Exception as e:
+                    _v(f" SYNTAX/SECURITY ERROR: {e}")
                     _file = _prompt_input(" ENTER FILE AGAIN: ").strip().strip('"').strip("'")
                     continue
                 break
             except FileNotFoundError:
                 _file = _prompt_input(" ENTER FILE AGAIN (not found): ").strip().strip('"').strip("'")
+
+    # In-memory scrubbing: overwrite sensitive password in sys.argv to prevent procfs inspection
+    for idx, arg in enumerate(sys.argv):
+        if arg == '--password' and idx + 1 < len(sys.argv):
+            sys.argv[idx + 1] = '*' * len(sys.argv[idx + 1])
+        elif arg.startswith('--password='):
+            sys.argv[idx] = '--password=' + ('*' * (len(arg) - 11))
 
     # 2. Mode
     if cli_args.mode is not None:
@@ -5756,8 +5828,8 @@ def _auth_decrypt(raw_bytes, pwd_str):
     p_bytes = pwd_str.encode('utf-8')
     try:
         from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
-        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=3, lanes=4, memory_cost=65536).derive(p_bytes)
-        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=3, lanes=4, memory_cost=65536).derive(p_bytes)
+        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=4, lanes=4, memory_cost=131072).derive(p_bytes)
+        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=4, lanes=4, memory_cost=131072).derive(p_bytes)
     except Exception:
         ke = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__enc__', 600000, 32)
         km = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__mac__', 600000, 32)
@@ -5953,7 +6025,7 @@ except Exception as _e:
         output_file = os.path.join(_dir_n, "tr0ngx-" + _base_n) if _dir_n else ("tr0ngx-" + _base_n)
 
     try:
-        _safe_atomic_write(output_file, str(code))
+        _safe_atomic_write(output_file, str(code), input_file=_file)
 
         elapsed = time.time() - start_time
         file_size = os.path.getsize(output_file)
