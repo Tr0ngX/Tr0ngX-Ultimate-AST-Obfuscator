@@ -25,6 +25,8 @@ try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     if hasattr(sys.stderr, 'reconfigure'):
         sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stdin, 'reconfigure'):
+        sys.stdin.reconfigure(encoding='utf-8', errors='replace')
     if os.name == 'nt':
         import ctypes
         kernel32 = ctypes.windll.kernel32
@@ -4468,6 +4470,23 @@ def _gradient_text(text: str, start_rgb: tuple, end_rgb: tuple) -> str:
         res.append(f"\033[38;2;{r};{g};{b}m{ch}")
     return "".join(res) + "\033[0m"
 
+def _format_symbol_tag(symbol: str) -> str:
+    """Tạo tag [TR0NGX] / [STAGE] bằng bảng phối màu Neon Cyberpunk rực rỡ, sắc nét từng ký tự."""
+    if _EngineState.cli_quiet_mode:
+        return f"[{symbol}]"
+    if symbol == 'TR0NGX':
+        # Letter-by-letter Multi-Stop TrueColor Neon Gradient: Cyan -> Sky -> Indigo -> Violet -> Fuchsia -> Magenta
+        return "\033[1;38;2;0;235;255m[\033[1;38;2;0;255;255mT\033[38;2;60;210;255mR\033[38;2;130;150;255m0\033[38;2;190;100;255mN\033[38;2;240;65;235mG\033[38;2;255;50;180mX\033[1;38;2;255;40;180m]\033[0m"
+    elif symbol in ('ERROR', 'FAIL'):
+        return f"\033[1;38;2;255;40;40m[\033[1;38;2;255;80;60m{symbol}\033[1;38;2;255;40;40m]\033[0m"
+    elif symbol in ('WARN', 'WARNING'):
+        return f"\033[1;38;2;255;180;20m[\033[1;38;2;255;220;40m{symbol}\033[1;38;2;255;180;20m]\033[0m"
+    elif symbol in ('PASS', 'OK', 'SAVED'):
+        return f"\033[1;38;2;0;240;255m[\033[1;38;2;50;255;130m{symbol}\033[1;38;2;0;240;255m]\033[0m"
+    else:
+        sym_grad = _gradient_text(symbol, (0, 240, 255), (240, 80, 255))
+        return f"\033[1;38;2;0;240;255m[{sym_grad}\033[1;38;2;240;80;255m]\033[0m"
+
 def stage(text: str, symbol: str = 'TR0NGX', col1=light, col2=None) -> str:
     text_str = str(text)
     # Extract clean core text without any prior ANSI codes or symbols
@@ -4501,7 +4520,7 @@ def stage(text: str, symbol: str = 'TR0NGX', col1=light, col2=None) -> str:
         # Bright Cyan to Vivid Purple default gradient
         gradient_body = _gradient_text(clean_text, (60, 210, 255), (210, 95, 255))
 
-    tag = f"\033[1;38;2;0;240;255m[\033[38;2;135;120;255m{symbol}\033[38;2;240;80;255m]\033[0m"
+    tag = _format_symbol_tag(symbol)
     return f" {tag} {gradient_body} "
 
 _raw_input = input
@@ -4513,7 +4532,17 @@ def _v(x, *k):
     return _raw_print(stage(x), *k, flush=True)
 
 def _prompt_input(x):
-    return _raw_input(stage(x))
+    formatted = stage(x)
+    try:
+        sys.stdout.write(formatted)
+        sys.stdout.flush()
+        return _raw_input("").strip().strip('"').strip("'")
+    except (UnicodeEncodeError, Exception):
+        enc = sys.stdout.encoding or 'utf-8'
+        safe_prompt = formatted.encode(enc, errors='replace').decode(enc, errors='replace')
+        sys.stdout.write(safe_prompt)
+        sys.stdout.flush()
+        return _raw_input("").strip().strip('"').strip("'")
 
 def _show_banner():
     if _EngineState.cli_quiet_mode:
@@ -4735,11 +4764,11 @@ VÍ DỤ SỬ DỤNG:
 
     # New Obfuscation Modes
     matrix_choice = cli_args.matrix or ("N" if is_cli_mode else _prompt_input(" MATRIX DEEP FUSION (Hybrid Variables + Fused 3-Track Shield)? (y/n): "))
-    emoji_obf_choice = cli_args.emoji_obf or ("N" if is_cli_mode else _prompt_input(" EMOJI OBFUSCATION (code → 🐀🐁🐂 emoji)? (y/n): "))
-    homoglyph_choice = cli_args.homoglyph or ("N" if is_cli_mode else _prompt_input(" HOMOGLYPH NAMES (Cyrillic/Greek lookalikes а≠a)? (y/n): "))
-    rare_unicode_choice = cli_args.rare_unicode or ("N" if is_cli_mode else _prompt_input(" RARE UNICODE NAMES (CJK Ext-B 龘鱻𪚥)? (y/n): "))
-    zalgo_choice = getattr(cli_args, 'zalgo', None) or ("N" if is_cli_mode else _prompt_input(" ZALGO COMBINING MARKS (Z͑͗͑͗... Diacritics Cascade)? (y/n): "))
-    whitespace_obf_choice = cli_args.whitespace_obf or ("N" if is_cli_mode else _prompt_input(" WHITESPACE OBFUSCATION (code → invisible space/tab)? (y/n): "))
+    emoji_obf_choice = cli_args.emoji_obf or ("N" if is_cli_mode else _prompt_input(" EMOJI OBFUSCATION (code -> Animal emoji stream)? (y/n): "))
+    homoglyph_choice = cli_args.homoglyph or ("N" if is_cli_mode else _prompt_input(" HOMOGLYPH NAMES (Cyrillic/Greek lookalikes: a/o/e)? (y/n): "))
+    rare_unicode_choice = cli_args.rare_unicode or ("N" if is_cli_mode else _prompt_input(" RARE UNICODE NAMES (CJK Ext-B Ancient glyphs)? (y/n): "))
+    zalgo_choice = getattr(cli_args, 'zalgo', None) or ("N" if is_cli_mode else _prompt_input(" ZALGO COMBINING MARKS (Extreme Diacritics Cascade)? (y/n): "))
+    whitespace_obf_choice = cli_args.whitespace_obf or ("N" if is_cli_mode else _prompt_input(" WHITESPACE OBFUSCATION (code -> Invisible space/tab)? (y/n): "))
     hyperion_choice = getattr(cli_args, 'hyperion', None) or ("N" if is_cli_mode else _prompt_input(" HYPERION ENGINE (Builtin/Import/Var token remap + Chunk shell)? (y/n): "))
     camouflage_choice = getattr(cli_args, 'camouflage', None) or ("N" if is_cli_mode else _prompt_input(" HYPERION CAMOUFLAGE (Fake Scientific Simulation Class)? (y/n): "))
 
