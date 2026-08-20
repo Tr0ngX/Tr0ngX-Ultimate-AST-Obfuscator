@@ -149,6 +149,7 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--matrix`, `--fused` | Enable Fused 3-Track Symbiotic Matrix Shield | `y` / `n` |
 | `--emoji-obf` | Encode output payload as executable Unicode identifier stream | `y` / `n` |
 | `--whitespace-obf` | Encode output as invisible whitespace bitfields | `y` / `n` |
+| `--blank-padding`, `--blank-lines` | Prepend 300+ blank screen lines padding to conceal code in editors | `y` / `n` |
 | `--cjk-vars` | Use CJK Chinese identifiers & PyCool docstrings | `y` / `n` |
 | `--homoglyph` | Use Cyrillic/Greek homoglyph variable names | `y` / `n` |
 | `--rare-unicode` | Use Rare Unicode characters (CJK Ext-B, Kangxi, Hieroglyphs) | `y` / `n` |

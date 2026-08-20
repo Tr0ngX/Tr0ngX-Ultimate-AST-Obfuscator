@@ -4231,7 +4231,7 @@ def _fused_matrix_wrap(payload_code: str, key: int = None) -> str:
   self.{m_dec}(*_n3_,**_n4_)
 {c_name}(__SPK_DATA__,__EMJ_DATA__,__WSP_DATA__)""".strip()
 
-    loader = tmpl.replace('__SPK_DATA__', repr(sk)).replace('__EMJ_DATA__', repr(se)).replace('__WSP_DATA__', repr(sw))
+    loader = tmpl.replace('__SPK_DATA__', repr(sk)).replace('__EMJ_DATA__', f'"""{se}"""').replace('__WSP_DATA__', f'"""{sw}"""')
 
     return loader.strip()
 
@@ -4758,6 +4758,7 @@ VÍ DỤ SỬ DỤNG:
     parser.add_argument("--rare-unicode", choices=["y", "n", "Y", "N"], help="Dung ky tu Unicode sieu hiem (CJK Extension B, Kangxi) (y/n)", default=None)
     parser.add_argument("--zalgo", "--combining-marks", "-z", choices=["y", "n", "Y", "N"], help="Kich hoat khien Zalgo Combining Marks chong cuc nhieu dau lam lag engine render GUI/Decompiler (y/n)", default=None)
     parser.add_argument("--whitespace-obf", choices=["y", "n", "Y", "N"], help="Mã hóa output thành khoảng trắng vô hình (space=0, tab=1) (y/n)", default=None)
+    parser.add_argument("--blank-padding", "--blank-lines", choices=["y", "n", "Y", "N"], help="Chèn hàng trăm dòng khoảng trống trắng tinh ở đầu file (Screen Blanker Padding) (y/n)", default=None)
     parser.add_argument("--hyperion", choices=["y", "n", "Y", "N"], help="Kích hoạt Hyperion Engine (Builtins remapping + token variable remapping + math/str obfuscation + chunk shell) (y/n)", default=None)
     parser.add_argument("--camouflage", "--camo", choices=["y", "n", "Y", "N"], help="Kích hoạt lớp ngụy trang Hyperion Camouflage (Fake Scientific/Algorithmic Class simulation) (y/n)", default=None)
 
@@ -4857,6 +4858,7 @@ VÍ DỤ SỬ DỤNG:
     rare_unicode_choice = cli_args.rare_unicode or ("N" if is_cli_mode else _prompt_input(" RARE UNICODE NAMES (CJK Ext-B Ancient glyphs)? (y/n): "))
     zalgo_choice = getattr(cli_args, 'zalgo', None) or ("N" if is_cli_mode else _prompt_input(" ZALGO COMBINING MARKS (Extreme Diacritics Cascade)? (y/n): "))
     whitespace_obf_choice = cli_args.whitespace_obf or ("N" if is_cli_mode else _prompt_input(" WHITESPACE OBFUSCATION (code -> Invisible space/tab)? (y/n): "))
+    blank_padding_choice = getattr(cli_args, 'blank_padding', None) or getattr(cli_args, 'blank_lines', None) or ("N" if is_cli_mode else _prompt_input(" BLANK LINES PADDING (Screen Blanker 300+ empty lines)? (y/n): "))
     hyperion_choice = getattr(cli_args, 'hyperion', None) or ("N" if is_cli_mode else _prompt_input(" HYPERION ENGINE (Builtin/Import/Var token remap + Chunk shell)? (y/n): "))
     camouflage_choice = getattr(cli_args, 'camouflage', None) or ("N" if is_cli_mode else _prompt_input(" HYPERION CAMOUFLAGE (Fake Scientific Simulation Class)? (y/n): "))
 
@@ -4926,6 +4928,7 @@ VÍ DỤ SỬ DỤNG:
         "rare_unicode": rare_unicode_choice,
         "zalgo": zalgo_choice,
         "whitespace_obf": whitespace_obf_choice,
+        "blank_padding": blank_padding_choice,
         "hyperion": hyperion_choice,
         "camouflage": camouflage_choice,
         "force_py_choice": force_py_choice,
@@ -4991,6 +4994,7 @@ def main():
     rare_unicode_choice = _cfg.get("rare_unicode", "N")
     zalgo_choice = _cfg.get("zalgo", "N")
     whitespace_obf_choice = _cfg.get("whitespace_obf", "N")
+    blank_padding_choice = _cfg.get("blank_padding", "N")
     hyperion_choice = _cfg.get("hyperion", "N")
     camouflage_choice = _cfg.get("camouflage", "N")
     force_py_choice = _cfg["force_py_choice"]
@@ -5018,6 +5022,7 @@ def main():
         "rare_unicode": rare_unicode_choice,
         "zalgo": zalgo_choice,
         "whitespace_obf": whitespace_obf_choice,
+        "blank_padding": blank_padding_choice,
         "hyperion": hyperion_choice,
         "camouflage": camouflage_choice,
         "force_py": forced_py_ver if force_py_choice.upper() == "Y" else "OFF"
@@ -5441,12 +5446,13 @@ except Exception as _e:
             except Exception as e:
                 _v(f" WARNING: Whitespace encoding error: {e}")
 
+    _blank_pad = ("\n" * 300) if blank_padding_choice.upper() == "Y" else ""
     if zalgo_choice.upper() == "Y":
-        code = _gen_tr0ngx_header() + "\n" + _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=6, chars_per_line=12, marks_per_char=50) + "\n" + code + "\n" + _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=4, chars_per_line=12, marks_per_char=50)
+        code = _gen_tr0ngx_header() + "\n" + _blank_pad + _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=6, chars_per_line=12, marks_per_char=50) + "\n" + code + "\n" + _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=4, chars_per_line=12, marks_per_char=50)
     elif cjk_choice.upper() == "Y" or matrix_choice.upper() == "Y" or rare_unicode_choice.upper() == "Y":
-        code = _gen_tr0ngx_header() + "\n" + _gen_cjk_docstring(paragraphs=1, lines_per_p=5, chars_per_line=36) + "\n" + code + "\n" + _gen_cjk_docstring(paragraphs=1, lines_per_p=4, chars_per_line=36)
+        code = _gen_tr0ngx_header() + "\n" + _blank_pad + _gen_cjk_docstring(paragraphs=1, lines_per_p=5, chars_per_line=36) + "\n" + code + "\n" + _gen_cjk_docstring(paragraphs=1, lines_per_p=4, chars_per_line=36)
     else:
-        code = _gen_tr0ngx_header() + "\n" + code
+        code = _gen_tr0ngx_header() + "\n" + _blank_pad + code
 
     if custom_out:
         output_file = custom_out.strip().strip('"').strip("'")
