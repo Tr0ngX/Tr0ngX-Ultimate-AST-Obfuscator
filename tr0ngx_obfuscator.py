@@ -5060,10 +5060,10 @@ CÔNG CỤ LÀM RỐI MÃ NGUỒN PYTHON ĐA TẦNG CỰC MẠNH:
   • Tầng 3: Double Compile Bytecode Loader (marshal + XOR + zlib + bz2 + base85)
   • Tầng 4: Kramer Kyrie Eleison Outer Shield (Mã hóa dịch chuyển Caesar động + Class ảo)
   • Tầng 5: Tên biến tiếng Trung / CJK + Watermark bản quyền PyCool
-  • Tầng 6: Emoji Obfuscation (Code → chuỗi emoji 🐀🐁🐂 + self-decoding loader)
-  • Tầng 7: Homoglyph Names (Tên biến Cyrillic/Greek trông giống ASCII: а≠a, о≠o)
-  • Tầng 8: Rare Unicode Names (CJK Extension B, Kangxi Radicals: 龘 鱻 𪚥)
-  • Tầng 9: Whitespace Obfuscation (Code → không gian trắng vô hình space/tab binary)
+  • Tầng 6: Emoji Obfuscation (Mã hóa chuỗi Unicode Emoji + self-decoding loader)
+  • Tầng 7: Homoglyph Names (Tên biến Cyrillic/Greek trông giống ASCII: a->а, o->о)
+  • Tầng 8: Rare Unicode Names (CJK Extension B, Kangxi Radicals)
+  • Tầng 9: Whitespace Obfuscation (Code biến đổi thành không gian trắng space/tab binary)
         """,
         epilog="""
 VÍ DỤ SỬ DỤNG:
@@ -5154,7 +5154,7 @@ VÍ DỤ SỬ DỤNG:
 
     _setup = None
     if not is_cli_mode:
-        _v(" ⚡ TR0NGX INTERACTIVE SETUP")
+        _v(" [!] TR0NGX INTERACTIVE SETUP")
         _v("  1. QUICK MODE (Mode 2, Compile, Velimatix L2, Kramer, Anti-Debug)")
         _v("  2. CUSTOM MODE (Cấu hình chi tiết từng bước)")
         _setup = _prompt_input(" Choose mode (1/2): ").strip()
