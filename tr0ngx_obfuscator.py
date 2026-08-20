@@ -2179,10 +2179,10 @@ def _protect_exec_eval():
     _real_exec = builtins.exec
     _real_eval = builtins.eval
 
-    # Compute bytecode checksum for integrity verification
+    # Compute bytecode checksum for integrity verification if available
     import hashlib
-    _exec_checksum = hashlib.sha256(_real_exec.__code__.co_code).digest()[:8]
-    _eval_checksum = hashlib.sha256(_real_eval.__code__.co_code).digest()[:8]
+    _exec_checksum = hashlib.sha256(_real_exec.__code__.co_code).digest()[:8] if hasattr(_real_exec, '__code__') else None
+    _eval_checksum = hashlib.sha256(_real_eval.__code__.co_code).digest()[:8] if hasattr(_real_eval, '__code__') else None
 
     class _ExecGuard:
         '''Descriptor that prevents exec replacement'''
@@ -2195,7 +2195,7 @@ def _protect_exec_eval():
             if id(self._func) != self._id:
                 _obliterate()
             # Verify bytecode integrity
-            if hasattr(self._func, '__code__'):
+            if self._checksum is not None and hasattr(self._func, '__code__'):
                 current_checksum = hashlib.sha256(self._func.__code__.co_code).digest()[:8]
                 if current_checksum != self._checksum:
                     _obliterate()
@@ -2211,7 +2211,7 @@ def _protect_exec_eval():
             if id(self._func) != self._id:
                 _obliterate()
             # Verify bytecode integrity
-            if hasattr(self._func, '__code__'):
+            if self._checksum is not None and hasattr(self._func, '__code__'):
                 current_checksum = hashlib.sha256(self._func.__code__.co_code).digest()[:8]
                 if current_checksum != self._checksum:
                     _obliterate()
@@ -4567,59 +4567,59 @@ if not sys.version.startswith('{target_ver_str}'):
 
             code = author + var + f"""
 
-    import hashlib, hmac, platform as _platform
+import hashlib, hmac, platform as _platform
 
-    def _derive_runtime_keys(salt):
-        _parts = []
-        _parts.append(sys.version[:5].encode())
-        _parts.append(_platform.python_implementation().encode())
-        _parts.append(salt)
-        _parts.append(str(sys.maxsize).encode())
-        _parts.append(sys.byteorder.encode())
-        _combined = b''.join(_parts)
-        _enc_k = hashlib.sha256(_combined + b'__enc__').digest()
-        _mac_k = hashlib.sha256(_combined + b'__mac__').digest()
-        return _enc_k, _mac_k
+def _derive_runtime_keys(salt):
+    _parts = []
+    _parts.append(sys.version[:5].encode())
+    _parts.append(_platform.python_implementation().encode())
+    _parts.append(salt)
+    _parts.append(str(sys.maxsize).encode())
+    _parts.append(sys.byteorder.encode())
+    _combined = b''.join(_parts)
+    _enc_k = hashlib.sha256(_combined + b'__enc__').digest()
+    _mac_k = hashlib.sha256(_combined + b'__mac__').digest()
+    return _enc_k, _mac_k
 
-    def _auth_decrypt(raw_bytes):
-        salt = raw_bytes[:16]
-        tag = raw_bytes[16:32]
-        ct = raw_bytes[32:]
-        _enc_k, _mac_k = _derive_runtime_keys(salt)
-        ke = hashlib.pbkdf2_hmac('sha256', salt, _enc_k, 1000, 32)
-        km = hashlib.pbkdf2_hmac('sha256', salt, _mac_k, 1000, 32)
-        expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
-        if not hmac.compare_digest(tag, expected_tag):
-            raise SystemExit(1)
-        keystream = bytearray()
-        counter = 0
-        while len(keystream) < len(ct):
-            block = hmac.new(ke, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
-            keystream.extend(block)
-            counter += 1
-        return bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
+def _auth_decrypt(raw_bytes):
+    salt = raw_bytes[:16]
+    tag = raw_bytes[16:32]
+    ct = raw_bytes[32:]
+    _enc_k, _mac_k = _derive_runtime_keys(salt)
+    ke = hashlib.pbkdf2_hmac('sha256', salt, _enc_k, 1000, 32)
+    km = hashlib.pbkdf2_hmac('sha256', salt, _mac_k, 1000, 32)
+    expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
+    if not hmac.compare_digest(tag, expected_tag):
+        raise SystemExit(1)
+    keystream = bytearray()
+    counter = 0
+    while len(keystream) < len(ct):
+        block = hmac.new(ke, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+        keystream.extend(block)
+        counter += 1
+    return bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
 
-    {_en_var} = getattr({___import__}({obfstr("marshal")}), {obfstr("loads")})
-    {_july_var} = getattr({___import__}({obfstr("zlib")}), {obfstr("decompress")})
-    {_birth_var} = getattr({___import__}({obfstr("bz2")}), {obfstr("decompress")})
-    {_b85_var} = getattr({___import__}({obfstr("base64")}), {obfstr("b85decode")})
-    _types_mod = {___import__}({obfstr("types")})
-    _fn_type = getattr(_types_mod, {obfstr("FunctionType")})
+{_en_var} = getattr({___import__}({obfstr("marshal")}), {obfstr("loads")})
+{_july_var} = getattr({___import__}({obfstr("zlib")}), {obfstr("decompress")})
+{_birth_var} = getattr({___import__}({obfstr("bz2")}), {obfstr("decompress")})
+{_b85_var} = getattr({___import__}({obfstr("base64")}), {obfstr("b85decode")})
+_types_mod = {___import__}({obfstr("types")})
+_fn_type = getattr(_types_mod, {obfstr("FunctionType")})
 
-    {part_assignments}
+{part_assignments}
 
-    try:
-        _payload = {part_concat}
-        _step1 = {_b85_var}(_payload)
-        _step2 = {_july_var}(_step1)
-        _step3 = {_birth_var}(_step2)
-        _step4 = _auth_decrypt(_step3)
-        _step5 = {_july_var}(_step4)
-        _fn_type({_en_var}(_step5), globals())()
-        del _payload, _step1, _step2, _step3, _step4, _step5
-    except Exception as _e:
-        pass
-    """
+try:
+    _payload = {part_concat}
+    _step1 = {_b85_var}(_payload)
+    _step2 = {_july_var}(_step1)
+    _step3 = {_birth_var}(_step2)
+    _step4 = _auth_decrypt(_step3)
+    _step5 = {_july_var}(_step4)
+    _fn_type({_en_var}(_step5), globals())()
+    del _payload, _step1, _step2, _step3, _step4, _step5
+except Exception as _e:
+    pass
+"""
 
             if velimatix.upper() == "Y" and veli_level >= 2:
                 _v(" [8/8] Velimatix final pass on loader...")
