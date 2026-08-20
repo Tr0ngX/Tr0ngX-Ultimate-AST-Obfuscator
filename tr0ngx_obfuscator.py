@@ -50,6 +50,9 @@ class _EngineState:
     use_cjk_names = False
     use_homoglyph_names = False
     use_rare_unicode_names = False
+    use_zalgo_marks = False
+    use_hyperion = False
+    use_camouflage = False
     use_fused_names = False
 
 _HAS_PYSTYLE = False
@@ -183,17 +186,21 @@ def _gen_fused_name(scope='general'):
     elif scope == 'globals':
         return _gen_cjk_name(random.randint(6, 10))
     else:
-        picker = random.choice(['homo', 'rare', 'cjk', 'invis'])
+        picker = random.choice(['homo', 'rare', 'cjk', 'zalgo', 'invis'])
         if picker == 'homo':
             return _gen_homoglyph_name(random.randint(5, 8))
         elif picker == 'rare':
             return _gen_rare_unicode_name(random.randint(3, 5))
         elif picker == 'cjk':
             return _gen_cjk_name(random.randint(6, 8))
+        elif picker == 'zalgo':
+            return _gen_zalgo_name(1, random.randint(25, 45))
         else:
             return _gen_homoglyph_name(random.randint(6, 10))
 
 def rd(scope='general'):
+    if _EngineState.use_zalgo_marks:
+        return _gen_zalgo_name()
     if _EngineState.use_fused_names:
         return _gen_fused_name(scope)
     if _EngineState.use_rare_unicode_names:
@@ -348,16 +355,75 @@ def _gen_rare_unicode_name(min_len=3, max_len=6):
             _used_names.add(name)
             return name
 
+# ═══════════════════════════════════════════════════════════════
+# EXTREME ZALGO COMBINING MARKS ENGINE (FULL DIACRITICS CASCADE)
+# ═══════════════════════════════════════════════════════════════
+
+_COMBINING_MARKS_VALID = None
+
+def _init_combining_marks():
+    global _COMBINING_MARKS_VALID
+    if _COMBINING_MARKS_VALID is not None:
+        return
+    import unicodedata
+    pool = []
+    # Ranges of Combining Diacritical Marks in Unicode standard
+    _ranges = [
+        (0x0300, 0x036F),  # Combining Diacritical Marks (U+0300..U+036F)
+        (0x1AB0, 0x1AFF),  # Combining Diacritical Marks Extended
+        (0x1DC0, 0x1DFF),  # Combining Diacritical Marks Supplement
+        (0x20D0, 0x20FF),  # Combining Diacritical Marks for Symbols
+        (0xFE20, 0xFE2F),  # Combining Half Marks
+    ]
+    for start, end in _ranges:
+        for cp in range(start, end + 1):
+            ch = chr(cp)
+            if unicodedata.category(ch) in ('Mn', 'Mc'):
+                pool.append(ch)
+    _COMBINING_MARKS_VALID = pool
+
+def _gen_zalgo_name(base_len=1, mark_intensity=45):
+    """Tạo tên biến hợp lệ trong Python chứa hàng chục dấu combining diacritical marks (Z͑͗͑͗...)
+       gây quá tải rendering engine của IDE / Decompiler (DirectWrite, HarfBuzz, Scintilla, FreeType).
+    """
+    import unicodedata
+    _init_combining_marks()
+    _bases = ['Z', 'X', 'V', 'T', 'O', 'I', 'z', 'x', 'v', 't', 'o', 'i', 'a', 'e', 's', 'c']
+    while True:
+        parts = []
+        for _ in range(base_len):
+            base_ch = random.choice(_bases)
+            marks = ''.join(random.choices(_COMBINING_MARKS_VALID, k=mark_intensity))
+            parts.append(base_ch + marks)
+        name = unicodedata.normalize('NFKC', ''.join(parts))
+        if name.isidentifier() and name not in _used_names:
+            _used_names.add(name)
+            return name
+
+def _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=6, chars_per_line=12, marks_per_char=50):
+    """Tạo khối docstring/comment cascade cực đại chứa hàng nghìn combining marks chồng chéo."""
+    _init_combining_marks()
+    tq = chr(39) * 3
+    _bases = list("ZALGO_CHAOS_ENGINE_TR0NGX_MATRIX_AST_OBFUSCATOR_VOID_KYRIE_ELEISON")
+    res_paragraphs = []
+    for _ in range(paragraphs):
+        lines = []
+        for _ in range(lines_per_p):
+            line_chars = []
+            for _ in range(chars_per_line):
+                b = random.choice(_bases)
+                m = ''.join(random.choices(_COMBINING_MARKS_VALID, k=marks_per_char))
+                line_chars.append(b + m)
+            lines.append(''.join(line_chars))
+        res_paragraphs.append(f"{tq}\n" + '\n'.join(lines) + f"\n{tq}")
+    return '\n\n'.join(res_paragraphs)
+
 def _gen_zalgo_chars(text, intensity=8):
     """Stack 4 tiers of combining diacritical marks onto characters (Extreme Zalgo Glitch)"""
-    combining = []
-    combining.extend(chr(i) for i in range(0x0300, 0x036F))  # Standard Combining Marks
-    combining.extend(chr(i) for i in range(0x1AB0, 0x1AFF))  # Extended Combining Marks
-    combining.extend(chr(i) for i in range(0x1DC0, 0x1DFF))  # Supplement Combining Marks
-    combining.extend(chr(i) for i in range(0xFE20, 0xFE2F))  # Combining Half Marks
+    _init_combining_marks()
     res = []
     for c in text:
-        res.append(c + ''.join(random.choices(combining, k=intensity)))
+        res.append(c + ''.join(random.choices(_COMBINING_MARKS_VALID, k=intensity)))
     return ''.join(res)
 
 def _gen_cjk_docstring(paragraphs=2, lines_per_p=4, chars_per_line=32):
@@ -393,7 +459,7 @@ def _gen_tr0ngx_header():
 # ║     ██║   ██║  ██║╚██████╔╝██║ ╚████║╚██████╔╝██╔╝ ██╗                            ║
 # ║     ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝                            ║
 # ╠═══════════════════════════════════════════════════════════════════════════════════╣
-# ║  Make by Tr0ngX  |  GitHub: https://github.com/Tr0ngX                              ║
+# ║  Make by Tr0ngX  |  GitHub: https://github.com/Tr0ngX                             ║
 # ║  Notice: Do not attempt to reverse engineer. You will only find darkness!         ║
 # ╚═══════════════════════════════════════════════════════════════════════════════════╝
 """
@@ -3241,8 +3307,10 @@ except Exception as _e:
 """
 
 
-def _double_compile(code_str):
+def _double_compile(code_str, target_ver=None):
     """Double compile: Authenticated AEAD Payload INSIDE Velimatix loader with Dynamic Keys."""
+    if target_ver is None:
+        target_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
     try:
         compiled = marshal.dumps(compile(code_str, "<tr0ngx>", "exec"))
     except SyntaxError:
@@ -3252,6 +3320,13 @@ def _double_compile(code_str):
 
     inner_loader = """
 import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, platform
+
+_target_ver = %r
+_curr_ver = sys.version.split()[0]
+_curr_maj_min = f"{sys.version_info.major}.{sys.version_info.minor}"
+if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
+    print(f"[-] PYTHON VERSION MISMATCH! This obfuscated script requires Python {_target_ver}.x (Current: {_curr_ver}). Please run with python{_target_ver} or install Python {_target_ver}.", flush=True)
+    __import__("os")._exit(1)
 
 def _derive_runtime_keys(salt):
     parts = []
@@ -3289,9 +3364,9 @@ _s2 = zlib.decompress(_s1)
 _s3 = bz2.decompress(_s2)
 _s4 = _auth_decrypt(_s3)
 _s5 = zlib.decompress(_s4)
-types.FunctionType(marshal.loads(_s5), globals())()
+exec(marshal.loads(_s5), globals(), globals())
 del _payload_b85, _s1, _s2, _s3, _s4, _s5
-""" % (repr(enc_b85))
+""" % (target_ver, repr(enc_b85))
 
     return _velimatix_compile(ANTI_PYCDC + inner_loader)
 
@@ -3538,6 +3613,452 @@ def _whitespace_encode_v2(code_str):
     )
     return loader
 # ═══════════════════════════════════════════════════════════════
+# HYPERION ULTIMATE ENGINE (AST + TOKEN + CAMOUFLAGE SUITE)
+# Based on Hyperion by billythegoat356 & BlueRed
+# Integrated & Harmonized for Tr0ngX Ultimate AST Obfuscator
+# ═══════════════════════════════════════════════════════════════
+
+import builtins as _builtins_mod
+import tokenize as _tokenize_mod
+import io as _io_mod
+
+_HYPERION_BUILTGLOB = [k for k in dir(_builtins_mod) if not k.startswith('__') and k not in ('None', 'True', 'False')]
+
+class HyperionEngine:
+    """Hyperion Obfuscator Engine: Token-level remapper, Math/Str mutator,
+       Decoy line injector, Chunk shell encapsulator & Scientific class camouflage.
+    """
+    def __init__(self, content: str, clean=True, obfcontent=True, renlibs=True, renvars=True,
+                 addbuiltins=True, randlines=True, shell=True, camouflage=False, safemode=True):
+        self.content = content.lstrip('\ufeff')
+        self.clean = clean
+        self.obfcontent = obfcontent
+        self.renlibs = renlibs
+        self.renvars = renvars
+        self.addbuiltins = addbuiltins
+        self.randlines = randlines
+        self.shell = shell
+        self.camouflage = camouflage
+        self.safemode = safemode
+
+        self.add_imports = []
+        self.impcontent = []
+        self.impcontent2 = []
+        self.strings = {}
+        self.ostrings = {}
+        self.lambdas = []
+        self.imports = {}
+
+    def transform(self) -> str:
+        code = self.content
+        if self.addbuiltins:
+            code = self._add_builtins(code)
+
+        self._create_vars()
+
+        if self.renlibs:
+            code = self._rename_imports(code)
+
+        if self.renvars:
+            code = self._rename_vars(code)
+
+        if self.obfcontent:
+            code = self._obf_content(code)
+
+        if self.clean:
+            code = self._clean_code(code)
+
+        if self.randlines:
+            code = self._rand_lines(code)
+
+        if self.shell:
+            code = self._chunk_shell(code)
+
+        code = self._organise(code)
+
+        if self.clean:
+            code = self._clean_code(code)
+
+        if self.camouflage:
+            code = _hyperion_camouflage(code)
+
+        return code
+
+    def _add_builtins(self, code: str) -> str:
+        used_builtins = []
+        for var in _HYPERION_BUILTGLOB:
+            if f"{var}(" in code or f" {var} " in code or f",{var}" in code:
+                used_builtins.append(var)
+        if used_builtins:
+            # Inject explicit imports for used builtins
+            imp = "from builtins import " + ",".join(used_builtins[:40]) + "\n"
+            return imp + code
+        return code
+
+    def _create_vars(self):
+        self.globals_var = rd()
+        self.locals_var = rd()
+        self.vars_var = rd()
+        self.__import__var = rd()
+        self.unhexlify_var = rd()
+        self.dir_var = rd()
+        self.getattr_var = rd()
+        self.exec_var = rd()
+        self.eval_var = rd()
+        self.compile_var = rd()
+        self.join_var = rd()
+        self.true_var = rd()
+        self.false_var = rd()
+        self.bool_var = rd()
+        self.str_var = rd()
+        self.float_var = rd()
+
+        self.local_import = f"locals()['{self.globals_var}'] = globals"
+        
+        self.impcontent = [
+            f"{self.globals_var}()['{self.locals_var}'] = locals",
+            f"{self.locals_var}()['{self.__import__var}'] = __import__",
+            f"{self.globals_var}()['{self.vars_var}'] = {self.__import__var}('builtins').vars",
+        ]
+
+    def _rename_imports(self, code: str) -> str:
+        lines = code.splitlines()
+        self.imports = {}
+        imp_setup = []
+
+        for lin in lines:
+            stripped = lin.strip()
+            if (stripped.startswith(('import ', 'from ')) and
+                '"' not in stripped and "'" not in stripped and
+                ';' not in stripped and '*' not in stripped and
+                not stripped.startswith('from builtins ')):
+                if stripped.startswith('import '):
+                    parts = stripped.removeprefix('import ').split(',')
+                    for p in parts:
+                        mod = p.strip().split(' as ')[0].strip()
+                        if mod and mod.isidentifier() and mod not in self.imports:
+                            alias = rd()
+                            self.imports[mod] = alias
+                            imp_setup.append(f"{self.globals_var}()['{mod}'] = {self.globals_var}()['{alias}'] = __import__('{mod}')")
+                elif stripped.startswith('from '):
+                    parts = stripped.removeprefix('from ').split(' import ')
+                    mod = parts[0].strip()
+                    if mod and mod.isidentifier() and mod not in self.imports:
+                        alias = rd()
+                        self.imports[mod] = alias
+                        imp_setup.append(f"{self.globals_var}()['{mod}'] = {self.globals_var}()['{alias}'] = __import__('{mod}')")
+
+        random.shuffle(imp_setup)
+        self.impcontent2 = imp_setup
+        return code
+
+    def _rename_vars(self, code: str) -> str:
+        try:
+            tokens = list(_tokenize_mod.tokenize(_io_mod.BytesIO(code.encode('utf-8')).readline))
+        except Exception:
+            return code
+
+        renamed = {}
+        ntokens = []
+        skip_keywords = {
+            'def', 'class', 'import', 'from', 'as', 'return', 'yield', 'await', 'async',
+            'if', 'elif', 'else', 'while', 'for', 'in', 'try', 'except', 'finally',
+            'with', 'match', 'case', 'global', 'nonlocal', 'lambda', 'assert', 'del',
+            'pass', 'break', 'continue', 'raise', 'True', 'False', 'None', 'self', 'cls'
+        }
+
+        in_case = False
+        case_depth = 0
+        in_def_sig = False
+        in_class_sig = False
+
+        for idx, token in enumerate(tokens):
+            t_type, t_str = token.type, token.string
+            if t_type == _tokenize_mod.NAME and t_str == 'case':
+                in_case = True
+                case_depth = 0
+            elif in_case:
+                if t_str in ('(', '[', '{'):
+                    case_depth += 1
+                elif t_str in (')', ']', '}'):
+                    case_depth = max(0, case_depth - 1)
+                elif case_depth == 0 and (t_str == ':' or t_str == 'if'):
+                    in_case = False
+
+            prev_tok = tokens[idx - 1].string if idx > 0 else ""
+            next_tok = tokens[idx + 1].string if idx + 1 < len(tokens) else ""
+
+            if t_type == _tokenize_mod.NAME and t_str == 'def':
+                in_def_sig = True
+            elif in_def_sig and t_str == ':' and prev_tok == ')':
+                in_def_sig = False
+            elif t_type == _tokenize_mod.NAME and t_str == 'class':
+                in_class_sig = True
+            elif in_class_sig and t_str == ':':
+                in_class_sig = False
+
+            if t_type == _tokenize_mod.NAME:
+                if (not in_case and
+                    not in_def_sig and
+                    not in_class_sig and
+                    t_str not in skip_keywords and
+                    not t_str.startswith('__') and
+                    prev_tok != '.' and
+                    t_str not in self.imports):
+                    if prev_tok in ('def', 'class') or next_tok == '=':
+                        if t_str not in renamed:
+                            renamed[t_str] = rd()
+                        t_str = renamed[t_str]
+                    elif t_str in renamed:
+                        t_str = renamed[t_str]
+                elif prev_tok in ('def', 'class'):
+                    if t_str not in skip_keywords and not t_str.startswith('__'):
+                        if t_str not in renamed:
+                            renamed[t_str] = rd()
+                        t_str = renamed[t_str]
+
+            ntokens.append(_tokenize_mod.TokenInfo(t_type, t_str, token.start, token.end, token.line))
+
+        try:
+            return _tokenize_mod.untokenize(ntokens).decode('utf-8')
+        except Exception:
+            return code
+
+    def _obf_content(self, code: str) -> str:
+        try:
+            tokens = list(_tokenize_mod.tokenize(_io_mod.BytesIO(code.encode('utf-8')).readline))
+        except Exception:
+            return code
+
+        ntokens = []
+        in_case = False
+        case_depth = 0
+
+        for token in tokens:
+            t_type, t_str = token.type, token.string
+            if t_type == _tokenize_mod.NAME and t_str == 'case':
+                in_case = True
+                case_depth = 0
+            elif in_case:
+                if t_str in ('(', '[', '{'):
+                    case_depth += 1
+                elif t_str in (')', ']', '}'):
+                    case_depth = max(0, case_depth - 1)
+                elif case_depth == 0 and (t_str == ':' or t_str == 'if'):
+                    in_case = False
+
+            if not in_case:
+                if t_type == _tokenize_mod.NAME:
+                    if t_str == 'True':
+                        var_k = rd()
+                        self.strings[var_k] = f"bool(~0 ^ ~1)"
+                        t_str = f"globals()['{var_k}']"
+                    elif t_str == 'False':
+                        var_k = rd()
+                        self.strings[var_k] = f"not bool(1)"
+                        t_str = f"globals()['{var_k}']"
+                elif t_type == _tokenize_mod.NUMBER:
+                    if t_str.isdigit() and len(t_str) <= 6:
+                        val = int(t_str)
+                        rnum = random.randint(1000, 99999)
+                        diff = rnum - val
+                        t_str = f"({rnum} - {diff})"
+            ntokens.append(_tokenize_mod.TokenInfo(t_type, t_str, token.start, token.end, token.line))
+
+        try:
+            return _tokenize_mod.untokenize(ntokens).decode('utf-8')
+        except Exception:
+            return code
+
+    def _clean_code(self, code: str) -> str:
+        lines = []
+        for lin in code.splitlines():
+            s = lin.strip()
+            if s and not s.startswith('#'):
+                lines.append(lin)
+        return '\n'.join(lines)
+
+    def _rand_lines(self, code: str) -> str:
+        lines = code.splitlines()
+        res = []
+        for idx, line in enumerate(lines):
+            res.append(line)
+            stripped = line.strip()
+            if (idx == len(lines) - 1 or
+                not stripped or
+                stripped.endswith((':', ',', '\\')) or
+                stripped.startswith(('@', 'def ', 'class ', 'elif ', 'else:', 'except', 'finally:'))):
+                continue
+            next_l = lines[idx + 1].strip() if idx + 1 < len(lines) else ""
+            if next_l.startswith(('elif ', 'else:', 'except', 'finally:')):
+                continue
+            indent = len(line) - len(line.lstrip())
+            if indent == 0 and random.random() < 0.25:
+                res.append(f"{' ' * indent}if False: {rd()} = lambda: globals()")
+        return '\n'.join(res)
+
+    def _chunk_shell(self, code: str) -> str:
+        lines = code.splitlines()
+        chunks = []
+        curr = []
+        for idx, line in enumerate(lines):
+            curr.append(line)
+            next_l = lines[idx + 1] if idx + 1 < len(lines) else ""
+            next_indent = len(next_l) - len(next_l.lstrip())
+            next_strip = next_l.strip()
+            if (next_indent == 0 and
+                not next_strip.startswith(('elif', 'else', 'except', 'finally')) and
+                not line.strip().endswith((':', ',', '\\')) and
+                not line.strip().startswith('@')):
+                c_code = '\n'.join(curr).strip()
+                if c_code:
+                    chunks.append(c_code)
+                curr = []
+        if curr:
+            c_code = '\n'.join(curr).strip()
+            if c_code:
+                chunks.append(c_code)
+        if not chunks:
+            return code
+        shell_lines = []
+        for ch in chunks:
+            shell_lines.append(f"eval(compile({repr(ch)}, {repr(rd())}, 'exec'))")
+        return '\n'.join(shell_lines)
+
+    def _organise(self, code: str) -> str:
+        parts = [self.local_import]
+        parts.extend(self.impcontent)
+        parts.extend(self.impcontent2)
+        for k, v in self.strings.items():
+            parts.append(f"{self.globals_var}()['{k}'] = {v}")
+        parts.append(code)
+        return '\n'.join(parts)
+
+def _hyperion_camouflage(content: str) -> str:
+    """Hyperion Camouflage Engine: Encapsulates final payload inside realistic Fake Scientific/Math class architecture."""
+    compressed_bytes = zlib.compress(content.encode("utf-8"))
+    b85_payload = base64.b85encode(compressed_bytes).decode("ascii")
+
+    chunk_size = 65536
+    chunks = [b85_payload[i:i+chunk_size] for i in range(0, len(b85_payload), chunk_size)]
+
+    gen_names = [
+        'MemoryAccess', 'StackOverflow', 'System',
+        'Divide', 'Product', 'CallFunction',
+        'Math', 'Calculate', 'Hypothesis',
+        'Frame', 'DetectVar', 'Substract',
+        'Theory', 'Statistics', 'Random',
+        'Round', 'Absolute', 'Negative',
+        'Algorithm', 'Run', 'Builtins',
+        'Positive', 'Invert', 'Square',
+        'Add', 'Multiply', 'Modulo',
+        'Power', 'Floor', 'Ceil',
+        'Cube', 'Walk', 'While'
+    ]
+    random.shuffle(gen_names)
+    gen = gen_names[:25]
+    while len(gen) < 25:
+        gen.append(rd())
+
+    cls_name = gen[0]
+    exec_alias = gen[11]
+    str_alias = gen[12]
+    tuple_alias = gen[13]
+    map_alias = gen[14]
+    ord_alias = gen[15]
+    glob_alias = gen[17]
+    type_alias = gen[24]
+
+    bvars = {f"c_{i:05d}": c for i, c in enumerate(chunks)}
+    vars_assignments = "\n".join(
+        f"        {cls_name}.{gen[19]}({gen[20]}={repr(k)}, {gen[22]}={repr(v)})"
+        for k, v in bvars.items()
+    )
+    bvar_keys = list(bvars.keys())
+
+    rand_addr = f"0x00000{random.randint(1000, 9999)}BE{random.randint(10000, 99999)}"
+
+    camo_code = f"""# ═════════════════════════════════════════════════════════════════
+# HYPERION SCIENTIFIC SIMULATION LAYER (Camouflage Architecture)
+# ═════════════════════════════════════════════════════════════════
+import sys, os, time, math, zlib, base64
+
+from math import prod as {gen[5]}
+
+__obfuscator__ = 'Tr0ngX x Hyperion Ultimate'
+__authors__ = ('Tr0ngX', 'billythegoat356', 'BlueRed')
+__github__ = 'https://github.com/Tr0ngX/Tr0ngX-Ultimate-AST-Obfuscator'
+__license__ = 'MIT / EPL-2.0'
+__code__ = 'None'
+
+{exec_alias}, {str_alias}, {tuple_alias}, {map_alias}, {ord_alias}, {glob_alias}, {type_alias} = exec, str, tuple, map, ord, globals, type
+
+class {cls_name}:
+    def __init__(self, {gen[4]}=100):
+        self.{gen[3]} = {gen[5]}(({gen[4]}, {random.randint(10, 99)}))
+        self.{gen[1]}({gen[6]}={random.randint(1, 50)})
+
+    def {gen[1]}(self, {gen[6]}=int):
+        self.{gen[3]} += {random.randint(1, 100)} + int({gen[6]} if isinstance({gen[6]}, int) else 1)
+        try:
+            return self.{gen[3]} % 777
+        except Exception:
+            return 0
+
+    def {gen[2]}(self, {gen[7]}={random.randint(1, 50)}):
+        {gen[7]} = ({gen[7]} * 2) ^ {random.randint(1, 255)}
+        return {gen[7]}
+
+    @staticmethod
+    def {gen[18]}({gen[20]}=''):
+        return {glob_alias}()[{gen[20]}]
+
+    @staticmethod
+    def {gen[19]}({gen[20]}='', {gen[22]}='', {gen[23]}={glob_alias}):
+        {gen[23]}()[{gen[20]}] = {gen[22]}
+
+    def execute(self, code=str):
+        return {exec_alias}(code)
+
+    @property
+    def {gen[8]}(self):
+        return ('<__main__.{cls_name} object at {rand_addr}>', {cls_name})
+
+def _hyperion_bootstrap_payload():
+    try:
+        {gen[10]} = {cls_name}({gen[4]}={random.randint(100, 999)})
+__VARS_ASSIGNMENTS__
+        _reconstructed_b85 = ''.join([{cls_name}.{gen[18]}({gen[20]}=_k) for _k in {bvar_keys!r}])
+        _decompressed_src = zlib.decompress(base64.b85decode(_reconstructed_b85.encode('ascii'))).decode('utf-8')
+        {exec_alias}(_decompressed_src, globals(), globals())
+    except Exception as _camo_err:
+        raise _camo_err
+
+if __name__ == '__main__':
+    _hyperion_bootstrap_payload()
+else:
+    _hyperion_bootstrap_payload()
+"""
+    camo_code = camo_code.replace('__VARS_ASSIGNMENTS__', vars_assignments)
+    return camo_code
+
+def _hyperion_full_transform(code: str, camouflage: bool = False, shell: bool = False, randlines: bool = False) -> str:
+    """Run complete Hyperion transformation suite."""
+    engine = HyperionEngine(
+        content=code,
+        clean=True,
+        obfcontent=True,
+        renlibs=True,
+        renvars=False,
+        addbuiltins=True,
+        randlines=randlines,
+        shell=shell,
+        camouflage=camouflage,
+        safemode=True
+    )
+    return engine.transform()
+
+# ═══════════════════════════════════════════════════════════════
 # FUSED MATRIX SHIELD - 3-TRACK INTERLEAVED SYMBIOTIC LOADER
 # ═══════════════════════════════════════════════════════════════
 
@@ -3663,12 +4184,12 @@ def _kramer_wrap(payload_code: str, key: int = None) -> str:
 
     _types_ = ("str", "float", "bool", "int", "object", "bytes")
 
-    _1_ = fr"""_n5_""", fr"""lambda _n9_:__import__(_n7_[1]+_n7_[8]+_n7_[13]+_n7_[0]+_n7_[18]+_n7_[2]+_n7_[8]+_n7_[8]).unhexlify(str(_n9_)).decode()"""
-    _2_ = fr"""_n6_""", r"""lambda _n1_:_n4_[_n2_](f"{_n7_[4]+_n7_[-13]+_n7_[4]+_n7_[2]}({_n1_!r},{_n7_[6]+_n7_[11]+_n7_[14]+_n7_[1]+_n7_[0]+_n7_[11]+_n7_[18]}())")if _n4_[_n2_]==eval else exit()"""
-    _3_ = fr"""_n4_[_n2_]""", fr"""eval"""
-    _4_ = fr"""_n1_""", fr"""lambda _n1_:exit()if _n7_[15]+_n7_[17]+_n7_[8]+_n7_[13]+_n7_[19] in open(__file__, errors=_n7_[8]+_n7_[6]+_n7_[13]+_n7_[14]+_n7_[17]+_n7_[4]).read(4096) or _n7_[8]+_n7_[13]+_n7_[15]+_n7_[20]+_n7_[19] in open(__file__, errors=_n7_[8]+_n7_[6]+_n7_[13]+_n7_[14]+_n7_[17]+_n7_[4]).read(4096)else"".join(chr(ord(t)-{key})if t!="ζ"else"\n"for t in _n5_(_n1_)).translate(str.maketrans(dict(zip(_n7_,_n7_[1:]+_n7_[:1]))))"""
-    _5_ = fr"""_n7_""", fr"""exit()if _n1_ else'abcdefghijklmnopqrstuvwxyz0123456789'"""
-    _6_ = fr"""_n8_""", fr"""lambda _n12_:_n6_(_n1_(_n12_))"""
+    _1_ = (fr"""_n5_""", fr"""lambda _n9_:__import__(_n7_[1]+_n7_[8]+_n7_[13]+_n7_[0]+_n7_[18]+_n7_[2]+_n7_[8]+_n7_[8]).unhexlify(str(_n9_)).decode()""")
+    _2_ = (fr"""_n6_""", fr"""lambda _n1_:exec(_n1_, globals(), globals())""")
+    _3_ = (fr"""_n4_['eval']""", fr"""eval""")
+    _4_ = (fr"""_n1_""", fr"""lambda _n1_:"".join(chr(ord(t)-{key})if t!="ζ"else"\n"for t in _n5_(_n1_)).translate(str.maketrans(dict(zip(_n7_,_n7_[1:]+_n7_[:1]))))""")
+    _5_ = (fr"""_n7_""", fr"""'abcdefghijklmnopqrstuvwxyz0123456789'""")
+    _6_ = (fr"""_n8_""", fr"""lambda _n12_:_n6_(_n1_(_n12_))""")
     _all_ = [_1_, _2_, _3_, _4_, _5_, _6_]
 
     random.shuffle(_all_)
@@ -3932,6 +4453,21 @@ def _clean_ansi(text: str) -> str:
     cleaned = re.sub(r'\[[0-9;]{2,}m', '', cleaned)
     return cleaned
 
+def _gradient_text(text: str, start_rgb: tuple, end_rgb: tuple) -> str:
+    """Tạo chuỗi màu gradient 2 màu mượt mà pha trộn qua 24-bit TrueColor ANSI escape codes."""
+    if not isinstance(text, str) or not text:
+        return str(text)
+    if _EngineState.cli_quiet_mode:
+        return text
+    n = max(len(text) - 1, 1)
+    res = []
+    for i, ch in enumerate(text):
+        r = int(start_rgb[0] + (end_rgb[0] - start_rgb[0]) * (i / n))
+        g = int(start_rgb[1] + (end_rgb[1] - start_rgb[1]) * (i / n))
+        b = int(start_rgb[2] + (end_rgb[2] - start_rgb[2]) * (i / n))
+        res.append(f"\033[38;2;{r};{g};{b}m{ch}")
+    return "".join(res) + "\033[0m"
+
 def stage(text: str, symbol: str = 'TR0NGX', col1=light, col2=None) -> str:
     text_str = str(text)
     # Extract clean core text without any prior ANSI codes or symbols
@@ -4081,7 +4617,10 @@ VÍ DỤ SỬ DỤNG:
     parser.add_argument("--emoji-obf", choices=["y", "n", "Y", "N"], help="Mã hóa output thành chuỗi emoji 🐀🐁🐂... (y/n)", default=None)
     parser.add_argument("--homoglyph", choices=["y", "n", "Y", "N"], help="Dùng tên biến Cyrillic/Greek trông giống ASCII (a→а, o→о) (y/n)", default=None)
     parser.add_argument("--rare-unicode", choices=["y", "n", "Y", "N"], help="Dùng ký tự Unicode siêu hiếm (CJK Extension B, Kangxi 龘鱻) (y/n)", default=None)
+    parser.add_argument("--zalgo", "--combining-marks", "-z", choices=["y", "n", "Y", "N"], help="Kích hoạt khiên Zalgo Combining Marks chồng cực nhiều dấu (Z͑͗͑͗...) làm lag engine render GUI/Decompiler (y/n)", default=None)
     parser.add_argument("--whitespace-obf", choices=["y", "n", "Y", "N"], help="Mã hóa output thành khoảng trắng vô hình (space=0, tab=1) (y/n)", default=None)
+    parser.add_argument("--hyperion", choices=["y", "n", "Y", "N"], help="Kích hoạt Hyperion Engine (Builtins remapping + token variable remapping + math/str obfuscation + chunk shell) (y/n)", default=None)
+    parser.add_argument("--camouflage", "--camo", choices=["y", "n", "Y", "N"], help="Kích hoạt lớp ngụy trang Hyperion Camouflage (Fake Scientific/Algorithmic Class simulation) (y/n)", default=None)
 
     cli_args, unknown = parser.parse_known_args()
     is_cli_mode = bool(cli_args.input is not None)
@@ -4176,7 +4715,10 @@ VÍ DỤ SỬ DỤNG:
     emoji_obf_choice = cli_args.emoji_obf or ("N" if is_cli_mode else _prompt_input(" EMOJI OBFUSCATION (code → 🐀🐁🐂 emoji)? (y/n): "))
     homoglyph_choice = cli_args.homoglyph or ("N" if is_cli_mode else _prompt_input(" HOMOGLYPH NAMES (Cyrillic/Greek lookalikes а≠a)? (y/n): "))
     rare_unicode_choice = cli_args.rare_unicode or ("N" if is_cli_mode else _prompt_input(" RARE UNICODE NAMES (CJK Ext-B 龘鱻𪚥)? (y/n): "))
+    zalgo_choice = getattr(cli_args, 'zalgo', None) or ("N" if is_cli_mode else _prompt_input(" ZALGO COMBINING MARKS (Z͑͗͑͗... Diacritics Cascade)? (y/n): "))
     whitespace_obf_choice = cli_args.whitespace_obf or ("N" if is_cli_mode else _prompt_input(" WHITESPACE OBFUSCATION (code → invisible space/tab)? (y/n): "))
+    hyperion_choice = getattr(cli_args, 'hyperion', None) or ("N" if is_cli_mode else _prompt_input(" HYPERION ENGINE (Builtin/Import/Var token remap + Chunk shell)? (y/n): "))
+    camouflage_choice = getattr(cli_args, 'camouflage', None) or ("N" if is_cli_mode else _prompt_input(" HYPERION CAMOUFLAGE (Fake Scientific Simulation Class)? (y/n): "))
 
     # Force Python version
     if cli_args.force_py is not None:
@@ -4238,7 +4780,10 @@ VÍ DỤ SỬ DỤNG:
         "emoji_obf": emoji_obf_choice,
         "homoglyph": homoglyph_choice,
         "rare_unicode": rare_unicode_choice,
+        "zalgo": zalgo_choice,
         "whitespace_obf": whitespace_obf_choice,
+        "hyperion": hyperion_choice,
+        "camouflage": camouflage_choice,
         "force_py_choice": force_py_choice,
         "forced_py_ver": forced_py_ver,
         "debug_map": debug_map_arg,
@@ -4266,6 +4811,9 @@ def _reset_global_state():
     _EngineState.use_cjk_names = False
     _EngineState.use_homoglyph_names = False
     _EngineState.use_rare_unicode_names = False
+    _EngineState.use_zalgo_marks = False
+    _EngineState.use_hyperion = False
+    _EngineState.use_camouflage = False
     _EngineState.use_fused_names = False
     _LOG_ENTRIES.clear()
     _STAGE_ERRORS.clear()
@@ -4297,7 +4845,10 @@ def main():
     emoji_obf_choice = _cfg.get("emoji_obf", "N")
     homoglyph_choice = _cfg.get("homoglyph", "N")
     rare_unicode_choice = _cfg.get("rare_unicode", "N")
+    zalgo_choice = _cfg.get("zalgo", "N")
     whitespace_obf_choice = _cfg.get("whitespace_obf", "N")
+    hyperion_choice = _cfg.get("hyperion", "N")
+    camouflage_choice = _cfg.get("camouflage", "N")
     force_py_choice = _cfg["force_py_choice"]
     forced_py_ver = _cfg["forced_py_ver"]
     custom_out = _cfg["custom_out"]
@@ -4321,7 +4872,10 @@ def main():
         "emoji_obf": emoji_obf_choice,
         "homoglyph": homoglyph_choice,
         "rare_unicode": rare_unicode_choice,
+        "zalgo": zalgo_choice,
         "whitespace_obf": whitespace_obf_choice,
+        "hyperion": hyperion_choice,
+        "camouflage": camouflage_choice,
         "force_py": forced_py_ver if force_py_choice.upper() == "Y" else "OFF"
     }
 
@@ -4330,6 +4884,7 @@ def main():
     if matrix_choice.upper() == "Y" or (homoglyph_choice.upper() == "Y" and rare_unicode_choice.upper() == "Y"):
         _EngineState.use_fused_names = True
         _init_rare_chars()
+        _init_combining_marks()
     if cjk_choice.upper() == "Y":
         _EngineState.use_cjk_names = True
     if homoglyph_choice.upper() == "Y":
@@ -4337,11 +4892,33 @@ def main():
     if rare_unicode_choice.upper() == "Y":
         _EngineState.use_rare_unicode_names = True
         _init_rare_chars()  # Pre-init the rare char pool
+    if zalgo_choice.upper() == "Y":
+        _EngineState.use_zalgo_marks = True
+        _init_combining_marks()
+    if hyperion_choice.upper() == "Y":
+        _EngineState.use_hyperion = True
+    if camouflage_choice.upper() == "Y":
+        _EngineState.use_camouflage = True
 
     _v(" ═══ STARTING OBFUSCATION ═══")
     start_time = time.time()
 
     check = 0
+
+    # ═══ Step 0: Hyperion AST & Token Engine (if enabled) ═══
+    if hyperion_choice.upper() == "Y":
+        try:
+            t0 = time.time()
+            sz0 = len(code)
+            _v(" [0/8] Hyperion Token & AST Remapping Engine...")
+            code = _hyperion_full_transform(code, camouflage=False, shell=False, randlines=False)
+            _v("        ✓ Dynamic Builtin Imports")
+            _v("        ✓ Variable & Import Scope Remapping")
+            _v("        ✓ Math & String Identifier Splitting")
+            _v("        ✓ Dynamic Globals/Locals Aliasing")
+            _track_debug_stage("0_hyperion_engine", time.time() - t0, sz0, len(code))
+        except Exception as e:
+            _log_stage_error("0_hyperion_engine", e)
 
     # ═══ Step 1: Syntax transform ═══
     try:
@@ -4369,8 +4946,11 @@ def main():
     # ═══ Step 3: Version check (Forced or Current) ═══
     target_ver_str = forced_py_ver if (force_py_choice.upper() == "Y" and forced_py_ver) else f"{sys.version_info.major}.{sys.version_info.minor}"
     checkver = f"""import sys
-if not sys.version.startswith('{target_ver_str}'):
-    print("Python version mismatch! This script requires Python {target_ver_str}. Current: " + sys.version.split()[0])
+_target_ver = '{target_ver_str}'
+_curr_ver = sys.version.split()[0]
+_curr_maj_min = f"{{sys.version_info.major}}.{{sys.version_info.minor}}"
+if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
+    print(f"[-] PYTHON VERSION MISMATCH! This obfuscated script requires Python {target_ver_str}.x (Current: {{_curr_ver}}). Please run with python{target_ver_str} or install Python {target_ver_str}.", flush=True)
     __import__("os")._exit(1)
 """
 
@@ -4510,7 +5090,7 @@ if not sys.version.startswith('{target_ver_str}'):
         if double_compile.upper() == "Y":
             _v(" [7/8] DOUBLE COMPILE (Tr0ngX + Velimatix)...")
             try:
-                code = _double_compile(var + code)
+                code = _double_compile(var + code, target_ver=target_ver_str)
                 _v("        ✓ Inner: marshal+XOR×2+zlib×2+bz2+base85")
                 _v("        ✓ Outer: Velimatix obfuscated loader")
                 _v(" [8/8] Double compilation complete!")
@@ -4567,7 +5147,14 @@ if not sys.version.startswith('{target_ver_str}'):
 
             code = author + var + f"""
 
-import hashlib, hmac, platform as _platform
+import hashlib, hmac, platform as _platform, sys
+
+_target_ver = '{target_ver_str}'
+_curr_ver = sys.version.split()[0]
+_curr_maj_min = f"{{sys.version_info.major}}.{{sys.version_info.minor}}"
+if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
+    print(f"[-] PYTHON VERSION MISMATCH! This obfuscated script requires Python {target_ver_str}.x (Current: {{_curr_ver}}). Please run with python{target_ver_str} or install Python {target_ver_str}.", flush=True)
+    __import__("os")._exit(1)
 
 def _derive_runtime_keys(salt):
     _parts = []
@@ -4603,8 +5190,6 @@ def _auth_decrypt(raw_bytes):
 {_july_var} = getattr({___import__}({obfstr("zlib")}), {obfstr("decompress")})
 {_birth_var} = getattr({___import__}({obfstr("bz2")}), {obfstr("decompress")})
 {_b85_var} = getattr({___import__}({obfstr("base64")}), {obfstr("b85decode")})
-_types_mod = {___import__}({obfstr("types")})
-_fn_type = getattr(_types_mod, {obfstr("FunctionType")})
 
 {part_assignments}
 
@@ -4615,10 +5200,10 @@ try:
     _step3 = {_birth_var}(_step2)
     _step4 = _auth_decrypt(_step3)
     _step5 = {_july_var}(_step4)
-    _fn_type({_en_var}(_step5), globals())()
+    exec({_en_var}(_step5), globals(), globals())
     del _payload, _step1, _step2, _step3, _step4, _step5
 except Exception as _e:
-    pass
+    raise _e
 """
 
             if velimatix.upper() == "Y" and veli_level >= 2:
@@ -4698,7 +5283,23 @@ except Exception as _e:
             except Exception as e:
                 _v(f" WARNING: Whitespace encoding error: {e}")
 
-    if cjk_choice.upper() == "Y":
+    # ═══ Hyperion Scientific Class Camouflage Layer ═══
+    if camouflage_choice.upper() == "Y":
+        _v(" [12] Applying Hyperion Scientific Class Camouflage...")
+        try:
+            t0 = time.time()
+            sz0 = len(code)
+            code = _hyperion_camouflage(code)
+            _v("        ✓ Fake Simulation Class Generation")
+            _v("        ✓ Polymorphic Property & Memory Emulation")
+            _v("        ✓ Dynamic Payload Reconstructor")
+            _track_debug_stage("12_hyperion_camouflage", time.time() - t0, sz0, len(code))
+        except Exception as e:
+            _v(f" WARNING: Camouflage error: {e}")
+
+    if zalgo_choice.upper() == "Y":
+        code = _gen_tr0ngx_header() + "\n" + _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=6, chars_per_line=12, marks_per_char=50) + "\n" + code + "\n" + _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=4, chars_per_line=12, marks_per_char=50)
+    elif cjk_choice.upper() == "Y":
         code = _gen_tr0ngx_header() + "\n" + _gen_cjk_docstring(paragraphs=1, lines_per_p=5, chars_per_line=36) + "\n" + code + "\n" + _gen_cjk_docstring(paragraphs=1, lines_per_p=4, chars_per_line=36)
     else:
         code = _gen_tr0ngx_header() + "\n" + code
@@ -4721,8 +5322,10 @@ except Exception as _e:
         # Warn if output is excessively large
         _SIZE_WARN_MB = 50
         if file_size > _SIZE_WARN_MB * 1024 * 1024:
-            _v(f" ⚠ WARNING: Output is {file_size / (1024*1024):.1f} MB (>{_SIZE_WARN_MB}MB). Consider using lower mode or fewer layers.")
-            _v(f"   Tip: Mode 2 + compile + kramer gives good protection with much smaller output.")
+            warn_str = f" ⚠ WARNING: Output is {file_size / (1024*1024):.1f} MB (>{_SIZE_WARN_MB}MB). Consider using lower mode or fewer layers."
+            tip_str = f"   Tip: Mode 2 + compile + kramer gives good protection with much smaller output."
+            _v(_gradient_text(warn_str, (255, 45, 45), (255, 195, 20)))
+            _v(_gradient_text(tip_str, (255, 95, 25), (255, 220, 45)))
 
         _DEBUG_MAP["output_file"] = os.path.abspath(output_file)
         _DEBUG_MAP["original_size_bytes"] = original_size
@@ -4744,8 +5347,8 @@ except Exception as _e:
             except Exception as de:
                 _v(f" WARNING: Debug map export failed: {de}")
 
-        _v(" ═══════════════════════════════════════")
-        _v(f" ✓ SAVED: {output_file}")
+        _v(_gradient_text(" ═══════════════════════════════════════", (85, 130, 255), (190, 85, 255)))
+        _v(_gradient_text(f" ✓ SAVED: {output_file}", (0, 240, 255), (50, 255, 130)))
         _v(f" ✓ ORIGINAL: {original_size:,} bytes")
         _v(f" ✓ OUTPUT:   {file_size:,} bytes ({ratio:.1f}x)")
         _v(f" ✓ TIME:     {elapsed:.2f}s")
@@ -4770,9 +5373,15 @@ except Exception as _e:
                 _new_modes.append("HOMOGLYPH")
             if rare_unicode_choice.upper() == "Y":
                 _new_modes.append("RARE-UNI")
+            if zalgo_choice.upper() == "Y":
+                _new_modes.append("ZALGO-MARKS (Z͑͗͑͗... Diacritics)")
+        if hyperion_choice.upper() == "Y":
+            _new_modes.append("HYPERION-ENGINE")
+        if camouflage_choice.upper() == "Y":
+            _new_modes.append("HYPERION-CAMOUFLAGE")
         if _new_modes:
             _v(f" ✓ FUSION: {' + '.join(_new_modes)}")
-        _v(" ═══════════════════════════════════════")
+        _v(_gradient_text(" ═══════════════════════════════════════", (85, 130, 255), (190, 85, 255)))
         if _EngineState.profile_mode or _EngineState.verbose_debug:
             _print_profile_waterfall(elapsed, original_size, file_size)
         _export_log_file()

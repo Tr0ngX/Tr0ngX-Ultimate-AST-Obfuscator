@@ -152,6 +152,9 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--cjk-vars` | Use CJK Chinese identifiers & PyCool docstrings | `y` / `n` |
 | `--homoglyph` | Use Cyrillic/Greek homoglyph variable names | `y` / `n` |
 | `--rare-unicode` | Use Rare Unicode characters (CJK Ext-B, Kangxi, Hieroglyphs) | `y` / `n` |
+| `--zalgo`, `-z` | Enable Extreme Zalgo Combining Marks Shield (Heavy Diacritics Stacking - Z͑͗͑͗...) | `y` / `n` |
+| `--hyperion` | Enable Full Hyperion Engine (Builtins remapping + token variable remapping + math/str obfuscation + chunk shell) | `y` / `n` |
+| `--camouflage`, `--camo` | Enable Hyperion Camouflage Layer (Fake Scientific/Algorithmic Class simulation) | `y` / `n` |
 | `--force-py` | Target specific Python version check (`off` to disable) | `3.10`, `3.11`, `3.12`, etc. |
 | `--max-ram` | Capping maximum RAM consumption (in MB) | e.g. `2048` |
 | `--cores` | Capping maximum CPU cores used | e.g. `2`, `4` |
