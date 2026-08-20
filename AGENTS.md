@@ -59,7 +59,10 @@ graph TD
 | `--moreobf` | Core AST | Inject extra AST dead code and try-except decoy blocks | `y` / `n` |
 | `--antidebug` | Protection | Inject anti-debugging watchdog daemon, Win32 PEB/remote debug checks, and hook blockers | `y` / `n` |
 | `--antivm` | Protection | Inject Anti-VM & Automated Sandbox Detection matrix (CPU, screen metrics, drivers, registry) | `y` / `n` |
+| `--anti-dump` | Protection | Inject in-memory anti-dump shield, GC object scrubber, and code metadata neutralizer | `y` / `n` |
 | `--selfmod` | Protection | Inject runtime signature mutating self-modification layer | `y` / `n` |
+| `--math-opaque` | Core AST | Inject number-theoretic mathematical opaque predicates (Quadratic Non-Residues mod 7, Euler invariants) | `y` / `n` |
+| `--dyn-strings` | Core AST | Dynamic per-callsite string XOR encryption with AST-coordinate derived keys | `y` / `n` |
 | `--compile` | Crypto | Multi-layer authenticated AEAD compilation (Marshal + XOR + Zlib + Bz2) | `y` / `n` |
 | `--password` | Crypto | Password for Argon2id + ChaCha20Poly1305 / PBKDF2 authenticated payload encryption | `<string>` |
 | `--password-file` | Crypto | Path to external file containing encryption password | `<filepath>` |

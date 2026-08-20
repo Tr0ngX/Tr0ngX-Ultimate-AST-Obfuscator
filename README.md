@@ -141,7 +141,10 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--moreobf` | Extra string & integer mutation pass | `y` / `n` |
 | `--antidebug` | Inject multi-vector Anti-Debug watchdog shield | `y` / `n` |
 | `--antivm` | Inject Anti-VM & Automated Sandbox Detection matrix (CPU, screen metrics, drivers, registry) | `y` / `n` |
+| `--anti-dump` | Inject in-memory anti-dump shield, GC object scrubber, and code metadata neutralizer | `y` / `n` |
 | `--selfmod` | Inject self-modifying code & anti-tamper layer | `y` / `n` |
+| `--math-opaque` | Inject number-theoretic mathematical opaque predicates (Quadratic Non-Residues mod 7, Euler invariants) | `y` / `n` |
+| `--dyn-strings` | Dynamic per-callsite string XOR encryption with AST-coordinate derived keys | `y` / `n` |
 | `--compile` | Authenticated AEAD bytecode compilation | `y` / `n` |
 | `--password` | Password for Argon2id + ChaCha20Poly1305 / PBKDF2 authenticated payload encryption | `<string>` |
 | `--password-file` | File path containing encryption password (avoids process table snooping) | `<filepath>` |

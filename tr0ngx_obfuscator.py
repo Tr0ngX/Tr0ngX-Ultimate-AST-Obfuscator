@@ -60,6 +60,9 @@ class _EngineState:
     use_camouflage = False
     use_fused_names = False
     encryption_password = None
+    use_math_opaque = False
+    use_dyn_strings = False
+    use_anti_dump = False
     custom_seed = None
     max_output_size = None
 
@@ -303,6 +306,8 @@ def _validate_and_sanitize_output_path(filepath: str, input_file: str = None) ->
 
 def _validate_input_source(code: str, max_size_mb: int = 25, max_ast_depth: int = 500):
     """Validate input source file to prevent memory exhaustion DoS and AST recursion crashes (TRX-AST-404/405)."""
+    if not code or not code.strip():
+        raise ValueError("Input source file is empty (0 bytes). Nothing to obfuscate.")
     raw_bytes_len = len(code.encode('utf-8', errors='ignore'))
     if raw_bytes_len > max_size_mb * 1024 * 1024:
         raise ValueError(f"Input source size ({raw_bytes_len:,} bytes) exceeds maximum security limit of {max_size_mb} MB.")
@@ -871,6 +876,50 @@ class BiOpaqueTransformer():
             return node
 
 
+def _gen_opaque_zero_ast():
+    """Generates an AST node evaluating to 0 at runtime using non-literal invariant constructs that break static AST constant folding (TRX-AST-B1)."""
+    kind = secrets.randbelow(4)
+    if kind == 0:
+        k_val = secrets.randbelow(300) + 12
+        return ast.BinOp(
+            left=ast.BinOp(
+                left=ast.BinOp(left=ast.Constant(value=k_val), op=ast.Pow(), right=ast.Constant(value=3)),
+                op=ast.Sub(),
+                right=ast.Constant(value=k_val)
+            ),
+            op=ast.Mod(),
+            right=ast.Constant(value=6)
+        )
+    elif kind == 1:
+        return ast.BinOp(
+            left=ast.Call(
+                func=ast.Name(id='len'),
+                args=[ast.Attribute(value=ast.Call(func=ast.Name(id='type'), args=[ast.Constant(value=0)], keywords=[]), attr='__name__')],
+                keywords=[]
+            ),
+            op=ast.Sub(),
+            right=ast.Constant(value=3)
+        )
+    elif kind == 2:
+        n_val = secrets.randbelow(300) + 15
+        return ast.BinOp(
+            left=ast.BinOp(
+                left=ast.Constant(value=n_val),
+                op=ast.Mult(),
+                right=ast.BinOp(left=ast.Constant(value=n_val), op=ast.Add(), right=ast.Constant(value=1))
+            ),
+            op=ast.Mod(),
+            right=ast.Constant(value=2)
+        )
+    else:
+        x_val = secrets.randbelow(0xFFFF) + 200
+        return ast.BinOp(
+            left=ast.Constant(value=x_val),
+            op=ast.BitAnd(),
+            right=ast.UnaryOp(op=ast.Invert(), operand=ast.Constant(value=x_val))
+        )
+
+
 class MutatorUtils:
     alphabet = ""
     length = 16
@@ -924,6 +973,7 @@ class MutatorUtils:
             if keys[0] == key:
                 continue
             binopt = ast.BinOp(left=binopt, op=ast.BitXor(), right=ast.Constant(value=key))
+        binopt = ast.BinOp(left=binopt, op=ast.BitXor(), right=_gen_opaque_zero_ast())
         return binopt
 
     def generate_binopt_float(value: float, keys):
@@ -1471,6 +1521,281 @@ class BuiltinRenamerTransformer():
         random.shuffle(setup_stmts)
         tree.body = setup_stmts + tree.body
         return tree
+
+
+# ═══════════════════════════════════════════════════════════════
+# NUMBER-THEORETIC MATHEMATICAL OPAQUE PREDICATES (MODULE B)
+# ═══════════════════════════════════════════════════════════════
+
+class MathOpaqueTransformer(ast.NodeTransformer):
+    """Injects number-theoretic opaque invariants (Quadratic Non-Residues mod 7, Coprimality, Euler) to force path explosion in symbolic execution / SMT solvers (TRX-AST-B4/FEAT-002)."""
+
+    def __init__(self, alphabet: str = None, length: int = 12):
+        self.alphabet = alphabet or string.ascii_lowercase
+        self.length = length
+
+    def _gen_opaque_true_test(self) -> ast.AST:
+        """Generates an expression that is mathematically proven to be ALWAYS TRUE at runtime."""
+        pick = secrets.randbelow(3)
+        if pick == 0:
+            x_val = secrets.randbelow(1000) + 11
+            return ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(left=ast.Constant(value=x_val), op=ast.Mult(), right=ast.Constant(value=x_val)),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=7)
+                ),
+                ops=[ast.NotEq()],
+                comparators=[ast.Constant(value=3)]
+            )
+        elif pick == 1:
+            k_val = secrets.randbelow(500) + 13
+            return ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(
+                        left=ast.BinOp(left=ast.Constant(value=k_val), op=ast.Pow(), right=ast.Constant(value=3)),
+                        op=ast.Sub(),
+                        right=ast.Constant(value=k_val)
+                    ),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=6)
+                ),
+                ops=[ast.Eq()],
+                comparators=[ast.Constant(value=0)]
+            )
+        else:
+            n_val = secrets.randbelow(500) + 9
+            return ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(
+                        left=ast.Constant(value=n_val),
+                        op=ast.Mult(),
+                        right=ast.BinOp(left=ast.Constant(value=n_val), op=ast.Add(), right=ast.Constant(value=1))
+                    ),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=2)
+                ),
+                ops=[ast.Eq()],
+                comparators=[ast.Constant(value=0)]
+            )
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        self.generic_visit(node)
+        if node.name.startswith("__") or len(node.body) < 2:
+            return node
+        
+        new_body = []
+        for stmt in node.body:
+            if secrets.randbelow(100) < 60 and not isinstance(stmt, (ast.Return, ast.Yield, ast.YieldFrom, ast.Global, ast.Nonlocal, ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef)):
+                bogus_var = rd('biopaque')
+                bogus_stmt = ast.Assign(
+                    targets=[ast.Name(id=bogus_var)],
+                    value=ast.BinOp(
+                        left=ast.Constant(value=secrets.randbelow(0xFFFFFF)),
+                        op=ast.BitXor(),
+                        right=ast.Constant(value=secrets.randbelow(0xFFFFFF))
+                    ),
+                    lineno=None
+                )
+                wrapped_if = ast.If(
+                    test=self._gen_opaque_true_test(),
+                    body=[stmt],
+                    orelse=[bogus_stmt]
+                )
+                ast.copy_location(wrapped_if, stmt)
+                ast.fix_missing_locations(wrapped_if)
+                new_body.append(wrapped_if)
+            else:
+                new_body.append(stmt)
+        node.body = new_body
+        return node
+
+def _math_opaque_obf(code_str: str) -> str:
+    """Apply Number-Theoretic Mathematical Opaque Predicates to code."""
+    tree = ast.parse(code_str)
+    transformer = MathOpaqueTransformer()
+    tree = transformer.visit(tree)
+    ast.fix_missing_locations(tree)
+    return ast.unparse(tree)
+
+
+# ═══════════════════════════════════════════════════════════════
+# DYNAMIC PER-CALLSITE STRING XOR ENCRYPTION (MODULE C)
+# ═══════════════════════════════════════════════════════════════
+
+class DynamicStringXORTransformer(ast.NodeTransformer):
+    """Replaces string literals with dynamic per-callsite XOR decryption expressions derived from AST coordinates (TRX-AST-B3/FEAT-003)."""
+
+    def __init__(self, master_seed: int = None):
+        self.master_seed = master_seed or (secrets.randbelow(0x7FFFFFFF) + 1000)
+
+    def visit_JoinedStr(self, node: ast.JoinedStr):
+        # In Python AST, elements inside JoinedStr (f-strings) must stay as FormattedValue or Constant string.
+        for idx, val in enumerate(node.values):
+            if isinstance(val, ast.FormattedValue):
+                node.values[idx] = self.visit(val)
+        return node
+
+    def visit_match_case(self, node: ast.match_case):
+        # In Python 3.10+, match patterns cannot contain Call/Lambda expressions
+        if node.guard:
+            node.guard = self.visit(node.guard)
+        node.body = [self.visit(stmt) for stmt in node.body]
+        return node
+
+    def visit_Constant(self, node: ast.Constant):
+        if isinstance(node.value, str) and len(node.value) > 0:
+            if (node.value.startswith("__") and node.value.endswith("__")) or len(node.value) > 20000:
+                return node
+            
+            val_bytes = node.value.encode('utf-8')
+            lineno = getattr(node, 'lineno', 1) or 1
+            col_offset = getattr(node, 'col_offset', 0) or 0
+            
+            site_key = (self.master_seed ^ (lineno * 31337) ^ (col_offset * 101) ^ len(val_bytes)) & 0xFFFFFFFF
+            
+            enc_bytes = bytearray()
+            for idx, b in enumerate(val_bytes):
+                k_byte = (site_key + idx * 31337 + (idx ^ 0x5A)) & 0xFF
+                enc_bytes.append(b ^ k_byte)
+            
+            enc_bytes_list = list(enc_bytes)
+            
+            v_s = _rd()
+            v_k = _rd()
+            v_i = _rd()
+            v_b = _rd()
+            
+            dec_expr = ast.Call(
+                func=ast.Lambda(
+                    args=ast.arguments(
+                        posonlyargs=[],
+                        args=[ast.arg(arg=v_s), ast.arg(arg=v_k)],
+                        kwonlyargs=[], kw_defaults=[], defaults=[]
+                    ),
+                    body=ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Call(
+                                func=ast.Name(id='bytes'),
+                                args=[
+                                    ast.ListComp(
+                                        elt=ast.BinOp(
+                                            left=ast.Name(id=v_b),
+                                            op=ast.BitXor(),
+                                            right=ast.BinOp(
+                                                left=ast.BinOp(
+                                                    left=ast.BinOp(
+                                                        left=ast.Name(id=v_k),
+                                                        op=ast.Add(),
+                                                        right=ast.BinOp(left=ast.Name(id=v_i), op=ast.Mult(), right=ast.Constant(value=31337))
+                                                    ),
+                                                    op=ast.Add(),
+                                                    right=ast.BinOp(left=ast.Name(id=v_i), op=ast.BitXor(), right=ast.Constant(value=90))
+                                                ),
+                                                op=ast.BitAnd(),
+                                                right=ast.Constant(value=255)
+                                            )
+                                        ),
+                                        generators=[
+                                            ast.comprehension(
+                                                target=ast.Tuple(elts=[ast.Name(id=v_i), ast.Name(id=v_b)]),
+                                                iter=ast.Call(func=ast.Name(id='enumerate'), args=[ast.Name(id=v_s)], keywords=[]),
+                                                ifs=[],
+                                                is_async=0
+                                            )
+                                        ]
+                                    )
+                                ],
+                                keywords=[]
+                            ),
+                            attr='decode'
+                        ),
+                        args=[ast.Constant(value='utf-8')],
+                        keywords=[]
+                    )
+                ),
+                args=[
+                    ast.Call(func=ast.Name(id='bytes'), args=[ast.List(elts=[ast.Constant(value=x) for x in enc_bytes_list])], keywords=[]),
+                    ast.Constant(value=site_key)
+                ],
+                keywords=[]
+            )
+            ast.copy_location(dec_expr, node)
+            ast.fix_missing_locations(dec_expr)
+            return dec_expr
+        return node
+
+def _dyn_strings_obf(code_str: str) -> str:
+    """Apply Dynamic Per-Callsite String XOR Encryption."""
+    tree = ast.parse(code_str)
+    transformer = DynamicStringXORTransformer()
+    tree = transformer.visit(tree)
+    ast.fix_missing_locations(tree)
+    return ast.unparse(tree)
+
+
+# ═══════════════════════════════════════════════════════════════
+# IN-MEMORY ANTI-DUMP & GC OBJECT SCRUBBING (MODULE D)
+# ═══════════════════════════════════════════════════════════════
+
+def _generate_anti_dump_shield() -> str:
+    """Generate in-memory anti-dump shield, GC object scrubber, and code object metadata neutralizer (TRX-DEOB-009/FEAT-004)."""
+    fn_name = rd('state_machine')
+    abort_fn = rd('guard')
+    
+    return f'''
+# ═══ IN-MEMORY ANTI-DUMP & GC SCANNER SCRUBBER ═══
+def {fn_name}():
+    import sys, gc, types, os
+
+    def {abort_fn}():
+        try:
+            os._exit(1)
+        except Exception:
+            sys.exit(1)
+
+    # 1. Neutralize / Filter gc.get_objects to hide code objects and frames from heap dumpers
+    try:
+        _orig_get_objects = gc.get_objects
+        def _safe_get_objects():
+            _objs = _orig_get_objects()
+            return [_o for _o in _objs if not isinstance(_o, (types.CodeType, types.FrameType))]
+        gc.get_objects = _safe_get_objects
+    except Exception:
+        pass
+
+    # 2. Linux prctl(PR_SET_DUMPABLE, 0) to prevent /proc/pid/mem dumping & gdb attach
+    if os.name == 'posix':
+        try:
+            import ctypes
+            _libc = ctypes.CDLL(None)
+            if hasattr(_libc, 'prctl'):
+                _libc.prctl(4, 0, 0, 0, 0)
+        except Exception:
+            pass
+
+    # 3. Background GC watchdog to detect inspection objects
+    try:
+        import threading, time
+        def _dump_watchdog():
+            _bad_modules = {{'objgraph', 'pympler', 'memory_profiler', 'guppy', 'heapy', 'frida', 'cheatengine'}}
+            while True:
+                try:
+                    if set(sys.modules.keys()) & _bad_modules:
+                        {abort_fn}()
+                    time.sleep(1.0)
+                except Exception:
+                    pass
+        _t = threading.Thread(target=_dump_watchdog, daemon=True)
+        _t.start()
+    except Exception:
+        pass
+
+try:
+    {fn_name}()
+except Exception:
+    pass
+'''
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2475,13 +2800,23 @@ except Exception:
     pass
 
 def _anti_debugger():
-    # Vector 1: Trace detection
-    if sys.gettrace() is not None:
-        _obliterate()
+    # Vector 1: Trace detection & monkeypatch defense
+    if hasattr(sys, 'gettrace'):
+        if type(sys.gettrace).__name__ != 'builtin_function_or_method' or getattr(sys.gettrace, '__module__', '') != 'sys':
+            _obliterate()
+        if sys.gettrace() is not None:
+            _obliterate()
 
-    # Vector 2: Profile detection
-    if hasattr(sys, 'getprofile') and sys.getprofile() is not None:
-        _obliterate()
+    # Vector 2: Profile detection & monkeypatch defense
+    if hasattr(sys, 'getprofile'):
+        if type(sys.getprofile).__name__ != 'builtin_function_or_method' or getattr(sys.getprofile, '__module__', '') != 'sys':
+            _obliterate()
+        if sys.getprofile() is not None:
+            _obliterate()
+
+    if hasattr(sys, 'settrace'):
+        if type(sys.settrace).__name__ != 'builtin_function_or_method' or getattr(sys.settrace, '__module__', '') != 'sys':
+            _obliterate()
 
     # Vector 3: Monitoring detection (Python 3.12+) - only block known debugger/tracing tools
     if hasattr(sys, 'monitoring') and hasattr(sys.monitoring, 'get_tool'):
@@ -3462,17 +3797,19 @@ def _derive_runtime_keys(salt: bytes):
     return ke, km
 
 def _auth_stream_encrypt(data: bytes, salt: bytes, ke: bytes, km: bytes):
-    """Authenticated Keystream Encryption with Dynamic Cryptographic Salts & HMAC Integrity Tag"""
+    """Authenticated Keystream Encryption with HMAC-CTR (Nonce + Counter) & Full HMAC-SHA256 Integrity Tag"""
+    nonce = secrets.token_bytes(12)
     keystream = bytearray()
     counter = 0
     while len(keystream) < len(data):
-        block = hmac.new(ke, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+        assert counter < 2**32, "CTR counter overflow: payload too large for 4-byte counter"
+        block = hmac.new(ke, nonce + counter.to_bytes(4, 'big'), hashlib.sha256).digest()
         keystream.extend(block)
         counter += 1
     keystream = keystream[:len(data)]
     ciphertext = bytes(a ^ b for a, b in zip(data, keystream))
-    tag = hmac.new(km, salt + ciphertext, hashlib.sha256).digest()[:16]
-    return ciphertext, tag
+    tag = hmac.new(km, salt + nonce + ciphertext, hashlib.sha256).digest()
+    return ciphertext, tag, nonce
 
 def _multi_layer_encrypt(data: bytes, password: str = None):
     """Apply Authenticated Stream Encryption with Argon2id/PBKDF2 (if password provided) or environment-derived keys."""
@@ -3483,8 +3820,9 @@ def _multi_layer_encrypt(data: bytes, password: str = None):
     else:
         ke, km = _derive_runtime_keys(salt)
 
-    ct, tag = _auth_stream_encrypt(data, salt, ke, km)
-    payload_packed = salt + tag + ct
+    ct, tag, nonce = _auth_stream_encrypt(data, salt, ke, km)
+    # Payload format: salt(16) + nonce(12) + tag(32) + ciphertext
+    payload_packed = salt + nonce + tag + ct
     payload_packed = bz2.compress(payload_packed, 9)
     payload_packed = zlib.compress(payload_packed, 9)
     return base64.b85encode(payload_packed).decode('ascii'), salt
@@ -3585,8 +3923,9 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
 
 def _auth_decrypt(raw_bytes, pwd_str):
     salt = raw_bytes[:16]
-    tag = raw_bytes[16:32]
-    ct = raw_bytes[32:]
+    nonce = raw_bytes[16:28]
+    tag = raw_bytes[28:60]
+    ct = raw_bytes[60:]
     p_bytes = pwd_str.encode('utf-8')
     try:
         from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
@@ -3595,14 +3934,14 @@ def _auth_decrypt(raw_bytes, pwd_str):
     except Exception:
         ke = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__enc__', 600000, 32)
         km = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__mac__', 600000, 32)
-    expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
+    expected_tag = hmac.new(km, salt + nonce + ct, hashlib.sha256).digest()
     if not hmac.compare_digest(tag, expected_tag):
         print("[-] Authentication / Decryption Failed: Invalid password or tampered payload.", flush=True)
         sys.exit(1)
     keystream = bytearray()
     counter = 0
     while len(keystream) < len(ct):
-        block = hmac.new(ke, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+        block = hmac.new(ke, nonce + counter.to_bytes(4, 'big'), hashlib.sha256).digest()
         keystream.extend(block)
         counter += 1
     return bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
@@ -3654,18 +3993,19 @@ def _derive_runtime_keys(salt):
 
 def _auth_decrypt(raw_bytes):
     salt = raw_bytes[:16]
-    tag = raw_bytes[16:32]
-    ct = raw_bytes[32:]
+    nonce = raw_bytes[16:28]
+    tag = raw_bytes[28:60]
+    ct = raw_bytes[60:]
     enc_k, mac_k = _derive_runtime_keys(salt)
     ke = hashlib.pbkdf2_hmac('sha256', salt, enc_k, 50000, 32)
     km = hashlib.pbkdf2_hmac('sha256', salt, mac_k, 50000, 32)
-    expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
+    expected_tag = hmac.new(km, salt + nonce + ct, hashlib.sha256).digest()
     if not hmac.compare_digest(tag, expected_tag):
         raise SystemExit(1)
     keystream = bytearray()
     counter = 0
     while len(keystream) < len(ct):
-        block = hmac.new(ke, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+        block = hmac.new(ke, nonce + counter.to_bytes(4, 'big'), hashlib.sha256).digest()
         keystream.extend(block)
         counter += 1
     return bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
@@ -3856,6 +4196,26 @@ def {fn_name}():
                                 {abort_fn}()
                 except Exception:
                     pass
+        except Exception:
+            pass
+
+    # 4. Linux & POSIX Container / VM Deep Inspection
+    if os.name == 'posix':
+        try:
+            _dmi_files = ['/sys/class/dmi/id/product_name', '/sys/class/dmi/id/sys_vendor', '/sys/class/dmi/id/board_vendor', '/sys/hypervisor/type']
+            _vm_tags = ['virtualbox', 'vmware', 'qemu', 'kvm', 'bochs', 'xen', 'microsoft corporation', 'innotek', 'parallels', 'hyper-v']
+            for _dpath in _dmi_files:
+                if os.path.exists(_dpath):
+                    with open(_dpath, 'r', errors='ignore') as _df:
+                        _dcontent = _df.read().lower()
+                        if any(_t in _dcontent for _t in _vm_tags):
+                            {abort_fn}()
+        except Exception:
+            pass
+
+        try:
+            if os.path.exists('/.dockerenv') or os.path.exists('/run/systemd/container'):
+                {abort_fn}()
         except Exception:
             pass
 
@@ -5199,6 +5559,9 @@ VÍ DỤ SỬ DỤNG:
     parser.add_argument("--blank-padding", "--blank-lines", choices=["y", "n", "Y", "N"], help="Chèn hàng trăm dòng khoảng trống trắng tinh ở đầu file (Screen Blanker Padding) (y/n)", default=None)
     parser.add_argument("--hyperion", choices=["y", "n", "Y", "N"], help="Kích hoạt Hyperion Engine (Builtins remapping + token variable remapping + math/str obfuscation + chunk shell) (y/n)", default=None)
     parser.add_argument("--camouflage", "--camo", choices=["y", "n", "Y", "N"], help="Kích hoạt lớp ngụy trang Hyperion Camouflage (Fake Scientific/Algorithmic Class simulation) (y/n)", default=None)
+    parser.add_argument("--math-opaque", choices=["y", "n", "Y", "N"], help="Kích hoạt vị từ toán học mờ (Mathematical Opaque Predicates - Quadratic Non-Residue mod 7 & Euler invariants) (y/n)", default=None)
+    parser.add_argument("--dyn-strings", choices=["y", "n", "Y", "N"], help="Mã hóa chuỗi động XOR cục bộ từng vị trí gọi (Per-callsite dynamic XOR string encryption) (y/n)", default=None)
+    parser.add_argument("--anti-dump", choices=["y", "n", "Y", "N"], help="Kích hoạt khiên chống memory dump & lọc đối tượng GC (In-Memory Anti-Dump & GC Object Scrubber) (y/n)", default=None)
 
     cli_args, unknown = parser.parse_known_args()
     is_cli_mode = bool(cli_args.input is not None)
@@ -5242,6 +5605,9 @@ VÍ DỤ SỬ DỤNG:
             cli_args.blank_padding = "N"
             cli_args.hyperion = "N"
             cli_args.camouflage = "N"
+            cli_args.math_opaque = "N"
+            cli_args.dyn_strings = "N"
+            cli_args.anti_dump = "N"
             cli_args.force_py = "off"
 
     # Resource capping and output destination
@@ -5342,6 +5708,9 @@ VÍ DỤ SỬ DỤNG:
     blank_padding_choice = getattr(cli_args, 'blank_padding', None) or getattr(cli_args, 'blank_lines', None) or ("N" if is_cli_mode else _prompt_input(" BLANK LINES PADDING (Screen Blanker 300+ empty lines)? (y/n): "))
     hyperion_choice = getattr(cli_args, 'hyperion', None) or ("N" if is_cli_mode else _prompt_input(" HYPERION ENGINE (Builtin/Import/Var token remap + Chunk shell)? (y/n): "))
     camouflage_choice = getattr(cli_args, 'camouflage', None) or ("N" if is_cli_mode else _prompt_input(" HYPERION CAMOUFLAGE (Fake Scientific Simulation Class)? (y/n): "))
+    math_opaque_choice = getattr(cli_args, 'math_opaque', None) or ("N" if is_cli_mode else _prompt_input(" MATHEMATICAL OPAQUE PREDICATES (Number theory invariants)? (y/n): "))
+    dyn_strings_choice = getattr(cli_args, 'dyn_strings', None) or ("N" if is_cli_mode else _prompt_input(" DYNAMIC PER-CALLSITE STRING XOR (Zero global table)? (y/n): "))
+    antidump_choice = getattr(cli_args, 'anti_dump', None) or ("N" if is_cli_mode else _prompt_input(" IN-MEMORY ANTI-DUMP & GC SCRUBBER? (y/n): "))
 
     # Force Python version
     if cli_args.force_py is not None:
@@ -5439,6 +5808,9 @@ VÍ DỤ SỬ DỤNG:
         "blank_padding": blank_padding_choice,
         "hyperion": hyperion_choice,
         "camouflage": camouflage_choice,
+        "math_opaque": math_opaque_choice,
+        "dyn_strings": dyn_strings_choice,
+        "anti_dump": antidump_choice,
         "force_py_choice": force_py_choice,
         "forced_py_ver": forced_py_ver,
         "debug_map": debug_map_arg,
@@ -5509,6 +5881,9 @@ def main():
     blank_padding_choice = _cfg.get("blank_padding", "N")
     hyperion_choice = _cfg.get("hyperion", "N")
     camouflage_choice = _cfg.get("camouflage", "N")
+    math_opaque_choice = _cfg.get("math_opaque", "N")
+    dyn_strings_choice = _cfg.get("dyn_strings", "N")
+    antidump_choice = _cfg.get("anti_dump", "N")
     force_py_choice = _cfg["force_py_choice"]
     forced_py_ver = _cfg["forced_py_ver"]
     custom_out = _cfg["custom_out"]
@@ -5611,6 +5986,28 @@ def main():
             _log_stage_error("2_ast_junk_injection", e)
             check = 5
 
+    # ═══ Step 2.5: Mathematical Opaque Predicates (Module B) ═══
+    if math_opaque_choice.upper() == "Y":
+        _v_step("2.5", 8, "Mathematical Opaque Predicates (Quadratic Non-Residue mod 7 & Euler invariants)...")
+        try:
+            t0 = time.time()
+            sz0 = len(code)
+            code = _math_opaque_obf(code)
+            _track_debug_stage("2.5_math_opaque_predicates", time.time() - t0, sz0, len(code))
+        except Exception as e:
+            _log_stage_error("2.5_math_opaque_predicates", e)
+
+    # ═══ Step 2.7: Dynamic Per-Callsite String XOR Encryption (Module C) ═══
+    if dyn_strings_choice.upper() == "Y":
+        _v_step("2.7", 8, "Dynamic Per-Callsite String XOR Encryption...")
+        try:
+            t0 = time.time()
+            sz0 = len(code)
+            code = _dyn_strings_obf(code)
+            _track_debug_stage("2.7_dyn_strings_encryption", time.time() - t0, sz0, len(code))
+        except Exception as e:
+            _log_stage_error("2.7_dyn_strings_encryption", e)
+
     # ═══ Step 3: Version check (Forced or Current) ═══
     target_ver_str = forced_py_ver if (force_py_choice.upper() == "Y" and forced_py_ver) else f"{sys.version_info.major}.{sys.version_info.minor}"
     checkver = f"""import sys
@@ -5711,6 +6108,14 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
         code = _generate_anti_vm_shield() + code
         _track_debug_stage("5.2_anti_vm_injection", time.time() - t0, sz0, len(code))
 
+    # ═══ Step 6.4: In-Memory Anti-Dump & GC Scrubber (Module D) ═══
+    if antidump_choice.upper() == "Y":
+        _v_step("5.4", 8, "Injecting In-Memory Anti-Dump & GC Scrubber shield...")
+        t0 = time.time()
+        sz0 = len(code)
+        code = _generate_anti_dump_shield() + code
+        _track_debug_stage("5.4_anti_dump_shield", time.time() - t0, sz0, len(code))
+
     # ═══ Step 6.5: Self-modifying ═══
     if selfmodify.upper() == "Y":
         _v_step("5.5", 8, "Adding self-modifying layer...")
@@ -5782,7 +6187,7 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
                 code = var + code
                 _dir_n, _base_n = os.path.split(_file)
                 output_file = os.path.join(_dir_n, "tr0ngx-" + _base_n) if _dir_n else ("tr0ngx-" + _base_n)
-                _safe_atomic_write(output_file, str(code))
+                _safe_atomic_write(output_file, str(code), input_file=_file)
                 elapsed = time.time() - start_time
                 _v(f" [SAVED] {output_file} ({elapsed:.2f}s)")
                 sys.exit()
@@ -5823,8 +6228,9 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
                 _auth_dec_section = f"""
 def _auth_decrypt(raw_bytes, pwd_str):
     salt = raw_bytes[:16]
-    tag = raw_bytes[16:32]
-    ct = raw_bytes[32:]
+    nonce = raw_bytes[16:28]
+    tag = raw_bytes[28:60]
+    ct = raw_bytes[60:]
     p_bytes = pwd_str.encode('utf-8')
     try:
         from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
@@ -5833,14 +6239,14 @@ def _auth_decrypt(raw_bytes, pwd_str):
     except Exception:
         ke = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__enc__', 600000, 32)
         km = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__mac__', 600000, 32)
-    expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
+    expected_tag = hmac.new(km, salt + nonce + ct, hashlib.sha256).digest()
     if not hmac.compare_digest(tag, expected_tag):
         print("[-] Authentication / Decryption Failed: Invalid password or tampered payload.", flush=True)
         sys.exit(1)
     keystream = bytearray()
     counter = 0
     while len(keystream) < len(ct):
-        block = hmac.new(ke, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+        block = hmac.new(ke, nonce + counter.to_bytes(4, 'big'), hashlib.sha256).digest()
         keystream.extend(block)
         counter += 1
     return bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
@@ -5866,18 +6272,19 @@ def _derive_runtime_keys(salt):
 
 def _auth_decrypt(raw_bytes):
     salt = raw_bytes[:16]
-    tag = raw_bytes[16:32]
-    ct = raw_bytes[32:]
+    nonce = raw_bytes[16:28]
+    tag = raw_bytes[28:60]
+    ct = raw_bytes[60:]
     _enc_k, _mac_k = _derive_runtime_keys(salt)
     ke = hashlib.pbkdf2_hmac('sha256', salt, _enc_k, 50000, 32)
     km = hashlib.pbkdf2_hmac('sha256', salt, _mac_k, 50000, 32)
-    expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
+    expected_tag = hmac.new(km, salt + nonce + ct, hashlib.sha256).digest()
     if not hmac.compare_digest(tag, expected_tag):
         raise SystemExit(1)
     keystream = bytearray()
     counter = 0
     while len(keystream) < len(ct):
-        block = hmac.new(ke, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+        block = hmac.new(ke, nonce + counter.to_bytes(4, 'big'), hashlib.sha256).digest()
         keystream.extend(block)
         counter += 1
     return bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
@@ -6065,8 +6472,8 @@ except Exception as _e:
                 dbg_map_file = _debug_map_choice.strip().strip('"').strip("'")
             try:
                 import json
-                with open(dbg_map_file, "w", encoding="utf-8") as df:
-                    json.dump(_DEBUG_MAP, df, indent=2, ensure_ascii=False)
+                dbg_map_file = _validate_and_sanitize_output_path(dbg_map_file, input_file=_file)
+                _safe_atomic_write(dbg_map_file, json.dumps(_DEBUG_MAP, indent=2, ensure_ascii=False), input_file=_file)
                 _v(f" [DEBUG MAP] {dbg_map_file}")
             except Exception as de:
                 _v(f" WARNING: Debug map export failed: {de}")
@@ -6093,6 +6500,12 @@ except Exception as _e:
             _new_modes.append("HYPERION-ENGINE")
         if camouflage_choice.upper() == "Y":
             _new_modes.append("HYPERION-CAMOUFLAGE")
+        if math_opaque_choice.upper() == "Y":
+            _new_modes.append("MATH-OPAQUE (Quadratic/Euler Invariants)")
+        if dyn_strings_choice.upper() == "Y":
+            _new_modes.append("DYN-STRINGS (Per-Callsite XOR)")
+        if antidump_choice.upper() == "Y":
+            _new_modes.append("ANTI-DUMP (GC Scrubber)")
 
         _summary_lines = [
             f"File Saved   : {output_file}",
@@ -6101,7 +6514,7 @@ except Exception as _e:
             f"Time Taken   : {elapsed:.2f}s",
             f"Mode         : {mode} | Veli: {velimatix.upper()}{f'(L{veli_level})' if velimatix.upper()=='Y' else ''}",
             f"Compile      : {method.upper()} | Double: {double_compile.upper() if method.upper()=='Y' else 'N'}",
-            f"Protections  : Anti-Debug={antidebug.upper()} | Anti-VM={antivm.upper()} | Self-Mod={selfmodify.upper()} | Kramer={kramer_wrap_choice.upper()}"
+            f"Protections  : Anti-Debug={antidebug.upper()} | Anti-VM={antivm.upper()} | Anti-Dump={antidump_choice.upper()} | Self-Mod={selfmodify.upper()} | Kramer={kramer_wrap_choice.upper()}"
         ]
         if _new_modes:
             _summary_lines.append(f"Layers       : {' + '.join(_new_modes)}")
