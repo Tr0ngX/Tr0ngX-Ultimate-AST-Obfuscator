@@ -2434,6 +2434,46 @@ def _anti_debugger():
     except Exception:
         pass
 
+    # Vector 9: Win32 PEB IsDebuggerPresent check
+    try:
+        import ctypes
+        if hasattr(ctypes, 'windll') and hasattr(ctypes.windll, 'kernel32'):
+            if ctypes.windll.kernel32.IsDebuggerPresent() != 0:
+                _obliterate()
+    except Exception:
+        pass
+
+    # Vector 10: Win32 CheckRemoteDebuggerPresent check
+    try:
+        import ctypes
+        if hasattr(ctypes, 'windll') and hasattr(ctypes.windll, 'kernel32'):
+            _is_dbg = ctypes.c_bool(False)
+            if ctypes.windll.kernel32.CheckRemoteDebuggerPresent(ctypes.windll.kernel32.GetCurrentProcess(), ctypes.byref(_is_dbg)) != 0:
+                if _is_dbg.value:
+                    _obliterate()
+    except Exception:
+        pass
+
+    # Vector 11: Reversing & Disassembler window title inspection
+    try:
+        import ctypes
+        if hasattr(ctypes, 'windll') and hasattr(ctypes.windll, 'user32'):
+            _u32 = ctypes.windll.user32
+            _buf = ctypes.create_unicode_buffer(512)
+            _bad_titles = ('x64dbg', 'x32dbg', 'ida -', 'ida64', 'ghidra', 'dnspy', 'cheat engine', 'wireshark', 'process hacker', 'process explorer', 'http debugger', 'fiddler')
+            def _enum_wnd_cb(hwnd, lparam):
+                if _u32.IsWindowVisible(hwnd):
+                    l = _u32.GetWindowTextW(hwnd, _buf, 512)
+                    if l > 0:
+                        t = _buf.value.lower()
+                        if any(b in t for b in _bad_titles):
+                            _obliterate()
+                return True
+            _WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+            _u32.EnumWindows(_WNDPROC(_enum_wnd_cb), 0)
+    except Exception:
+        pass
+
 # ═══ ANTI-IMPORT HOOK ═══
 class _ImportBlocker:
     '''Block dangerous imports at meta_path level (PEP 451 compatible)'''
@@ -3537,6 +3577,112 @@ try:
 except Exception:
     pass
 """
+
+def _generate_anti_vm_shield() -> str:
+    """Generate industrial-grade Anti-VM and Sandbox detection shield."""
+    fn_name = rd('state_machine')
+    abort_fn = rd('guard')
+    cores_var = rd('biopaque')
+    user_var = rd('state_machine')
+    host_var = rd('guard')
+    
+    return f'''
+# ═══ ANTI-VIRTUALIZATION & SANDBOX MATRIX ═══
+def {fn_name}():
+    import os, sys
+
+    def {abort_fn}():
+        try:
+            import gc
+            gc.collect()
+        except Exception:
+            pass
+        try:
+            os._exit(1)
+        except Exception:
+            sys.exit(1)
+
+    # 1. CPU Core Count Check (Automated analysis sandboxes often allocate <= 1 vCPU)
+    try:
+        {cores_var} = os.cpu_count()
+        if {cores_var} is not None and {cores_var} <= 1:
+            {abort_fn}()
+    except Exception:
+        pass
+
+    # 2. Known Automated Sandbox Usernames & Hostnames
+    try:
+        {user_var} = (os.getenv('USERNAME') or os.getenv('USER') or '').upper()
+        {host_var} = (os.getenv('COMPUTERNAME') or os.getenv('HOSTNAME') or '').upper()
+        _bad_identities = {{'SANDBOX', 'VIRUS', 'MALTEST', 'TEQUILABOOMBOOM', 'SAMPLE', 'CURRENTUSER', 'DESKTOP-ANALYSIS', 'USER-PC', 'JOHN-PC', 'TEST-PC', 'KLONE'}}
+        if {user_var} in _bad_identities or {host_var} in _bad_identities:
+            {abort_fn}()
+    except Exception:
+        pass
+
+    # 3. Windows-Specific VM & Hypervisor Deep Inspection
+    if os.name == 'nt':
+        # A. Screen Resolution Metrics (Headless sandboxes often have small/default resolution)
+        try:
+            import ctypes
+            if hasattr(ctypes, 'windll') and hasattr(ctypes.windll, 'user32'):
+                _w = ctypes.windll.user32.GetSystemMetrics(0)
+                _h = ctypes.windll.user32.GetSystemMetrics(1)
+                if 0 < _w < 800 or 0 < _h < 600:
+                    {abort_fn}()
+        except Exception:
+            pass
+
+        # B. System Uptime Check (Fresh sandbox snapshots often have uptime < 60s)
+        try:
+            import ctypes
+            if hasattr(ctypes, 'windll') and hasattr(ctypes.windll, 'kernel32'):
+                _uptime = ctypes.windll.kernel32.GetTickCount64()
+                if 0 < _uptime < 60000:
+                    {abort_fn}()
+        except Exception:
+            pass
+
+        # C. VM Artifact & Driver Files Detection
+        try:
+            _sys_root = os.getenv('SystemRoot', r'C:\\Windows')
+            _drv_dir = os.path.join(_sys_root, 'System32', 'drivers')
+            _vm_drivers = {{'vboxmouse.sys', 'vboxguest.sys', 'vboxsf.sys', 'vboxvideo.sys',
+                           'vmmouse.sys', 'vmhgfs.sys', 'vmusbmouse.sys', 'qemu-ga.exe', 'prl_fs.sys'}}
+            if os.path.exists(_drv_dir):
+                for _fname in os.listdir(_drv_dir):
+                    if _fname.lower() in _vm_drivers:
+                        {abort_fn}()
+        except Exception:
+            pass
+
+        # D. BIOS & Hardware Manufacturer Registry Check
+        try:
+            import winreg
+            _reg_paths = [
+                (winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\\Description\\System\\BIOS"),
+                (winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\\Description\\System"),
+            ]
+            _vm_kw = (b'vmware', b'virtualbox', b'vbox', b'qemu', b'bochs', b'kvm', b'parallels', b'xen', b'hyper-v')
+            for _hkey, _subkey in _reg_paths:
+                try:
+                    with winreg.OpenKey(_hkey, _subkey) as _k:
+                        for _i in range(winreg.QueryInfoKey(_k)[1]):
+                            _, _vdata, _ = winreg.EnumValue(_k, _i)
+                            _vstr = str(_vdata).lower().encode()
+                            if any(_kw in _vstr for _kw in _vm_kw):
+                                {abort_fn}()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+try:
+    {fn_name}()
+except Exception:
+    pass
+'''
+
 
 
 
@@ -4803,6 +4949,7 @@ VÍ DỤ SỬ DỤNG:
     parser.add_argument("-m", "--mode", type=int, choices=[1, 2, 3], help="Cấp độ làm rối Trongdepzai AST (1: Cơ bản, 2: Nâng cao, 3: Cực đại)", default=None)
     parser.add_argument("--moreobf", choices=["y", "n", "Y", "N"], help="Bơm mã rác AST junk & try-except dead code (y/n)", default=None)
     parser.add_argument("--antidebug", choices=["y", "n", "Y", "N"], help="Kích hoạt khiên chống debug & anti-hook (y/n)", default=None)
+    parser.add_argument("--antivm", choices=["y", "n", "Y", "N"], help="Kích hoạt khiên phát hiện máy ảo (Anti-VM & Sandbox Detection) (y/n)", default=None)
     parser.add_argument("--selfmod", choices=["y", "n", "Y", "N"], help="Thêm tầng mã tự biến đổi chữ ký khi chạy (y/n)", default=None)
     parser.add_argument("--compile", choices=["y", "n", "Y", "N"], help="Biên dịch bytecode đa tầng (marshal + XOR + zlib + bz2) (y/n)", default=None)
     
@@ -4905,6 +5052,7 @@ VÍ DỤ SỬ DỤNG:
     # 3. Flags
     moreobf = cli_args.moreobf or ("N" if is_cli_mode else _prompt_input(" MORE OBF? (y/n): "))
     antidebug = cli_args.antidebug or ("N" if is_cli_mode else _prompt_input(" ANTI DEBUG? (y/n): "))
+    antivm = getattr(cli_args, 'antivm', None) or ("N" if is_cli_mode else _prompt_input(" ANTI VM & SANDBOX? (y/n): "))
     selfmodify = cli_args.selfmod or ("N" if is_cli_mode else _prompt_input(" SELF-MODIFYING CODE? (y/n): "))
     method = cli_args.compile or ("N" if is_cli_mode else _prompt_input(" COMPILE? (y/n): "))
     velimatix = cli_args.velimatix or ("N" if is_cli_mode else _prompt_input(" VELIMATIX ENGINE? (y/n): "))
@@ -5021,6 +5169,7 @@ VÍ DỤ SỬ DỤNG:
         "mode": mode,
         "moreobf": moreobf,
         "antidebug": antidebug,
+        "antivm": antivm,
         "selfmodify": selfmodify,
         "method": method,
         "password": password,
@@ -5090,6 +5239,7 @@ def main():
     mode = _cfg["mode"]
     moreobf = _cfg["moreobf"]
     antidebug = _cfg["antidebug"]
+    antivm = _cfg.get("antivm", "N")
     selfmodify = _cfg["selfmodify"]
     method = _cfg["method"]
     encryption_password = _cfg.get("password")
@@ -5121,6 +5271,7 @@ def main():
         "mode": mode,
         "moreobf": moreobf,
         "antidebug": antidebug,
+        "antivm": antivm,
         "selfmodify": selfmodify,
         "compile": method,
         "password_protected": bool(encryption_password),
@@ -5263,6 +5414,14 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
             code = velimatix_anti_hook + code
         code = anti + code
         _track_debug_stage("3_anti_debug_injection", time.time() - t0, sz0, len(code))
+
+    # ═══ Step 4.2: Anti-VM & Sandbox Detection ═══
+    if antivm.upper() == "Y":
+        _v(" [3.2/8] Injecting Anti-VM & Sandbox detection shield...")
+        t0 = time.time()
+        sz0 = len(code)
+        code = _generate_anti_vm_shield() + code
+        _track_debug_stage("3.2_anti_vm_injection", time.time() - t0, sz0, len(code))
 
     # ═══ Step 5: Self-modifying ═══
     if selfmodify.upper() == "Y":
@@ -5670,7 +5829,7 @@ except Exception as _e:
         _v(f" [OUTPUT]      {file_size:,} bytes ({ratio:.1f}x)")
         _v(f" [TIME]        {elapsed:.2f}s")
         _v(f" [MODE]        {mode} | VELI: {velimatix.upper()}{'(L'+str(veli_level)+')' if velimatix.upper()=='Y' else ''}")
-        _v(f" [OBF]         {moreobf.upper()} | ANTI: {antidebug.upper()} | SELF-MOD: {selfmodify.upper()}")
+        _v(f" [OBF]         {moreobf.upper()} | ANTI: {antidebug.upper()} | ANTI-VM: {antivm.upper()} | SELF-MOD: {selfmodify.upper()}")
         _v(f" [COMPILE]     {method.upper()} | DOUBLE: {double_compile.upper() if method.upper()=='Y' else 'N/A'}")
         _v(f" [KRAMER]      {kramer_wrap_choice.upper()} | FORCE PY: {forced_py_ver if force_py_choice.upper()=='Y' else 'OFF'}")
         _v(f" [CJK/PYCOOL]  {cjk_choice.upper()}")

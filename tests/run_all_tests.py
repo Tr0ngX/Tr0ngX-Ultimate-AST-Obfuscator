@@ -21,7 +21,8 @@ TEST_FILES = [
 STANDALONE_TESTS = [
     "tests/test_06_crypto_password.py",
     "tests/test_07_reproducible.py",
-    "tests/test_08_dos_limits.py"
+    "tests/test_08_dos_limits.py",
+    "tests/test_09_antivm_antidebug.py"
 ]
 
 OBF_CONFIGS = [
@@ -39,8 +40,8 @@ OBF_CONFIGS = [
         "env": {"TR0NGX_PASSWORD": "Tr0ngX_SuitePass_2026"}
     },
     {
-        "name": "MAXIMUM POWER Mode 3 + Anti-Debug + SelfMod + Double Compile + Fused Matrix + Unicode",
-        "args": ["-m", "3", "--moreobf", "y", "--antidebug", "y", "--selfmod", "y", "--compile", "y", "--velimatix", "y", "--veli-level", "3", "--double-compile", "y", "--matrix", "y", "--kramer", "y", "--emoji-obf", "y", "--whitespace-obf", "y", "--cjk-vars", "y", "--rare-unicode", "y", "--homoglyph", "y", "--force-py", "off", "--no-art", "--max-ram", "2048", "--cores", "2"]
+        "name": "MAXIMUM POWER Mode 3 + Anti-Debug + Anti-VM + SelfMod + Double Compile + Fused Matrix + Unicode",
+        "args": ["-m", "3", "--moreobf", "y", "--antidebug", "y", "--antivm", "y", "--selfmod", "y", "--compile", "y", "--velimatix", "y", "--veli-level", "3", "--double-compile", "y", "--matrix", "y", "--kramer", "y", "--emoji-obf", "y", "--whitespace-obf", "y", "--cjk-vars", "y", "--rare-unicode", "y", "--homoglyph", "y", "--force-py", "off", "--no-art", "--max-ram", "2048", "--cores", "2"]
     }
 ]
 

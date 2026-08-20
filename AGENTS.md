@@ -57,7 +57,8 @@ graph TD
 | `-o`, `--output` | IO | Custom output destination path | `<filepath>` |
 | `-m`, `--mode` | Core AST | AST obfuscation complexity level | `1`, `2`, `3` |
 | `--moreobf` | Core AST | Inject extra AST dead code and try-except decoy blocks | `y` / `n` |
-| `--antidebug` | Protection | Inject anti-debugging watchdog daemon and hook blockers | `y` / `n` |
+| `--antidebug` | Protection | Inject anti-debugging watchdog daemon, Win32 PEB/remote debug checks, and hook blockers | `y` / `n` |
+| `--antivm` | Protection | Inject Anti-VM & Automated Sandbox Detection matrix (CPU, screen metrics, drivers, registry) | `y` / `n` |
 | `--selfmod` | Protection | Inject runtime signature mutating self-modification layer | `y` / `n` |
 | `--compile` | Crypto | Multi-layer authenticated AEAD compilation (Marshal + XOR + Zlib + Bz2) | `y` / `n` |
 | `--password` | Crypto | Password for Argon2id + ChaCha20Poly1305 / PBKDF2 authenticated payload encryption | `<string>` |

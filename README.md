@@ -140,6 +140,7 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `-m`, `--mode` | Obfuscation complexity level | `1`, `2`, `3` |
 | `--moreobf` | Extra string & integer mutation pass | `y` / `n` |
 | `--antidebug` | Inject multi-vector Anti-Debug watchdog shield | `y` / `n` |
+| `--antivm` | Inject Anti-VM & Automated Sandbox Detection matrix (CPU, screen metrics, drivers, registry) | `y` / `n` |
 | `--selfmod` | Inject self-modifying code & anti-tamper layer | `y` / `n` |
 | `--compile` | Authenticated AEAD bytecode compilation | `y` / `n` |
 | `--password` | Password for Argon2id + ChaCha20Poly1305 / PBKDF2 authenticated payload encryption | `<string>` |
