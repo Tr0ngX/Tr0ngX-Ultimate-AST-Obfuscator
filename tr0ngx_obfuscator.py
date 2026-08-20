@@ -1102,7 +1102,7 @@ class ControlFlowTransformer():
                 return node
             try:
                 ControlFlowUtils.generate_controlflow_block(node)
-            except:
+            except Exception:
                 pass
             return node
 
@@ -1150,7 +1150,7 @@ class MutatorTransformer():
                         try:
                             if node in ast.walk(p.pattern):
                                 return node
-                        except:
+                        except Exception:
                             pass
                     p = p.parent
             try:
@@ -1168,7 +1168,7 @@ class MutatorTransformer():
                         result = MutatorUtils.proceed_float_constant(node, self.ladder)
                         self._depth -= 1
                         return result
-            except:
+            except Exception:
                 pass
             return node
 
@@ -1204,7 +1204,7 @@ class MethodClonerTransformer():
                 for stmt in donor.body[:random.randint(1, max(1, len(donor.body)))]:
                     try:
                         decoy_body.append(ast.parse(ast.unparse(stmt)).body[0])
-                    except:
+                    except Exception:
                         decoy_body.append(ast.Pass())
             if not decoy_body:
                 decoy_body = [ast.Pass()]
@@ -1283,9 +1283,9 @@ class BuiltinRenamerTransformer():
                         else:
                             _ = getattr(__builtins__, builtin_name)
                         self.mapping[builtin_name] = Utils.randomize_name(self.alphabet, self.length)
-                    except:
+                    except Exception:
                         pass
-            except:
+            except Exception:
                 continue
 
         for node in ast.walk(tree):
@@ -1469,7 +1469,7 @@ class StringEncoderTransformer():
                 result = ast.parse(code, mode='eval').body
                 self._depth -= 1
                 return result
-            except:
+            except Exception:
                 self._depth -= 1
                 return node
 
@@ -1517,7 +1517,7 @@ def OBF_Spam(code, level=2):
     try:
         setting = ast.parse(code)
         setting = ast.unparse(setting)
-    except:
+    except Exception:
         return code
 
     # ★ FIX: Prepend VELIMATIX class when ExceptionJump will be used
@@ -1623,7 +1623,7 @@ def _velimatix_obf(code, mode=2):
         if mode >= 2:
             try:
                 code = OBF_Import(code)
-            except:
+            except Exception:
                 pass
 
         code = "class VELIMATIX(MemoryError): pass\n" + code
@@ -2105,7 +2105,7 @@ def 你器(你):
     return 你
 try:
     pass
-except:
+except Exception:
     pass
 finally:
     pass
@@ -2479,7 +2479,7 @@ try:
     _start_watchdog()
 except SystemExit:
     os._exit(1)
-except:
+except Exception:
     pass
 """
 
@@ -2503,7 +2503,7 @@ class _VeliGuard_:
         except: pass
         try:
             __import__('os')._exit(1)
-        except:
+        except Exception:
             raise _VELIMATIX_SHIELD_('>> PROTECTION TRIGGERED <<') from None
 
     @staticmethod
@@ -2555,7 +2555,7 @@ class _VeliGuard_:
                 func = getattr(mod, parts[1], None)
                 if func is not None and type(func) != expected_type:
                     _VeliGuard_._terminate()
-            except:
+            except Exception:
                 pass
 
     @staticmethod
@@ -2636,7 +2636,7 @@ class _VeliGuard_:
                     __import__('os')._exit(1)
                 except SystemExit:
                     __import__('os')._exit(1)
-                except:
+                except Exception:
                     _VeliGuard_._terminate()
 
         t = threading.Thread(target=_patrol, daemon=True,
@@ -2660,7 +2660,7 @@ except _VELIMATIX_SHIELD_:
     __import__('os')._exit(1)
 except SystemExit:
     __import__('os')._exit(1)
-except:
+except Exception:
     pass
 """
 
@@ -2985,24 +2985,24 @@ class _MainAstTransformer(ast.NodeTransformer):
         if isinstance(node.value, bool):
             try:
                 return ast.parse(obfint(node.value)).body[0].value
-            except:
+            except Exception:
                 return node
         elif isinstance(node.value, str):
             try:
                 return ast.parse(obfstr(node.value)).body[0].value
-            except:
+            except Exception:
                 return node
         elif isinstance(node.value, int):
             try:
                 return ast.parse(obfint(node.value)).body[0].value
-            except:
+            except Exception:
                 return node
         return node
 
     def visit_JoinedStr(self, node: ast.JoinedStr):
         try:
             return fm(node)
-        except:
+        except Exception:
             return node
 
 def obfuscate(node):
@@ -3411,6 +3411,43 @@ class Kyrie:
         """Enhanced encryption: alphabet rotation + XOR stream cipher."""
         e1 = Kyrie._ekyrie(content)
         return Kyrie._xor_stream_encrypt(e1, key=key)
+
+    @staticmethod
+    def encrypt_v3(content: str, key: int) -> str:
+        """Byte-level XOR with HMAC-SHA256 keystream (cryptographically strong).
+        Returns hex-encoded string safe for embedding in source code."""
+        import hashlib, hmac
+        data = content.encode('utf-8')
+        key_bytes = key.to_bytes(4, 'big')
+        
+        # Generate keystream using HMAC-SHA256 in counter mode
+        keystream = bytearray()
+        counter = 0
+        while len(keystream) < len(data):
+            block = hmac.new(key_bytes, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+            keystream.extend(block)
+            counter += 1
+        
+        # XOR encrypt
+        encrypted = bytes(a ^ b for a, b in zip(data, keystream[:len(data)]))
+        return encrypted.hex()
+
+    @staticmethod
+    def decrypt_v3(hex_str: str, key: int) -> str:
+        """Decrypt hex-encoded XOR-encrypted content."""
+        import hashlib, hmac
+        data = bytes.fromhex(hex_str)
+        key_bytes = key.to_bytes(4, 'big')
+        
+        keystream = bytearray()
+        counter = 0
+        while len(keystream) < len(data):
+            block = hmac.new(key_bytes, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+            keystream.extend(block)
+            counter += 1
+        
+        decrypted = bytes(a ^ b for a, b in zip(data, keystream[:len(data)]))
+        return decrypted.decode('utf-8')
 
 # ═══════════════════════════════════════════════════════════════
 # EMOJI OBFUSCATION - ENCODE ENTIRE CODE AS EMOJI SEQUENCE
@@ -4439,17 +4476,17 @@ if not sys.version.startswith('{target_ver_str}'):
         if check == 5:
             try:
                 code = __moreobf(code)
-            except:
+            except Exception:
                 try:
                     code = __moreobf(code)
-                except:
+                except Exception:
                     pass
 
         if velimatix.upper() == "Y" and veli_level >= 2:
             _v(" [7/8] Velimatix final pass...")
             try:
                 code = OBF_Spam(code, level=min(veli_level, 2))
-            except:
+            except Exception:
                 pass
 
         _track_debug_stage("6_non_compiled_packaging", time.time() - t0, sz0, len(code))
@@ -4461,10 +4498,10 @@ if not sys.version.startswith('{target_ver_str}'):
         if check == 5:
             try:
                 code = __moreobf(code)
-            except:
+            except Exception:
                 try:
                     code = __moreobf(code)
-                except:
+                except Exception:
                     pass
 
         code = ANTI_PYCDC + code
@@ -4588,7 +4625,7 @@ if not sys.version.startswith('{target_ver_str}'):
                 _v(" [8/8] Velimatix final pass on loader...")
                 try:
                     code = OBF_Spam(code, level=1)
-                except:
+                except Exception:
                     pass
             else:
                 _v(" [8/8] Finalizing...")
