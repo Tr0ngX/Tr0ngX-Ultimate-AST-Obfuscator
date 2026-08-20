@@ -5055,6 +5055,7 @@ def get_args_or_prompt():
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 CÔNG CỤ LÀM RỐI MÃ NGUỒN PYTHON ĐA TẦNG CỰC MẠNH:
+  • Tầng 0: Hyperion Engine (Builtin remapping, token variable remap, math/str splitting)
   • Tầng 1: Tr0ngX AST Transformer (Biến đổi hằng số, chuỗi, số nguyên, logic)
   • Tầng 2: Velimatix Engine (BiOpaque predicates, Exception jump, Match-Case state machine)
   • Tầng 3: Double Compile Bytecode Loader (marshal + XOR + zlib + bz2 + base85)
@@ -5064,26 +5065,29 @@ CÔNG CỤ LÀM RỐI MÃ NGUỒN PYTHON ĐA TẦNG CỰC MẠNH:
   • Tầng 7: Homoglyph Names (Tên biến Cyrillic/Greek trông giống ASCII: a->а, o->о)
   • Tầng 8: Rare Unicode Names (CJK Extension B, Kangxi Radicals)
   • Tầng 9: Whitespace Obfuscation (Code biến đổi thành không gian trắng space/tab binary)
+  • Tầng 10: Extreme Zalgo Diacritics Shield (Chồng lớp dấu tổ hợp làm tê liệt decompiler GUI)
+  • Tầng 11: Hyperion Scientific Class Camouflage (Ngụy trang lớp mô phỏng bộ nhớ khoa học)
+  • Tầng 12: 3-Track Symbiotic Fused Matrix Shield (Kyrie + Emoji + Whitespace hợp nhất không phình dung lượng)
         """,
         epilog="""
 VÍ DỤ SỬ DỤNG:
   1. Chạy CLI đầy đủ tính năng:
-     python procheck.py -i script.py -o obf_script.py -m 3 --moreobf y --antidebug y --selfmod y --compile y --velimatix y --veli-level 3 --double-compile y --kramer y --cjk-vars y --force-py 3.14 --debug-map --max-ram 2048 --cores 4
+     python tr0ngx_obfuscator.py -i script.py -o obf_script.py -m 3 --moreobf y --antidebug y --antivm y --selfmod y --compile y --velimatix y --veli-level 3 --double-compile y --kramer y --hyperion y --camouflage y --matrix y --zalgo y
 
   2. Chạy nhanh chế độ im lặng (không lag, không banner màu):
-     python procheck.py -i script.py -o obf_script.py -m 2 --compile y --kramer y --no-art
+     python tr0ngx_obfuscator.py -i script.py -o obf_script.py -m 2 --compile y --kramer y --no-art
 
   3. Chạy giao diện tương tác TUI:
-     python procheck.py
+     python tr0ngx_obfuscator.py
 
-  4. Bật Emoji + Whitespace layers (code thành chuỗi emoji rồi whitespace):
-     python procheck.py -i script.py -m 3 --compile y --emoji-obf y --whitespace-obf y --no-art
+  4. Bật Symbiotic Fused Matrix Shield:
+     python tr0ngx_obfuscator.py -i script.py -m 2 --compile y --matrix y --no-art
 
-  5. Bật Homoglyph + Rare Unicode (tên biến cực rối, mắt thường không phân biệt):
-     python procheck.py -i script.py -m 3 --compile y --homoglyph y --rare-unicode y --no-art
+  5. Bật Extreme Zalgo Diacritics + Homoglyph:
+     python tr0ngx_obfuscator.py -i script.py -m 3 --compile y --zalgo y --homoglyph y --no-art
 
-  6. ALL-IN MAX POWER (mọi tầng bảo vệ):
-     python procheck.py -i script.py -o max.py -m 3 --moreobf y --antidebug y --selfmod y --compile y --velimatix y --veli-level 3 --double-compile y --kramer y --cjk-vars y --emoji-obf y --homoglyph y --rare-unicode y --whitespace-obf y --force-py 3.14 --debug-map --no-art
+  6. ALL-IN MAXIMUM POWER (toàn bộ ma trận bảo vệ):
+     python tr0ngx_obfuscator.py -i script.py -o max.py -m 3 --moreobf y --antidebug y --antivm y --selfmod y --compile y --velimatix y --veli-level 3 --double-compile y --kramer y --cjk-vars y --hyperion y --camouflage y --matrix y --zalgo y --no-art
         """
     )
     # File options
