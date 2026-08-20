@@ -2312,10 +2312,12 @@ def _anti_memory_analysis():
                 pass
 
     # Null out Python-level tracing & profiling
+    # IMPORTANT: Must use None (not a lambda) so sys.gettrace()/getprofile() return None,
+    # otherwise _anti_debugger() will detect a non-None trace and call _obliterate().
     try:
-        sys.settrace(lambda *a, **k: None)
+        sys.settrace(None)
         if hasattr(sys, 'setprofile'):
-            sys.setprofile(lambda *a, **k: None)
+            sys.setprofile(None)
     except Exception:
         pass
 
@@ -2517,7 +2519,12 @@ class _VeliGuard_:
         def _check_patch():
             for name, orig_id in _snapshot.items():
                 current = getattr(_b, name, None)
-                if current is None or id(current) != orig_id:
+                if current is None:
+                    _VeliGuard_._terminate()
+                curr_id = id(current)
+                # Allow wrapped builtins (e.g. _ExecGuard/_EvalGuard from anti-debug shield)
+                # that expose a _func attribute pointing to the real builtin.
+                if curr_id != orig_id and not hasattr(current, '_func'):
                     _VeliGuard_._terminate()
             _VeliGuard_.check_type_changed()
 
@@ -4207,11 +4214,14 @@ if not sys.version.startswith('{target_ver_str}'):
         _v(" [3/8] Injecting anti-debug shield...")
         t0 = time.time()
         sz0 = len(code)
-        code = anti + code
-
+        # IMPORTANT: anti shield must run BEFORE velimatix_anti_hook so that
+        # velimatix_anti_hook's anti_monkey_patch snapshots the already-wrapped
+        # builtins (exec/eval). Otherwise the patrol thread detects the ID
+        # change when anti shield wraps them and calls _terminate().
         if velimatix.upper() == "Y":
             _v("        Adding Velimatix anti-hook layer...")
             code = velimatix_anti_hook + code
+        code = anti + code
         _track_debug_stage("3_anti_debug_injection", time.time() - t0, sz0, len(code))
 
     # ═══ Step 5: Self-modifying ═══
