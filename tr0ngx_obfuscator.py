@@ -5061,9 +5061,9 @@ CÔNG CỤ LÀM RỐI MÃ NGUỒN PYTHON ĐA TẦNG CỰC MẠNH:
   • Tầng 3: Double Compile Bytecode Loader (marshal + XOR + zlib + bz2 + base85)
   • Tầng 4: Kramer Kyrie Eleison Outer Shield (Mã hóa dịch chuyển Caesar động + Class ảo)
   • Tầng 5: Tên biến tiếng Trung / CJK + Watermark bản quyền PyCool
-  • Tầng 6: Emoji Obfuscation (Mã hóa chuỗi Unicode Emoji + self-decoding loader)
+  • Tầng 6: Emoji Obfuscation (Code → chuỗi emoji 🐀🐁🐂 + self-decoding loader)
   • Tầng 7: Homoglyph Names (Tên biến Cyrillic/Greek trông giống ASCII: a->а, o->о)
-  • Tầng 8: Rare Unicode Names (CJK Extension B, Kangxi Radicals)
+  • Tầng 8: Rare Unicode Names (CJK Extension B, Kangxi Radicals: 龘 鱻 𪚥)
   • Tầng 9: Whitespace Obfuscation (Code biến đổi thành không gian trắng space/tab binary)
   • Tầng 10: Extreme Zalgo Diacritics Shield (Chồng lớp dấu tổ hợp làm tê liệt decompiler GUI)
   • Tầng 11: Hyperion Scientific Class Camouflage (Ngụy trang lớp mô phỏng bộ nhớ khoa học)
