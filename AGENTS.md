@@ -60,6 +60,10 @@ graph TD
 | `--antidebug` | Protection | Inject anti-debugging watchdog daemon and hook blockers | `y` / `n` |
 | `--selfmod` | Protection | Inject runtime signature mutating self-modification layer | `y` / `n` |
 | `--compile` | Crypto | Multi-layer authenticated AEAD compilation (Marshal + XOR + Zlib + Bz2) | `y` / `n` |
+| `--password` | Crypto | Password for Argon2id + ChaCha20Poly1305 / PBKDF2 authenticated payload encryption | `<string>` |
+| `--password-file` | Crypto | Path to external file containing encryption password | `<filepath>` |
+| `--max-output-size` | Resource | Maximum output file size DoS limit (aborts and removes if exceeded) | e.g. `10MB`, `50MB` |
+| `--seed` | Core AST | Deterministic seed for reproducible builds | e.g. `1337` |
 | `--velimatix` | Velimatix | Enable Velimatix ExceptionJump & AST control flow engine | `y` / `n` |
 | `--veli-level` | Velimatix | Velimatix intensity level (1: BiOpaque, 2: Exception Jump, 3: Match-Case State Machine) | `1`, `2`, `3` |
 | `--double-compile` | Crypto | Package inner compiled bytecode inside outer Velimatix loader | `y` / `n` |

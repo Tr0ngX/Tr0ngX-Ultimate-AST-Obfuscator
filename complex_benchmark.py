@@ -1,4 +1,4 @@
-﻿# Test file with complex Python features:
+# Test file with complex Python features:
 # - Asynchronous coroutines (async / await)
 # - Custom metaclass & decorators with args
 # - Pattern matching (match / case)
@@ -152,9 +152,9 @@ def main():
 
     # Test 3: Math & Algorithms
     primes = list(prime_sieve(30))
-    ack_res = ackermann(3, 3)
+    ack_res = ackermann(3, 2)
     print(f"[3] Primes <= 30: {primes}")
-    print(f"    Ackermann(3, 3): {ack_res}")
+    print(f"    Ackermann(3, 2): {ack_res}")
 
     # Test 4: Match / Case Logic
     c1 = process_command({"type": "START", "id": 404})

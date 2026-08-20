@@ -142,6 +142,10 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--antidebug` | Inject multi-vector Anti-Debug watchdog shield | `y` / `n` |
 | `--selfmod` | Inject self-modifying code & anti-tamper layer | `y` / `n` |
 | `--compile` | Authenticated AEAD bytecode compilation | `y` / `n` |
+| `--password` | Password for Argon2id + ChaCha20Poly1305 / PBKDF2 authenticated payload encryption | `<string>` |
+| `--password-file` | File path containing encryption password (avoids process table snooping) | `<filepath>` |
+| `--max-output-size` | Maximum output size DoS limit (aborts and unlinks if exceeded) | e.g. `10MB`, `50MB` |
+| `--seed` | Integer seed for deterministic reproducible obfuscation builds | e.g. `1337` |
 | `--double-compile` | Double compile (Tr0ngX + Velimatix loader) | `y` / `n` |
 | `--velimatix` | Enable Velimatix ExceptionJump & AST spam engine | `y` / `n` |
 | `--veli-level` | Velimatix intensity level | `1`, `2`, `3` |
@@ -178,6 +182,10 @@ python tests/test_01_core_features.py
 python tests/test_02_crypto_math.py
 python tests/test_03_data_structures.py
 python tests/test_04_dynamic_reflection.py
+python tests/test_05_edge_cases.py
+python tests/test_06_crypto_password.py
+python tests/test_07_reproducible.py
+python tests/test_08_dos_limits.py
 python complex_benchmark.py
 ```
 

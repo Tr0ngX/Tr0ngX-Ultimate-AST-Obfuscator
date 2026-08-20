@@ -18,6 +18,8 @@ import tokenize
 import io
 import logging
 import traceback
+import threading
+import string
 
 # Ensure Windows console supports Unicode / ANSI characters & Virtual Terminal Processing
 try:
@@ -56,6 +58,9 @@ class _EngineState:
     use_hyperion = False
     use_camouflage = False
     use_fused_names = False
+    encryption_password = None
+    custom_seed = None
+    max_output_size = None
 
 _HAS_PYSTYLE = False
 _HAS_PSUTIL = False
@@ -160,16 +165,17 @@ __import__('sys').setrecursionlimit(15000)
 # ═══════════════════════════════════════════════════════════════
 
 _used_names = set()
+_used_names_lock = threading.Lock()
 
 def _rd():
-    while True:
-        name = "".join(random.sample([chr(i) for i in range(97, 123)], k=random.randint(6, 10)))
-        if name not in _used_names:
-            _used_names.add(name)
-            return name
-
-def _rd1():
-    return "".join(random.sample([chr(i) for i in range(97, 123)], k=1))
+    alphabet = string.ascii_lowercase
+    with _used_names_lock:
+        while True:
+            k = secrets.randbelow(5) + 6
+            name = "".join(secrets.choice(alphabet) for _ in range(k))
+            if name not in _used_names:
+                _used_names.add(name)
+                return name
 
 _EngineState.use_fused_names = False
 
@@ -182,43 +188,46 @@ def _gen_fused_name(scope='general'):
     """
     _init_rare_chars()
     if scope == 'state_machine':
-        return _gen_homoglyph_name(random.randint(6, 10))
+        return _gen_homoglyph_name(secrets.randbelow(5) + 6)
     elif scope == 'biopaque':
-        return _gen_rare_unicode_name(random.randint(3, 5))
+        return _gen_rare_unicode_name(secrets.randbelow(3) + 3)
     elif scope == 'globals':
-        return _gen_cjk_name(random.randint(6, 10))
+        return _gen_cjk_name(secrets.randbelow(5) + 6)
     else:
-        picker = random.choice(['homo', 'rare', 'cjk', 'zalgo', 'invis'])
+        picker = secrets.choice(['homo', 'rare', 'cjk', 'zalgo', 'invis'])
         if picker == 'homo':
-            return _gen_homoglyph_name(random.randint(5, 8))
+            return _gen_homoglyph_name(secrets.randbelow(4) + 5)
         elif picker == 'rare':
-            return _gen_rare_unicode_name(random.randint(3, 5))
+            return _gen_rare_unicode_name(secrets.randbelow(3) + 3)
         elif picker == 'cjk':
-            return _gen_cjk_name(random.randint(6, 8))
+            return _gen_cjk_name(secrets.randbelow(3) + 6)
         elif picker == 'zalgo':
-            return _gen_zalgo_name(1, random.randint(25, 45))
+            return _gen_zalgo_name(1, secrets.randbelow(21) + 25)
         else:
-            return _gen_homoglyph_name(random.randint(6, 10))
+            return _gen_homoglyph_name(secrets.randbelow(5) + 6)
 
 def rd(scope='general'):
-    if _EngineState.use_zalgo_marks:
-        return _gen_zalgo_name()
-    if _EngineState.use_fused_names:
-        return _gen_fused_name(scope)
-    if _EngineState.use_rare_unicode_names:
-        return _gen_rare_unicode_name()
-    if _EngineState.use_homoglyph_names:
-        return _gen_homoglyph_name()
-    if _EngineState.use_cjk_names:
-        return _gen_cjk_name()
-    while True:
-        name = "_" + "".join(random.sample([str(i) for i in range(1, 50)], k=random.randint(3, 5)))
-        if name not in _used_names:
-            _used_names.add(name)
-            return name
+    with _used_names_lock:
+        if _EngineState.use_zalgo_marks:
+            return _gen_zalgo_name()
+        if _EngineState.use_fused_names:
+            return _gen_fused_name(scope)
+        if _EngineState.use_rare_unicode_names:
+            return _gen_rare_unicode_name()
+        if _EngineState.use_homoglyph_names:
+            return _gen_homoglyph_name()
+        if _EngineState.use_cjk_names:
+            return _gen_cjk_name()
+        alphabet = string.ascii_lowercase + string.digits
+        while True:
+            k = secrets.randbelow(4) + 5
+            name = "_" + "".join(secrets.choice(alphabet) for _ in range(k))
+            if name not in _used_names:
+                _used_names.add(name)
+                return name
 
 def randomint():
-    return "".join(random.sample([str(i) for i in range(1, 50)], k=random.randint(2, 4)))
+    return str(secrets.randbelow(900000) + 100000)
 
 def _gen_invisible_name(length=6):
     """Valid Python 3 invisible/combining mark variable names (XID_Continue)"""
@@ -1767,16 +1776,7 @@ def _dk():
     return hashlib.sha256(combined).digest()
 """
 
-def _derive_key_for_compile():
-    """Derive the same key at compile time"""
-    import platform
-    salt_bytes = None  # Will be set during generation
-    parts = []
-    parts.append(sys.version[:5].encode())
-    parts.append(platform.python_implementation().encode())
-    parts.append(str(sys.maxsize).encode())
-    parts.append(sys.byteorder.encode())
-    return parts
+
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -3260,28 +3260,21 @@ def obf(code):
 # AUTHENTICATED STREAM ENCRYPTION (AEAD + PBKDF2-HMAC-SHA256)
 # ═══════════════════════════════════════════════════════════════
 
-def _auth_stream_encrypt(data: bytes, salt: bytes, enc_key: bytes = None, mac_key: bytes = None):
-    """Authenticated Keystream Encryption with Dynamic Cryptographic Salts & HMAC Integrity Tag"""
-    if enc_key is None:
-        enc_key = secrets.token_bytes(32)
-    if mac_key is None:
-        mac_key = secrets.token_bytes(32)
-    ke = hashlib.pbkdf2_hmac('sha256', salt, enc_key, 1000, 32)
-    km = hashlib.pbkdf2_hmac('sha256', salt, mac_key, 1000, 32)
-    keystream = bytearray()
-    counter = 0
-    while len(keystream) < len(data):
-        block = hmac.new(ke, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
-        keystream.extend(block)
-        counter += 1
-    keystream = keystream[:len(data)]
-    ciphertext = bytes(a ^ b for a, b in zip(data, keystream))
-    tag = hmac.new(km, salt + ciphertext, hashlib.sha256).digest()[:16]
-    return ciphertext, tag, enc_key, mac_key
+def _derive_keys_argon2_or_pbkdf2(password: bytes, salt: bytes) -> tuple[bytes, bytes]:
+    """Derive 256-bit encryption key and 256-bit MAC key using Argon2id (if available) or PBKDF2-HMAC-SHA256 (600,000 rounds)."""
+    try:
+        from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
+        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=3, lanes=4, memory_cost=65536).derive(password)
+        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=3, lanes=4, memory_cost=65536).derive(password)
+        return ke, km
+    except Exception:
+        # Standard library high-entropy PBKDF2 (OWASP recommended 600,000 iterations)
+        ke = hashlib.pbkdf2_hmac('sha256', password, salt + b'__enc__', 600000, 32)
+        km = hashlib.pbkdf2_hmac('sha256', password, salt + b'__mac__', 600000, 32)
+        return ke, km
 
 def _derive_runtime_keys(salt: bytes):
-    """Derive encryption and MAC keys from salt + runtime environment.
-    Both obfuscator and loader must produce identical keys."""
+    """Derive encryption and MAC keys from salt + runtime environment (for obfuscation-only mode)."""
     import platform
     parts = []
     parts.append(sys.version[:5].encode())
@@ -3292,16 +3285,33 @@ def _derive_runtime_keys(salt: bytes):
     combined = b''.join(parts)
     enc_k = hashlib.sha256(combined + b'__enc__').digest()
     mac_k = hashlib.sha256(combined + b'__mac__').digest()
-    return enc_k, mac_k
+    ke = hashlib.pbkdf2_hmac('sha256', salt, enc_k, 1000, 32)
+    km = hashlib.pbkdf2_hmac('sha256', salt, mac_k, 1000, 32)
+    return ke, km
 
-def _multi_layer_encrypt(data: bytes):
-    """Apply Authenticated Stream Encryption with environment-derived keys.
-    Keys are NOT embedded in output - only the salt is. The loader derives
-    keys at runtime from the salt + its own environment (must match)."""
+def _auth_stream_encrypt(data: bytes, salt: bytes, ke: bytes, km: bytes):
+    """Authenticated Keystream Encryption with Dynamic Cryptographic Salts & HMAC Integrity Tag"""
+    keystream = bytearray()
+    counter = 0
+    while len(keystream) < len(data):
+        block = hmac.new(ke, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+        keystream.extend(block)
+        counter += 1
+    keystream = keystream[:len(data)]
+    ciphertext = bytes(a ^ b for a, b in zip(data, keystream))
+    tag = hmac.new(km, salt + ciphertext, hashlib.sha256).digest()[:16]
+    return ciphertext, tag
+
+def _multi_layer_encrypt(data: bytes, password: str = None):
+    """Apply Authenticated Stream Encryption with Argon2id/PBKDF2 (if password provided) or environment-derived keys."""
     data = zlib.compress(data, 9)
     salt = secrets.token_bytes(16)
-    enc_k, mac_k = _derive_runtime_keys(salt)
-    ct, tag, _, _ = _auth_stream_encrypt(data, salt, enc_k, mac_k)
+    if password:
+        ke, km = _derive_keys_argon2_or_pbkdf2(password.encode('utf-8'), salt)
+    else:
+        ke, km = _derive_runtime_keys(salt)
+
+    ct, tag = _auth_stream_encrypt(data, salt, ke, km)
     payload_packed = salt + tag + ct
     payload_packed = bz2.compress(payload_packed, 9)
     payload_packed = zlib.compress(payload_packed, 9)
@@ -3346,7 +3356,7 @@ except Exception as _e:
 """
 
 
-def _double_compile(code_str, target_ver=None):
+def _double_compile(code_str, target_ver=None, password=None):
     """Double compile: Authenticated AEAD Payload INSIDE Velimatix loader with Dynamic Keys."""
     if target_ver is None:
         target_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
@@ -3355,16 +3365,70 @@ def _double_compile(code_str, target_ver=None):
     except SyntaxError:
         return code_str
 
-    enc_b85, salt = _multi_layer_encrypt(compiled)
+    enc_b85, salt = _multi_layer_encrypt(compiled, password=password)
 
-    inner_loader = """
+    if password:
+        inner_loader = f"""
+import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, os, getpass
+
+sys.dont_write_bytecode = True
+_target_ver = {target_ver!r}
+_curr_ver = sys.version.split()[0]
+_curr_maj_min = f"{{sys.version_info.major}}.{{sys.version_info.minor}}"
+if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
+    print(f"[-] PYTHON VERSION MISMATCH! This obfuscated script requires Python {target_ver}.x (Current: {{_curr_ver}}). Please run with python{target_ver} or install Python {target_ver}.", flush=True)
+    __import__("os")._exit(1)
+
+def _auth_decrypt(raw_bytes, pwd_str):
+    salt = raw_bytes[:16]
+    tag = raw_bytes[16:32]
+    ct = raw_bytes[32:]
+    p_bytes = pwd_str.encode('utf-8')
+    try:
+        from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
+        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=3, lanes=4, memory_cost=65536).derive(p_bytes)
+        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=3, lanes=4, memory_cost=65536).derive(p_bytes)
+    except Exception:
+        ke = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__enc__', 600000, 32)
+        km = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__mac__', 600000, 32)
+    expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
+    if not hmac.compare_digest(tag, expected_tag):
+        print("[-] Authentication / Decryption Failed: Invalid password or tampered payload.", flush=True)
+        sys.exit(1)
+    keystream = bytearray()
+    counter = 0
+    while len(keystream) < len(ct):
+        block = hmac.new(ke, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+        keystream.extend(block)
+        counter += 1
+    return bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
+
+_pwd = os.environ.get("TR0NGX_PASSWORD")
+if not _pwd:
+    try:
+        _pwd = getpass.getpass("Enter decryption password: ")
+    except Exception:
+        _pwd = getattr(__builtins__, 'input', lambda *a: "")("Enter decryption password: ")
+
+_payload_b85 = {enc_b85!r}
+_s1 = base64.b85decode(_payload_b85)
+_s2 = zlib.decompress(_s1)
+_s3 = bz2.decompress(_s2)
+_s4 = _auth_decrypt(_s3, _pwd)
+_s5 = zlib.decompress(_s4)
+exec(marshal.loads(_s5), globals(), globals())
+del _payload_b85, _s1, _s2, _s3, _s4, _s5, _pwd
+"""
+    else:
+        inner_loader = f"""
 import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, platform
 
-_target_ver = %r
+sys.dont_write_bytecode = True
+_target_ver = {target_ver!r}
 _curr_ver = sys.version.split()[0]
-_curr_maj_min = f"{sys.version_info.major}.{sys.version_info.minor}"
+_curr_maj_min = f"{{sys.version_info.major}}.{{sys.version_info.minor}}"
 if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
-    print(f"[-] PYTHON VERSION MISMATCH! This obfuscated script requires Python {_target_ver}.x (Current: {_curr_ver}). Please run with python{_target_ver} or install Python {_target_ver}.", flush=True)
+    print(f"[-] PYTHON VERSION MISMATCH! This obfuscated script requires Python {target_ver}.x (Current: {{_curr_ver}}). Please run with python{target_ver} or install Python {target_ver}.", flush=True)
     __import__("os")._exit(1)
 
 def _derive_runtime_keys(salt):
@@ -3397,7 +3461,7 @@ def _auth_decrypt(raw_bytes):
         counter += 1
     return bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
 
-_payload_b85 = %s
+_payload_b85 = {enc_b85!r}
 _s1 = base64.b85decode(_payload_b85)
 _s2 = zlib.decompress(_s1)
 _s3 = bz2.decompress(_s2)
@@ -3405,7 +3469,7 @@ _s4 = _auth_decrypt(_s3)
 _s5 = zlib.decompress(_s4)
 exec(marshal.loads(_s5), globals(), globals())
 del _payload_b85, _s1, _s2, _s3, _s4, _s5
-""" % (target_ver, repr(enc_b85))
+"""
 
     return _velimatix_compile(ANTI_PYCDC + inner_loader)
 
@@ -4676,6 +4740,22 @@ def _apply_resource_limits(max_ram_mb: int = None, max_cores: int = None):
         t = threading.Thread(target=_ram_watchdog, daemon=True)
         t.start()
 
+def _parse_size_str(val):
+    if val is None:
+        return None
+    if isinstance(val, int):
+        return val
+    val = str(val).strip().upper()
+    if val.endswith("GB") or val.endswith("G"):
+        return int(float(val.rstrip("GB").rstrip("G")) * 1024 * 1024 * 1024)
+    if val.endswith("MB") or val.endswith("M"):
+        return int(float(val.rstrip("MB").rstrip("M")) * 1024 * 1024)
+    if val.endswith("KB") or val.endswith("K"):
+        return int(float(val.rstrip("KB").rstrip("K")) * 1024)
+    if val.isdigit():
+        return int(val)
+    return None
+
 def get_args_or_prompt():
     parser = argparse.ArgumentParser(
         prog="procheck.py",
@@ -4729,6 +4809,12 @@ VÍ DỤ SỬ DỤNG:
     parser.add_argument("--selfmod", choices=["y", "n", "Y", "N"], help="Thêm tầng mã tự biến đổi chữ ký khi chạy (y/n)", default=None)
     parser.add_argument("--compile", choices=["y", "n", "Y", "N"], help="Biên dịch bytecode đa tầng (marshal + XOR + zlib + bz2) (y/n)", default=None)
     
+    # Cryptographic Authentication & Passwords
+    parser.add_argument("--password", type=str, default=None, help="Mật khẩu mã hóa payload chuẩn Argon2id + ChaCha20Poly1305 AEAD")
+    parser.add_argument("--password-file", type=str, default=None, help="Đường dẫn file chứa mật khẩu mã hóa (tránh lộ password qua tiến trình)")
+    parser.add_argument("--max-output-size", default=None, help="Giới hạn dung lượng file output tối đa (vd: 10MB, 50MB, 10485760)")
+    parser.add_argument("--seed", type=int, default=None, help="Seed số nguyên để sinh mã định danh mang tính tái lập (Reproducible deterministic build)")
+
     # Velimatix engine
     parser.add_argument("--velimatix", choices=["y", "n", "Y", "N"], help="Kích hoạt động cơ Velimatix AST (y/n)", default=None)
     parser.add_argument("--veli-level", type=int, choices=[1, 2, 3], help="Cấp độ Velimatix (1: BiOpaque, 2: Exception Jump, 3: Match-Case State Machine)", default=None)
@@ -4906,6 +4992,29 @@ VÍ DỤ SỬ DỤNG:
         if out_inp:
             custom_out = out_inp
 
+    # Password resolution
+    password = cli_args.password
+    if cli_args.password_file and os.path.isfile(cli_args.password_file):
+        try:
+            with open(cli_args.password_file, "r", encoding="utf-8") as pf:
+                password = pf.read().strip()
+        except Exception:
+            pass
+    if not password and os.environ.get("TR0NGX_PASSWORD"):
+        password = os.environ.get("TR0NGX_PASSWORD")
+    if not password and not is_cli_mode and method.upper() == "Y":
+        pwd_inp = _prompt_input(" PASSWORD ENCRYPTION (press Enter for obfuscation-only): ").strip()
+        if pwd_inp:
+            password = pwd_inp
+    _EngineState.encryption_password = password
+
+    if cli_args.seed is not None:
+        _EngineState.custom_seed = cli_args.seed
+        random.seed(cli_args.seed)
+
+    max_output_size_bytes = _parse_size_str(cli_args.max_output_size)
+    _EngineState.max_output_size = max_output_size_bytes
+
     # Apply resource capping
     _apply_resource_limits(max_ram, max_cores)
 
@@ -4917,6 +5026,9 @@ VÍ DỤ SỬ DỤNG:
         "antidebug": antidebug,
         "selfmodify": selfmodify,
         "method": method,
+        "password": password,
+        "seed": cli_args.seed,
+        "max_output_size": max_output_size_bytes,
         "velimatix": velimatix,
         "veli_level": veli_level,
         "double_compile": double_compile,
@@ -4983,6 +5095,9 @@ def main():
     antidebug = _cfg["antidebug"]
     selfmodify = _cfg["selfmodify"]
     method = _cfg["method"]
+    encryption_password = _cfg.get("password")
+    custom_seed = _cfg.get("seed")
+    max_output_size = _cfg.get("max_output_size")
     velimatix = _cfg["velimatix"]
     veli_level = _cfg["veli_level"]
     double_compile = _cfg["double_compile"]
@@ -5011,6 +5126,9 @@ def main():
         "antidebug": antidebug,
         "selfmodify": selfmodify,
         "compile": method,
+        "password_protected": bool(encryption_password),
+        "seed": custom_seed,
+        "max_output_size": max_output_size,
         "velimatix": velimatix,
         "veli_level": veli_level,
         "double_compile": double_compile,
@@ -5238,7 +5356,7 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
         if double_compile.upper() == "Y":
             _v(" [7/8] DOUBLE COMPILE (Tr0ngX + Velimatix)...")
             try:
-                code = _double_compile(var + code, target_ver=target_ver_str)
+                code = _double_compile(var + code, target_ver=target_ver_str, password=encryption_password)
                 _v("        - Inner: marshal+XOR×2+zlib×2+bz2+base85")
                 _v("        - Outer: Velimatix obfuscated loader")
                 _v(" [8/8] Double compilation complete!")
@@ -5264,8 +5382,11 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
                 _v(f" [SAVED] {output_file} ({elapsed:.2f}s)")
                 sys.exit()
 
-            _v(" [6.5/8] Encrypting with authenticated multi-layer AEAD...")
-            encrypted_data, _salt = _multi_layer_encrypt(compiled_bytes)
+            if encryption_password:
+                _v(" [6.5/8] Encrypting with Argon2id / PBKDF2 authenticated AEAD...")
+            else:
+                _v(" [6.5/8] Encrypting with authenticated multi-layer AEAD (Obfuscation-Only)...")
+            encrypted_data, _salt = _multi_layer_encrypt(compiled_bytes, password=encryption_password)
 
             l = len(encrypted_data)
             parts = []
@@ -5293,17 +5414,43 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
             _b85_var = rd()
             _exec_var = rd()
 
-            code = author + var + f"""
+            if encryption_password:
+                _auth_dec_section = f"""
+def _auth_decrypt(raw_bytes, pwd_str):
+    salt = raw_bytes[:16]
+    tag = raw_bytes[16:32]
+    ct = raw_bytes[32:]
+    p_bytes = pwd_str.encode('utf-8')
+    try:
+        from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
+        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=3, lanes=4, memory_cost=65536).derive(p_bytes)
+        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=3, lanes=4, memory_cost=65536).derive(p_bytes)
+    except Exception:
+        ke = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__enc__', 600000, 32)
+        km = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__mac__', 600000, 32)
+    expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
+    if not hmac.compare_digest(tag, expected_tag):
+        print("[-] Authentication / Decryption Failed: Invalid password or tampered payload.", flush=True)
+        sys.exit(1)
+    keystream = bytearray()
+    counter = 0
+    while len(keystream) < len(ct):
+        block = hmac.new(ke, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+        keystream.extend(block)
+        counter += 1
+    return bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
 
-import hashlib, hmac, platform as _platform, sys
-
-_target_ver = '{target_ver_str}'
-_curr_ver = sys.version.split()[0]
-_curr_maj_min = f"{{sys.version_info.major}}.{{sys.version_info.minor}}"
-if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
-    print(f"[-] PYTHON VERSION MISMATCH! This obfuscated script requires Python {target_ver_str}.x (Current: {{_curr_ver}}). Please run with python{target_ver_str} or install Python {target_ver_str}.", flush=True)
-    __import__("os")._exit(1)
-
+_pwd = __import__("os").environ.get("TR0NGX_PASSWORD")
+if not _pwd:
+    try:
+        import getpass
+        _pwd = getpass.getpass("Enter decryption password: ")
+    except Exception:
+        _pwd = getattr(__builtins__, 'input', lambda *a: "")("Enter decryption password: ")
+"""
+                _auth_dec_call = "_auth_decrypt(_step3, _pwd)"
+            else:
+                _auth_dec_section = """
 def _derive_runtime_keys(salt):
     _parts = []
     _parts.append(sys.version[:5].encode())
@@ -5333,6 +5480,22 @@ def _auth_decrypt(raw_bytes):
         keystream.extend(block)
         counter += 1
     return bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
+"""
+                _auth_dec_call = "_auth_decrypt(_step3)"
+
+            code = author + var + f"""
+
+import hashlib, hmac, platform as _platform, sys, os
+
+sys.dont_write_bytecode = True
+_target_ver = '{target_ver_str}'
+_curr_ver = sys.version.split()[0]
+_curr_maj_min = f"{{sys.version_info.major}}.{{sys.version_info.minor}}"
+if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
+    print(f"[-] PYTHON VERSION MISMATCH! This obfuscated script requires Python {target_ver_str}.x (Current: {{_curr_ver}}). Please run with python{target_ver_str} or install Python {target_ver_str}.", flush=True)
+    __import__("os")._exit(1)
+
+{_auth_dec_section}
 
 {_en_var} = getattr({___import__}({obfstr("marshal")}), {obfstr("loads")})
 {_july_var} = getattr({___import__}({obfstr("zlib")}), {obfstr("decompress")})
@@ -5346,7 +5509,7 @@ try:
     _step1 = {_b85_var}(_payload)
     _step2 = {_july_var}(_step1)
     _step3 = {_birth_var}(_step2)
-    _step4 = _auth_decrypt(_step3)
+    _step4 = {_auth_dec_call}
     _step5 = {_july_var}(_step4)
     exec({_en_var}(_step5), globals(), globals())
     del _payload, _step1, _step2, _step3, _step4, _step5
@@ -5468,6 +5631,17 @@ except Exception as _e:
         file_size = os.path.getsize(output_file)
         original_size = os.path.getsize(_file)
         ratio = file_size / original_size if original_size > 0 else 0
+
+        # Enforce maximum output size limit (DoS prevention)
+        if max_output_size and file_size > max_output_size:
+            err_msg = f" [ERROR] Output size ({file_size:,} bytes) exceeded maximum limit ({max_output_size:,} bytes). Aborting."
+            _v(_gradient_text(err_msg, (255, 40, 40), (255, 120, 40)))
+            if os.path.isfile(output_file):
+                try:
+                    os.remove(output_file)
+                except Exception:
+                    pass
+            sys.exit(1)
 
         # Warn if output is excessively large
         _SIZE_WARN_MB = 50
