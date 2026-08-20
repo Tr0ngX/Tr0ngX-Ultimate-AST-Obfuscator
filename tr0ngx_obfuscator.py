@@ -4477,9 +4477,32 @@ def stage(text: str, symbol: str = 'TR0NGX', col1=light, col2=None) -> str:
     
     if _EngineState.cli_quiet_mode:
         return f"[{symbol}] {clean_text}"
-    if col2 is None:
-        col2 = light if symbol == 'TR0NGX' else purple
-    return f""" {Col.Symbol(symbol, col1, dark)} {Colorate.Diagonal(Colors.DynamicMIX((purple, light)), clean_text)}{light}"""
+
+    upper_text = clean_text.upper()
+    if "ENTER FILE" in upper_text:
+        # Ultra-striking Amber Gold to Hot Neon Magenta gradient for file input prompts
+        gradient_body = _gradient_text(clean_text, (255, 225, 30), (255, 40, 150))
+    elif "SAVED:" in upper_text or "SUCCESS" in upper_text or "COMPLETE" in upper_text:
+        # Electric Cyan to Neon Spring Green gradient
+        gradient_body = _gradient_text(clean_text, (0, 240, 255), (50, 255, 130))
+    elif any(kw in upper_text for kw in ["WARNING", "ERROR", "SYNTAX ERROR", "NOT FOUND", "FAILED"]):
+        # Fiery Crimson Red to Radiant Gold-Orange gradient
+        gradient_body = _gradient_text(clean_text, (255, 45, 45), (255, 185, 25))
+    elif any(kw in upper_text for kw in ["MODE", "LEVEL", "CORES", "RAM", "LIMIT"]):
+        # Neon Sunset Orange to Electric Purple gradient
+        gradient_body = _gradient_text(clean_text, (255, 175, 40), (220, 75, 255))
+    elif "? (Y/N)" in upper_text or "?" in upper_text:
+        # Neon Turquoise to Orchid Violet gradient
+        gradient_body = _gradient_text(clean_text, (40, 215, 255), (205, 105, 255))
+    elif any(kw in upper_text for kw in ["ORIGINAL:", "OUTPUT:", "TIME:", "FUSION:", "DEBUG MAP", "OBF:", "ANTI:", "COMPILE:", "KRAMER:", "CJK"]):
+        # Ice Cyan to Soft Magenta gradient
+        gradient_body = _gradient_text(clean_text, (100, 220, 255), (180, 120, 255))
+    else:
+        # Bright Cyan to Vivid Purple default gradient
+        gradient_body = _gradient_text(clean_text, (60, 210, 255), (210, 95, 255))
+
+    tag = f"\033[1;38;2;0;240;255m[\033[38;2;135;120;255m{symbol}\033[38;2;240;80;255m]\033[0m"
+    return f" {tag} {gradient_body} "
 
 _raw_input = input
 _raw_print = print
