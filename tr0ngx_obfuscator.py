@@ -4217,54 +4217,55 @@ purple = Colors.StaticMIX((Col.green, Col.yellow))
 bpurple = Colors.StaticMIX((Col.pink, Col.blue, Col.blue))
 
 text = f"""
- TR0NGX x VELIMATIX - ULTIMATE OBFUSCATOR
- AST ENGINE v4.0 - MAXIMUM POWER EDITION
+  ⚡ TR0NGX x VELIMATIX - ULTIMATE OBFUSCATOR
+  🚀 AST ENGINE v4.0 - MAXIMUM POWER EDITION
 
- ══════════ TR0NGX ENGINE ══════════
- STRING : 6 STRATEGIES (LAMBDA/XOR/SPLIT/REVERSE/SHUFFLE/BYTEWISE)
- INTEGER: 8 STRATEGIES (BYTE/OFFSET/XOR/ARITHMETIC/SHIFT/NESTED)
- CONTROL: STATE MACHINE + TRY-CATCH + MATCH-CASE + JUNK
+ ══════════ ⚡ TR0NGX CORE ENGINE ══════════
+  • 📜 STRING    : 6 STRATEGIES (LAMBDA/XOR/SPLIT/REVERSE/SHUFFLE/BYTEWISE)
+  • 🔢 INTEGER   : 8 STRATEGIES (BYTE/OFFSET/XOR/ARITHMETIC/SHIFT/NESTED)
+  • 🔀 CONTROL   : STATE MACHINE + TRY-CATCH + MATCH-CASE + JUNK DECOYS
 
- ══════════ VELIMATIX ENGINE ══════════
- BI-OPAQUE  : PREDICATE INJECTION + ROADLINE GENERATION
- EXCEPTION  : WHILE-LOOP + EXCEPTION JUMP CONTROL FLOW
- CONTROL    : MATCH-CASE STATE MACHINE + JUNK CASES
- CALL OBF   : BUILTIN → GETATTR CHAIN RECONSTRUCTION
- MUTATOR    : XOR CHAIN + LAMBDA WRAP + STACK ELEMENTS
- CLONE      : FAKE METHOD COPIES + DEAD CODE INJECTION
- BUILTIN    : FULL BUILTIN RENAME (60+ FUNCTIONS)
- STRING     : BYTEWISE XOR + SHIFT + NOT ENCODING
+ ══════════ 🔮 VELIMATIX AST ENGINE ══════════
+  • 💎 BI-OPAQUE  : PREDICATE INJECTION + ROADLINE GENERATION
+  • 🌀 EXCEPTION  : WHILE-LOOP + EXCEPTION JUMP CONTROL FLOW
+  • 🧩 CONTROL    : MATCH-CASE STATE MACHINE + JUNK CASES
+  • 🔗 CALL OBF   : BUILTIN -> GETATTR CHAIN RECONSTRUCTION
+  • 🧬 MUTATOR    : XOR CHAIN + LAMBDA WRAP + STACK ELEMENTS
+  • 👥 CLONE      : FAKE METHOD COPIES + DEAD CODE INJECTION
+  • 🏷️ BUILTIN    : FULL BUILTIN RENAME (60+ FUNCTIONS)
+  • 🔒 STRING     : BYTEWISE XOR + SHIFT + NOT ENCODING
 
- ══════════ PROTECTION ══════════
- ANTI-DEBUG    : 6-VECTOR DETECTION + CONTINUOUS MONITOR
- ANTI-HOOK     : VELIMATIX SHIELD + EXEC/EVAL GUARD
- ANTI-IMPORT   : META_PATH BLOCKER (15+ TOOLS BLOCKED)
- ANTI-DUMP     : CHUNKED EXECUTION + SELF-MODIFYING
- ANTI-DECOMPILE: PYCDC/UNCOMPYLE BLOCKER (8000+ JUNK)
- ANTI-MARSHAL  : TYPE VERIFY + CALLER CHECK + GUARD
+ ══════════ 🛡️ PROTECTION MATRIX ══════════
+  • 🚨 ANTI-DEBUG    : 6-VECTOR DETECTION + CONTINUOUS MONITOR
+  • 🛑 ANTI-HOOK     : VELIMATIX SHIELD + EXEC/EVAL GUARD
+  • 🚫 ANTI-IMPORT   : META_PATH BLOCKER (15+ TOOLS BLOCKED)
+  • 🧱 ANTI-DUMP     : CHUNKED EXECUTION + SELF-MODIFYING
+  • 🛡️ ANTI-DECOMPILE: PYCDC/UNCOMPYLE BLOCKER (8000+ JUNK)
+  • 🔐 ANTI-MARSHAL  : TYPE VERIFY + CALLER CHECK + GUARD
 
- ══════════ COMPILER ══════════
- MARSHAL + XOR(x2) + ZLIB(x2) + BZ2 + BASE85
- 8-PART SPLIT + DYNAMIC KEY DERIVATION
- DOUBLE COMPILE: TR0NGX INSIDE VELIMATIX LOADER
+ ══════════ 🔐 AEAD COMPILER ══════════
+  • 📦 PACKAGING     : MARSHAL + XOR(x2) + ZLIB(x2) + BZ2 + BASE85
+  • 🔑 DERIVATION    : 8-PART SPLIT + DYNAMIC KEY DERIVATION
+  • 🧬 DOUBLE COMPILE: TR0NGX INSIDE VELIMATIX LOADER
 
- MODE 1 : LOW    (FAST, BASIC PROTECTION)
- MODE 2 : MEDIUM (RECOMMENDED, FULL OBF)
- MODE 3 : HIGH   (MAXIMUM, ALL LAYERS)
+  • 🟢 MODE 1 : LOW    (FAST, BASIC PROTECTION)
+  • 🟡 MODE 2 : MEDIUM (RECOMMENDED, FULL OBF)
+  • 🔴 MODE 3 : HIGH   (MAXIMUM, ALL LAYERS)
 
- ══════════ KRAMER ENGINE ══════════
- KYRIE ELEISON  : INDEX SHIFT + ASCII CAESAR OFFSET
- DYNAMIC CLASS  : RUNTIME OBFUSCATED CLASS + FAKE ANNOTATIONS
- ANTI-TAMPER    : STATICAL KEYWORD DISCOVERY GUARD
- FORCE PYTHON   : LOCK EXECUTION TO SPECIFIC PY VERSION (E.G. 3.10, 3.11, 3.12, 3.14)
- CJK / PYCOOL   : CHINESE CHARACTER IDENTIFIERS + JUNK WATERMARKS
- CLI SUPPORT    : FULL COMMAND LINE ARGUMENTS (-i, -o, -m, --cjk-vars, ETC.)
+ ══════════ 👑 KRAMER & HYPERION ENGINES ══════════
+  • 👑 KYRIE ELEISON  : INDEX SHIFT + ASCII CAESAR OFFSET
+  • 🏛️ DYNAMIC CLASS  : RUNTIME OBFUSCATED CLASS + FAKE ANNOTATIONS
+  • 🌌 HYPERION TOKEN : BUILTINS / SCOPE / MATH / STR SPLITTING
+  • 🎭 CAMOUFLAGE     : FAKE SCIENTIFIC CLASS SIMULATION
+  • 🔒 FORCE PYTHON   : LOCK EXECUTION TO SPECIFIC PY VERSION (3.10 - 3.14)
+  • 🀄 CJK / PYCOOL   : CHINESE IDENTIFIERS + PYCOOL WATERMARKS
 
- ══════════ UNICODE ENGINES ══════════
- EMOJI-OBF     : CODE → EMOJI SEQUENCE ENCODER (U+1F400 ANIMAL BLOCK)
- HOMOGLYPH     : CYRILLIC/GREEK LOOKALIKE NAMES (a→а, o→о, e→е)
- RARE-UNICODE  : CJK EXTENSION B + KANGXI RADICALS (龘 鱻 𪚥)
- WHITESPACE    : INVISIBLE SPACE/TAB BINARY ENCODING + LOADER
+ ══════════ 🌀 UNICODE MATRIX ENGINES ══════════
+  • 🐾 EMOJI-OBF     : CODE -> EMOJI SEQUENCE ENCODER (U+1F400 ANIMAL)
+  • 🔤 HOMOGLYPH     : CYRILLIC/GREEK LOOKALIKE NAMES (a/o/e)
+  • 🀄 RARE-UNICODE  : CJK EXTENSION B + KANGXI RADICALS (龘 鱻 𪚥)
+  • ☣️ ZALGO MARKS   : EXTREME PEP 3131 COMBINING DIACRITICS CASCADE
+  • 👻 WHITESPACE    : INVISIBLE SPACE/TAB BINARY BITFIELD MATRIX
 """
 
 banner = f"""
@@ -4702,7 +4703,7 @@ VÍ DỤ SỬ DỤNG:
         with open(_file, "r", encoding="utf-8-sig", errors="replace") as file:
             raw_code = file.read().lstrip('\ufeff').lstrip('\ufeff')
     else:
-        _file = _prompt_input(" ENTER FILE: ").strip().strip('"').strip("'")
+        _file = _prompt_input(" 📂 ENTER FILE: ").strip().strip('"').strip("'")
         while True:
             try:
                 with open(_file, "r", encoding="utf-8-sig", errors="replace") as file:
@@ -4710,12 +4711,12 @@ VÍ DỤ SỬ DỤNG:
                 try:
                     ast.parse(raw_code)
                 except SyntaxError as e:
-                    _v(f" SYNTAX ERROR: {e}")
-                    _file = _prompt_input(" ENTER FILE AGAIN: ").strip().strip('"').strip("'")
+                    _v(f" ⚠️ SYNTAX ERROR: {e}")
+                    _file = _prompt_input(" 📂 ENTER FILE AGAIN: ").strip().strip('"').strip("'")
                     continue
                 break
             except FileNotFoundError:
-                _file = _prompt_input(" ENTER FILE AGAIN (not found): ").strip().strip('"').strip("'")
+                _file = _prompt_input(" 📂 ENTER FILE AGAIN (not found): ").strip().strip('"').strip("'")
 
     # 2. Mode
     if cli_args.mode is not None:
@@ -4723,19 +4724,19 @@ VÍ DỤ SỬ DỤNG:
     else:
         while True:
             try:
-                mode = int(_prompt_input(" ENTER MODE (1-3): "))
+                mode = int(_prompt_input(" ⚙️ ENTER MODE (1-3): "))
                 if 1 <= mode <= 3:
                     break
-                _v(" ENTER 1, 2, OR 3")
+                _v(" ⚠️ ENTER 1, 2, OR 3")
             except ValueError:
-                _v(" INVALID INPUT")
+                _v(" ⚠️ INVALID INPUT")
 
     # 3. Flags
-    moreobf = cli_args.moreobf or ("N" if is_cli_mode else _prompt_input(" MORE OBF? (y/n): "))
-    antidebug = cli_args.antidebug or ("N" if is_cli_mode else _prompt_input(" ANTI DEBUG? (y/n): "))
-    selfmodify = cli_args.selfmod or ("N" if is_cli_mode else _prompt_input(" SELF-MODIFYING CODE? (y/n): "))
-    method = cli_args.compile or ("N" if is_cli_mode else _prompt_input(" COMPILE? (y/n): "))
-    velimatix = cli_args.velimatix or ("N" if is_cli_mode else _prompt_input(" VELIMATIX ENGINE? (y/n): "))
+    moreobf = cli_args.moreobf or ("N" if is_cli_mode else _prompt_input(" ➕ MORE OBF? (y/n): "))
+    antidebug = cli_args.antidebug or ("N" if is_cli_mode else _prompt_input(" 🛡️ ANTI DEBUG? (y/n): "))
+    selfmodify = cli_args.selfmod or ("N" if is_cli_mode else _prompt_input(" 🧬 SELF-MODIFYING CODE? (y/n): "))
+    method = cli_args.compile or ("N" if is_cli_mode else _prompt_input(" 🔐 COMPILE? (y/n): "))
+    velimatix = cli_args.velimatix or ("N" if is_cli_mode else _prompt_input(" 🔮 VELIMATIX ENGINE? (y/n): "))
 
     veli_level = 1
     if velimatix.upper() == "Y":
@@ -4747,30 +4748,30 @@ VÍ DỤ SỬ DỤNG:
             else:
                 while True:
                     try:
-                        veli_level = int(_prompt_input(" VELIMATIX LEVEL (1-3): "))
+                        veli_level = int(_prompt_input(" 🎚️ VELIMATIX LEVEL (1-3): "))
                         if 1 <= veli_level <= 3:
                             break
-                        _v(" ENTER 1, 2, OR 3")
+                        _v(" ⚠️ ENTER 1, 2, OR 3")
                     except ValueError:
-                        _v(" INVALID")
+                        _v(" ⚠️ INVALID")
 
     double_compile = "N"
     if method.upper() == "Y" and velimatix.upper() == "Y":
-        double_compile = cli_args.double_compile or ("Y" if is_cli_mode else _prompt_input(" DOUBLE COMPILE (Veli wrap)? (y/n): "))
+        double_compile = cli_args.double_compile or ("Y" if is_cli_mode else _prompt_input(" 📦 DOUBLE COMPILE (Veli wrap)? (y/n): "))
 
-    kramer_wrap_choice = cli_args.kramer or ("N" if is_cli_mode else _prompt_input(" KRAMER OUTER SHIELD (Kyrie Eleison)? (y/n): "))
+    kramer_wrap_choice = cli_args.kramer or ("N" if is_cli_mode else _prompt_input(" 👑 KRAMER OUTER SHIELD (Kyrie Eleison)? (y/n): "))
 
-    cjk_choice = cli_args.cjk_vars or ("N" if is_cli_mode else _prompt_input(" CJK CHINESE IDENTIFIERS & PYCOOL DOCSTRINGS? (y/n): "))
+    cjk_choice = cli_args.cjk_vars or ("N" if is_cli_mode else _prompt_input(" 🀄 CJK CHINESE IDENTIFIERS & PYCOOL DOCSTRINGS? (y/n): "))
 
     # New Obfuscation Modes
-    matrix_choice = cli_args.matrix or ("N" if is_cli_mode else _prompt_input(" MATRIX DEEP FUSION (Hybrid Variables + Fused 3-Track Shield)? (y/n): "))
-    emoji_obf_choice = cli_args.emoji_obf or ("N" if is_cli_mode else _prompt_input(" EMOJI OBFUSCATION (code -> Animal emoji stream)? (y/n): "))
-    homoglyph_choice = cli_args.homoglyph or ("N" if is_cli_mode else _prompt_input(" HOMOGLYPH NAMES (Cyrillic/Greek lookalikes: a/o/e)? (y/n): "))
-    rare_unicode_choice = cli_args.rare_unicode or ("N" if is_cli_mode else _prompt_input(" RARE UNICODE NAMES (CJK Ext-B Ancient glyphs)? (y/n): "))
-    zalgo_choice = getattr(cli_args, 'zalgo', None) or ("N" if is_cli_mode else _prompt_input(" ZALGO COMBINING MARKS (Extreme Diacritics Cascade)? (y/n): "))
-    whitespace_obf_choice = cli_args.whitespace_obf or ("N" if is_cli_mode else _prompt_input(" WHITESPACE OBFUSCATION (code -> Invisible space/tab)? (y/n): "))
-    hyperion_choice = getattr(cli_args, 'hyperion', None) or ("N" if is_cli_mode else _prompt_input(" HYPERION ENGINE (Builtin/Import/Var token remap + Chunk shell)? (y/n): "))
-    camouflage_choice = getattr(cli_args, 'camouflage', None) or ("N" if is_cli_mode else _prompt_input(" HYPERION CAMOUFLAGE (Fake Scientific Simulation Class)? (y/n): "))
+    matrix_choice = cli_args.matrix or ("N" if is_cli_mode else _prompt_input(" 🌀 MATRIX DEEP FUSION (Hybrid Variables + Fused 3-Track Shield)? (y/n): "))
+    emoji_obf_choice = cli_args.emoji_obf or ("N" if is_cli_mode else _prompt_input(" 🐾 EMOJI OBFUSCATION (code -> Animal emoji stream)? (y/n): "))
+    homoglyph_choice = cli_args.homoglyph or ("N" if is_cli_mode else _prompt_input(" 🔤 HOMOGLYPH NAMES (Cyrillic/Greek lookalikes: a/o/e)? (y/n): "))
+    rare_unicode_choice = cli_args.rare_unicode or ("N" if is_cli_mode else _prompt_input(" 🏛️ RARE UNICODE NAMES (CJK Ext-B Ancient glyphs)? (y/n): "))
+    zalgo_choice = getattr(cli_args, 'zalgo', None) or ("N" if is_cli_mode else _prompt_input(" ☣️ ZALGO COMBINING MARKS (Extreme Diacritics Cascade)? (y/n): "))
+    whitespace_obf_choice = cli_args.whitespace_obf or ("N" if is_cli_mode else _prompt_input(" 👻 WHITESPACE OBFUSCATION (code -> Invisible space/tab)? (y/n): "))
+    hyperion_choice = getattr(cli_args, 'hyperion', None) or ("N" if is_cli_mode else _prompt_input(" 🌌 HYPERION ENGINE (Builtin/Import/Var token remap + Chunk shell)? (y/n): "))
+    camouflage_choice = getattr(cli_args, 'camouflage', None) or ("N" if is_cli_mode else _prompt_input(" 🎭 HYPERION CAMOUFLAGE (Fake Scientific Simulation Class)? (y/n): "))
 
     # Force Python version
     if cli_args.force_py is not None:
@@ -4785,30 +4786,36 @@ VÍ DỤ SỬ DỤNG:
             force_py_choice = "N"
             forced_py_ver = ""
         else:
-            force_py_choice = _prompt_input(" FORCE PYTHON VERSION? (y/n): ")
+            force_py_choice = _prompt_input(" 🔒 FORCE PYTHON VERSION? (y/n): ")
             forced_py_ver = ""
             if force_py_choice.upper() == "Y":
                 cur_v = f"{sys.version_info.major}.{sys.version_info.minor}"
-                forced_py_ver = _prompt_input(f" ENTER PY VERSION (default {cur_v}): ").strip()
+                forced_py_ver = _prompt_input(f" 🐍 ENTER PY VERSION (default {cur_v}): ").strip()
                 if not forced_py_ver:
                     forced_py_ver = cur_v
 
     # Debug Map
     debug_map_arg = cli_args.debug_map
     if debug_map_arg is None and not is_cli_mode:
-        dbg_choice = _prompt_input(" GENERATE DEBUG MAP (.json)? (y/n): ")
+        dbg_choice = _prompt_input(" 🗺️ GENERATE DEBUG MAP (.json)? (y/n): ")
         if dbg_choice.upper() == "Y":
             debug_map_arg = "AUTO"
 
     # Resource limits in interactive prompt if not passed
     if not is_cli_mode and max_ram is None:
-        ram_inp = _prompt_input(" MAX RAM LIMIT IN MB (press Enter for unlimited): ").strip()
+        ram_inp = _prompt_input(" 💾 MAX RAM LIMIT IN MB (press Enter for unlimited): ").strip()
         if ram_inp.isdigit():
             max_ram = int(ram_inp)
     if not is_cli_mode and max_cores is None:
-        core_inp = _prompt_input(" MAX CPU CORES (press Enter for auto): ").strip()
+        core_inp = _prompt_input(" ⚡ MAX CPU CORES (press Enter for auto): ").strip()
         if core_inp.isdigit():
             max_cores = int(core_inp)
+
+    # Custom Output Path in interactive prompt if not passed
+    if not is_cli_mode and custom_out is None:
+        out_inp = _prompt_input(" 📁 CUSTOM OUTPUT PATH (press Enter for default): ").strip()
+        if out_inp:
+            custom_out = out_inp
 
     # Apply resource capping
     _apply_resource_limits(max_ram, max_cores)
@@ -4952,7 +4959,7 @@ def main():
     if camouflage_choice.upper() == "Y":
         _EngineState.use_camouflage = True
 
-    _v(" ═══ STARTING OBFUSCATION ═══")
+    _v(" 🚀 ═══ STARTING OBFUSCATION ═══")
     start_time = time.time()
 
     check = 0
@@ -4962,12 +4969,12 @@ def main():
         try:
             t0 = time.time()
             sz0 = len(code)
-            _v(" [0/8] Hyperion Token & AST Remapping Engine...")
+            _v(" 🌌 [0/8] Hyperion Token & AST Remapping Engine...")
             code = _hyperion_full_transform(code, camouflage=False, shell=False, randlines=False)
-            _v("        ✓ Dynamic Builtin Imports")
-            _v("        ✓ Variable & Import Scope Remapping")
-            _v("        ✓ Math & String Identifier Splitting")
-            _v("        ✓ Dynamic Globals/Locals Aliasing")
+            _v("        ✨ Dynamic Builtin Imports")
+            _v("        ✨ Variable & Import Scope Remapping")
+            _v("        ✨ Math & String Identifier Splitting")
+            _v("        ✨ Dynamic Globals/Locals Aliasing")
             _track_debug_stage("0_hyperion_engine", time.time() - t0, sz0, len(code))
         except Exception as e:
             _log_stage_error("0_hyperion_engine", e)
@@ -4976,7 +4983,7 @@ def main():
     try:
         t0 = time.time()
         sz0 = len(code)
-        _v(" [1/8] Syntax transformation...")
+        _v(" ⚡ [1/8] Syntax transformation...")
         code = _syntax(code)
         _track_debug_stage("1_syntax_transform", time.time() - t0, sz0, len(code))
     except Exception as e:
@@ -4984,7 +4991,7 @@ def main():
 
     # ═══ Step 2: AST junk injection ═══
     if moreobf.upper() == "Y":
-        _v(" [2/8] AST junk injection...")
+        _v(" 🧩 [2/8] AST junk injection...")
         try:
             t0 = time.time()
             sz0 = len(code)
@@ -5040,7 +5047,7 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
 
     # ═══ Step 4: Anti-debug ═══
     if antidebug.upper() == "Y":
-        _v(" [3/8] Injecting anti-debug shield...")
+        _v(" 🛡️ [3/8] Injecting anti-debug shield...")
         t0 = time.time()
         sz0 = len(code)
         # IMPORTANT: anti shield must run BEFORE velimatix_anti_hook so that
@@ -5048,14 +5055,14 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
         # builtins (exec/eval). Otherwise the patrol thread detects the ID
         # change when anti shield wraps them and calls _terminate().
         if velimatix.upper() == "Y":
-            _v("        Adding Velimatix anti-hook layer...")
+            _v("        🛑 Adding Velimatix anti-hook layer...")
             code = velimatix_anti_hook + code
         code = anti + code
         _track_debug_stage("3_anti_debug_injection", time.time() - t0, sz0, len(code))
 
     # ═══ Step 5: Self-modifying ═══
     if selfmodify.upper() == "Y":
-        _v(" [3.5/8] Adding self-modifying layer...")
+        _v(" 🧬 [3.5/8] Adding self-modifying layer...")
         t0 = time.time()
         sz0 = len(code)
         code = _generate_self_modify_wrapper() + code
@@ -5063,29 +5070,29 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
 
     # ═══ Step 6: VELIMATIX ENGINE ═══
     if velimatix.upper() == "Y":
-        _v(f" [4/8] Velimatix engine (level {veli_level})...")
+        _v(f" 🔮 [4/8] Velimatix engine (level {veli_level})...")
         try:
             t0 = time.time()
             sz0 = len(code)
             code = _velimatix_obf(code, mode=veli_level)
-            _v("        ✓ BiOpaque predicates")
-            _v("        ✓ Call obfuscation")
-            _v("        ✓ Dead code injection")
+            _v("        ✨ BiOpaque predicates")
+            _v("        ✨ Call obfuscation")
+            _v("        ✨ Dead code injection")
             if veli_level >= 2:
-                _v("        ✓ Exception jump flow")
-                _v("        ✓ Import obfuscation")
-                _v("        ✓ Builtin renaming")
+                _v("        ✨ Exception jump flow")
+                _v("        ✨ Import obfuscation")
+                _v("        ✨ Builtin renaming")
             if veli_level >= 3:
-                _v("        ✓ Match-case control flow")
-                _v("        ✓ Constant mutation (XOR chain)")
-                _v("        ✓ Method cloning")
-                _v("        ✓ String bytewise encoding")
+                _v("        ✨ Match-case control flow")
+                _v("        ✨ Constant mutation (XOR chain)")
+                _v("        ✨ Method cloning")
+                _v("        ✨ String bytewise encoding")
             _track_debug_stage(f"4_velimatix_level_{veli_level}", time.time() - t0, sz0, len(code))
         except Exception as e:
-            _v(f" WARNING: Velimatix partial: {e}")
+            _v(f" ⚠️ WARNING: Velimatix partial: {e}")
 
     # ═══ Step 7: Main obfuscation layers ═══
-    _v(f" [5/8] Applying {mode}-layer tr0ngx obfuscation...")
+    _v(f" 🔥 [5/8] Applying {mode}-layer tr0ngx obfuscation...")
     for i in range(mode):
         try:
             t0 = time.time()
@@ -5094,14 +5101,14 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
             compile(new_code, "<test_layer>", "exec")
             code = new_code
             _track_debug_stage(f"5_tr0ngx_layer_{i+1}_of_{mode}", time.time() - t0, sz0, len(code))
-            _v(f"        Layer {i + 1}/{mode} complete")
+            _v(f"        ✨ Layer {i + 1}/{mode} complete")
         except Exception as e:
-            _v(f" WARNING: Layer {i + 1} issue: {e}")
+            _v(f" ⚠️ WARNING: Layer {i + 1} issue: {e}")
             break
 
     # ═══ Step 8: Compile or output ═══
     if method.upper() != "Y":
-        _v(" [6/8] Building non-compiled output...")
+        _v(" 📦 [6/8] Building non-compiled output...")
         t0 = time.time()
         sz0 = len(code)
         code = author + var + code
@@ -5115,16 +5122,16 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
                     pass
 
         if velimatix.upper() == "Y" and veli_level >= 2:
-            _v(" [7/8] Velimatix final pass...")
+            _v(" 🔮 [7/8] Velimatix final pass...")
             try:
                 code = OBF_Spam(code, level=min(veli_level, 2))
             except Exception:
                 pass
 
         _track_debug_stage("6_non_compiled_packaging", time.time() - t0, sz0, len(code))
-        _v(" [8/8] Finalizing...")
+        _v(" 💎 [8/8] Finalizing...")
     else:
-        _v(" [6/8] Multi-layer compilation...")
+        _v(" 🔐 [6/8] Multi-layer compilation...")
         t0 = time.time()
         sz0 = len(code)
         if check == 5:
@@ -5140,16 +5147,16 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
 
         # ═══ Double compile path ═══
         if double_compile.upper() == "Y":
-            _v(" [7/8] DOUBLE COMPILE (Tr0ngX + Velimatix)...")
+            _v(" 🧬 [7/8] DOUBLE COMPILE (Tr0ngX + Velimatix)...")
             try:
                 code = _double_compile(var + code, target_ver=target_ver_str)
-                _v("        ✓ Inner: marshal+XOR×2+zlib×2+bz2+base85")
-                _v("        ✓ Outer: Velimatix obfuscated loader")
-                _v(" [8/8] Double compilation complete!")
+                _v("        ✨ Inner: marshal+XOR×2+zlib×2+bz2+base85")
+                _v("        ✨ Outer: Velimatix obfuscated loader")
+                _v(" 💎 [8/8] Double compilation complete!")
                 _track_debug_stage("7_double_compile_packaging", time.time() - t0, sz0, len(code))
             except Exception as e:
-                _v(f" WARNING: Double compile failed: {e}")
-                _v(" FALLBACK: Standard compilation...")
+                _v(f" ⚠️ WARNING: Double compile failed: {e}")
+                _v(" ⚠️ FALLBACK: Standard compilation...")
                 double_compile = "N"
 
         # ═══ Standard compile path ═══
@@ -5157,18 +5164,18 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
             try:
                 compiled_bytes = marshal.dumps(compile(code, "<tr0ngx>", "exec"))
             except SyntaxError as e:
-                _v(f" COMPILE ERROR: {e}")
-                _v(" FALLBACK: Non-compiled mode")
+                _v(f" ⚠️ COMPILE ERROR: {e}")
+                _v(" ⚠️ FALLBACK: Non-compiled mode")
                 code = var + code
                 _dir_n, _base_n = os.path.split(_file)
                 output_file = os.path.join(_dir_n, "tr0ngx-" + _base_n) if _dir_n else ("tr0ngx-" + _base_n)
                 with open(output_file, "w", encoding="utf8") as f:
                     f.write(str(code))
                 elapsed = time.time() - start_time
-                _v(f" SAVED: {output_file} ({elapsed:.2f}s)")
+                _v(f" 💾 ✓ SAVED: {output_file} ({elapsed:.2f}s)")
                 sys.exit()
 
-            _v(" [6.5/8] Encrypting with authenticated multi-layer AEAD...")
+            _v(" 🛡️ [6.5/8] Encrypting with authenticated multi-layer AEAD...")
             encrypted_data, _salt = _multi_layer_encrypt(compiled_bytes)
 
             l = len(encrypted_data)
@@ -5189,7 +5196,7 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
             )
             part_concat = '+'.join(part_vars)
 
-            _v(" [7/8] Building final authenticated payload...")
+            _v(" 📦 [7/8] Building final authenticated payload...")
 
             _en_var = rd()
             _july_var = rd()
@@ -5259,13 +5266,13 @@ except Exception as _e:
 """
 
             if velimatix.upper() == "Y" and veli_level >= 2:
-                _v(" [8/8] Velimatix final pass on loader...")
+                _v(" 🔮 [8/8] Velimatix final pass on loader...")
                 try:
                     code = OBF_Spam(code, level=1)
                 except Exception:
                     pass
             else:
-                _v(" [8/8] Finalizing...")
+                _v(" 💎 [8/8] Finalizing...")
             _track_debug_stage("7_standard_compile_packaging", time.time() - t0, sz0, len(code))
 
     # ═══════════════════════════════════════════════════════════════
@@ -5277,35 +5284,35 @@ except Exception as _e:
     is_fused_shield = (matrix_choice.upper() == "Y") or (multi_shield_count >= 2)
 
     if is_fused_shield:
-        _v(" [9/9] Applying Fused Matrix Shield (Kyrie + Emoji + Whitespace Symbiotic)...")
+        _v(" 🌀 [9/9] Applying Fused Matrix Shield (Kyrie + Emoji + Whitespace Symbiotic)...")
         try:
             t0 = time.time()
             sz0 = len(code)
             code = _fused_matrix_wrap(code)
-            _v("        ✓ 3-Track Interleaved Symbiotic Loader (Zero Bloat)")
-            _v("        ✓ Kyrie Caesar + Emoji Stream + Whitespace Bitfield Matrix")
-            _v("        ✓ Fast In-Memory Reconstruction Pipeline")
+            _v("        ✨ 3-Track Interleaved Symbiotic Loader (Zero Bloat)")
+            _v("        ✨ Kyrie Caesar + Emoji Stream + Whitespace Bitfield Matrix")
+            _v("        ✨ Fast In-Memory Reconstruction Pipeline")
             _track_debug_stage("8_fused_matrix_shield", time.time() - t0, sz0, len(code))
         except Exception as e:
             _log_stage_error("8_fused_matrix_shield", e)
     else:
         # Single outer shield path
         if kramer_wrap_choice.upper() == "Y":
-            _v(" [9/9] Applying Kramer Outer Shield (Kyrie Eleison)...")
+            _v(" 👑 [9/9] Applying Kramer Outer Shield (Kyrie Eleison)...")
             try:
                 t0 = time.time()
                 sz0 = len(code)
                 code = _kramer_wrap(code)
-                _v("        ✓ Kyrie Eleison Caesar Index Shift")
-                _v("        ✓ Dynamic Obfuscated Kramer Class Wrapper")
-                _v("        ✓ Anti-Tamper String Inspection")
+                _v("        ✨ Kyrie Eleison Caesar Index Shift")
+                _v("        ✨ Dynamic Obfuscated Kramer Class Wrapper")
+                _v("        ✨ Anti-Tamper String Inspection")
                 _track_debug_stage("8_kramer_outer_shield", time.time() - t0, sz0, len(code))
             except Exception as e:
-                _v(f" WARNING: Kramer wrap error: {e}")
+                _v(f" ⚠️ WARNING: Kramer wrap error: {e}")
 
         # ═══ Emoji Obfuscation Layer ═══
         if emoji_obf_choice.upper() == "Y":
-            _v(" [10] Applying Emoji Obfuscation (🐀🐁🐂)...")
+            _v(" 🐾 [10] Applying Emoji Obfuscation (U+1F400 Animal Block)...")
             try:
                 t0 = time.time()
                 sz0 = len(code)
@@ -5313,15 +5320,15 @@ except Exception as _e:
                     code = _emoji_encode_v2(code)
                 else:
                     code = _emoji_encode(code)
-                _v("        ✓ Code → Emoji Sequence Encoder")
-                _v("        ✓ Compact Self-Decoding Loader")
+                _v("        ✨ Code -> Emoji Sequence Encoder")
+                _v("        ✨ Compact Self-Decoding Loader")
                 _track_debug_stage("9_emoji_obfuscation", time.time() - t0, sz0, len(code))
             except Exception as e:
-                _v(f" WARNING: Emoji encoding error: {e}")
+                _v(f" ⚠️ WARNING: Emoji encoding error: {e}")
 
         # ═══ Whitespace Obfuscation Layer ═══
         if whitespace_obf_choice.upper() == "Y":
-            _v(" [11] Applying Whitespace Obfuscation (invisible code)...")
+            _v(" 👻 [11] Applying Whitespace Obfuscation (invisible code)...")
             try:
                 t0 = time.time()
                 sz0 = len(code)
@@ -5329,25 +5336,25 @@ except Exception as _e:
                     code = _whitespace_encode_v2(code)
                 else:
                     code = _whitespace_encode(code)
-                _v("        ✓ Code → Space/Tab Binary Encoding")
-                _v("        ✓ Self-Decoding Whitespace Loader")
+                _v("        ✨ Code -> Space/Tab Binary Encoding")
+                _v("        ✨ Self-Decoding Whitespace Loader")
                 _track_debug_stage("10_whitespace_obfuscation", time.time() - t0, sz0, len(code))
             except Exception as e:
-                _v(f" WARNING: Whitespace encoding error: {e}")
+                _v(f" ⚠️ WARNING: Whitespace encoding error: {e}")
 
     # ═══ Hyperion Scientific Class Camouflage Layer ═══
     if camouflage_choice.upper() == "Y":
-        _v(" [12] Applying Hyperion Scientific Class Camouflage...")
+        _v(" 🎭 [12] Applying Hyperion Scientific Class Camouflage...")
         try:
             t0 = time.time()
             sz0 = len(code)
             code = _hyperion_camouflage(code)
-            _v("        ✓ Fake Simulation Class Generation")
-            _v("        ✓ Polymorphic Property & Memory Emulation")
-            _v("        ✓ Dynamic Payload Reconstructor")
+            _v("        ✨ Fake Simulation Class Generation")
+            _v("        ✨ Polymorphic Property & Memory Emulation")
+            _v("        ✨ Dynamic Payload Reconstructor")
             _track_debug_stage("12_hyperion_camouflage", time.time() - t0, sz0, len(code))
         except Exception as e:
-            _v(f" WARNING: Camouflage error: {e}")
+            _v(f" ⚠️ WARNING: Camouflage error: {e}")
 
     if zalgo_choice.upper() == "Y":
         code = _gen_tr0ngx_header() + "\n" + _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=6, chars_per_line=12, marks_per_char=50) + "\n" + code + "\n" + _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=4, chars_per_line=12, marks_per_char=50)
@@ -5374,7 +5381,7 @@ except Exception as _e:
         # Warn if output is excessively large
         _SIZE_WARN_MB = 50
         if file_size > _SIZE_WARN_MB * 1024 * 1024:
-            warn_str = f" ⚠ WARNING: Output is {file_size / (1024*1024):.1f} MB (>{_SIZE_WARN_MB}MB). Consider using lower mode or fewer layers."
+            warn_str = f" ⚠️ WARNING: Output is {file_size / (1024*1024):.1f} MB (>{_SIZE_WARN_MB}MB). Consider using lower mode or fewer layers."
             tip_str = f"   Tip: Mode 2 + compile + kramer gives good protection with much smaller output."
             _v(_gradient_text(warn_str, (255, 45, 45), (255, 195, 20)))
             _v(_gradient_text(tip_str, (255, 95, 25), (255, 220, 45)))
@@ -5395,20 +5402,20 @@ except Exception as _e:
                 import json
                 with open(dbg_map_file, "w", encoding="utf-8") as df:
                     json.dump(_DEBUG_MAP, df, indent=2, ensure_ascii=False)
-                _v(f" ✓ DEBUG MAP: {dbg_map_file}")
+                _v(f" 🗺️ ✓ DEBUG MAP: {dbg_map_file}")
             except Exception as de:
-                _v(f" WARNING: Debug map export failed: {de}")
+                _v(f" ⚠️ WARNING: Debug map export failed: {de}")
 
         _v(_gradient_text(" ═══════════════════════════════════════", (85, 130, 255), (190, 85, 255)))
-        _v(_gradient_text(f" ✓ SAVED: {output_file}", (0, 240, 255), (50, 255, 130)))
-        _v(f" ✓ ORIGINAL: {original_size:,} bytes")
-        _v(f" ✓ OUTPUT:   {file_size:,} bytes ({ratio:.1f}x)")
-        _v(f" ✓ TIME:     {elapsed:.2f}s")
-        _v(f" ✓ MODE: {mode} | VELI: {velimatix.upper()}{'(L'+str(veli_level)+')' if velimatix.upper()=='Y' else ''}")
-        _v(f" ✓ OBF: {moreobf.upper()} | ANTI: {antidebug.upper()} | SELF-MOD: {selfmodify.upper()}")
-        _v(f" ✓ COMPILE: {method.upper()} | DOUBLE: {double_compile.upper() if method.upper()=='Y' else 'N/A'}")
-        _v(f" ✓ KRAMER: {kramer_wrap_choice.upper()} | FORCE PY: {forced_py_ver if force_py_choice.upper()=='Y' else 'OFF'}")
-        _v(f" ✓ CJK / PYCOOL: {cjk_choice.upper()}")
+        _v(f" 💾 ✓ SAVED: {output_file}")
+        _v(f" 📊 ✓ ORIGINAL: {original_size:,} bytes")
+        _v(f" 📈 ✓ OUTPUT:   {file_size:,} bytes ({ratio:.1f}x)")
+        _v(f" ⏱️ ✓ TIME:     {elapsed:.2f}s")
+        _v(f" 💎 ✓ MODE: {mode} | VELI: {velimatix.upper()}{'(L'+str(veli_level)+')' if velimatix.upper()=='Y' else ''}")
+        _v(f" 🛡️ ✓ OBF: {moreobf.upper()} | ANTI: {antidebug.upper()} | SELF-MOD: {selfmodify.upper()}")
+        _v(f" 🔐 ✓ COMPILE: {method.upper()} | DOUBLE: {double_compile.upper() if method.upper()=='Y' else 'N/A'}")
+        _v(f" 👑 ✓ KRAMER: {kramer_wrap_choice.upper()} | FORCE PY: {forced_py_ver if force_py_choice.upper()=='Y' else 'OFF'}")
+        _v(f" 🀄 ✓ CJK / PYCOOL: {cjk_choice.upper()}")
         # New modes summary
         _new_modes = []
         if is_fused_shield:
@@ -5432,14 +5439,14 @@ except Exception as _e:
         if camouflage_choice.upper() == "Y":
             _new_modes.append("HYPERION-CAMOUFLAGE")
         if _new_modes:
-            _v(f" ✓ FUSION: {' + '.join(_new_modes)}")
+            _v(f" 🌌 ✓ FUSION: {' + '.join(_new_modes)}")
         _v(_gradient_text(" ═══════════════════════════════════════", (85, 130, 255), (190, 85, 255)))
         if _EngineState.profile_mode or _EngineState.verbose_debug:
             _print_profile_waterfall(elapsed, original_size, file_size)
         _export_log_file()
-        _v(" OBFUSCATION COMPLETE!")
+        _v(" 🌟 OBFUSCATION COMPLETE!")
     except Exception as e:
-        _v(f" ERROR SAVING: {e}")
+        _v(f" ⚠️ ERROR SAVING: {e}")
 
 if __name__ == "__main__":
     main()
