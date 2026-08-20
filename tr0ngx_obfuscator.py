@@ -5151,35 +5151,50 @@ def _log_debug(msg: str, stage: str = None, duration: float = None, error: Excep
     ts = time.strftime("%H:%M:%S")
     dur_str = f" [took {duration:.4f}s]" if duration is not None else ""
     stg_str = f" [{stage}]" if stage else ""
-    entry = f"[{ts}][{level}]{stg_str} {msg}{dur_str}"
+    ram_mb = _get_current_ram_mb()
+    ram_str = f" [RAM: {ram_mb:.1f}MB]" if ram_mb > 0 else ""
+    entry = f"[{ts}][{level}]{stg_str}{ram_str} {msg}{dur_str}"
     _LOG_ENTRIES.append(entry)
 
     if _EngineState.verbose_debug or level in ("ERROR", "WARNING") or _EngineState.profile_mode:
         if level == "ERROR":
-            _v(f" [91m[ERROR]{stg_str} {msg}{dur_str}[0m")
+            _v(_gradient_text(f"  [ERROR]{stg_str} {msg}{dur_str}{ram_str}", (255, 60, 60), (255, 120, 60)))
             if error is not None:
                 tb_lines = traceback.format_exc().strip()
                 _LOG_ENTRIES.append(tb_lines)
-                if _EngineState.verbose_debug:
-                    for l in tb_lines.splitlines():
-                        _v(f"   [90m│ {l}[0m")
+                for l in tb_lines.splitlines():
+                    _v(f"    │ {l}")
         elif level == "WARNING":
-            _v(f" [93m[WARNING]{stg_str} {msg}{dur_str}[0m")
+            _v(_gradient_text(f"  [WARNING]{stg_str} {msg}{dur_str}", (255, 180, 40), (255, 220, 80)))
         elif _EngineState.verbose_debug:
-            _v(f" [96m[DEBUG]{stg_str} {msg}{dur_str}[0m")
+            _v(_gradient_text(f"  [DEBUG]{stg_str} {msg}{dur_str}{ram_str}", (80, 180, 255), (140, 220, 255)))
 
-def _log_stage_error(stage_name: str, exc: Exception):
+def _log_stage_error(stage_name: str, exc: Exception, extra_info: dict = None):
     tb = traceback.format_exc()
-    _STAGE_ERRORS.append({
+    tb_lines = [l for l in tb.strip().splitlines() if l.strip()]
+    loc_str = tb_lines[-2] if len(tb_lines) >= 2 else "Unknown location"
+    
+    error_record = {
         "stage": stage_name,
         "exception_type": type(exc).__name__,
         "message": str(exc),
+        "location": loc_str.strip(),
         "traceback": tb,
-        "timestamp": time.time()
-    })
-    _log_debug(f"{type(exc).__name__}: {exc}", stage=stage_name, error=exc, level="ERROR")
+        "timestamp": time.time(),
+        "ram_mb": round(_get_current_ram_mb(), 2),
+        "extra_info": extra_info or {}
+    }
+    _STAGE_ERRORS.append(error_record)
+    
+    if "_DEBUG_MAP" in globals() and "errors" in _DEBUG_MAP:
+        _DEBUG_MAP["errors"].append(error_record)
+
+    _log_debug(f"{type(exc).__name__}: {exc} (at {loc_str.strip()})", stage=stage_name, error=exc, level="ERROR")
+    
     if _EngineState.strict_mode:
-        _v(f" [91m[STRICT MODE ABORT] Terminating due to error in stage '{stage_name}'[0m")
+        _v(_gradient_text(f"\n [STRICT MODE ABORT] Terminating immediately due to error in stage '{stage_name}'", (255, 30, 30), (255, 100, 30)))
+        _v(f"  Exception: {type(exc).__name__}: {exc}")
+        _v(f"  Traceback:\n{tb}\n")
         sys.exit(1)
 
 def _print_profile_waterfall(total_elapsed: float, original_size: int, final_size: int):
@@ -5189,7 +5204,7 @@ def _print_profile_waterfall(total_elapsed: float, original_size: int, final_siz
 
     _v("")
     _v(" ══════════════════════ PERFORMANCE & BOTTLENECK PROFILE ══════════════════════")
-    _v(f" {'STAGE':<32} {'TIME (s)':<12} {'% TOTAL':<10} {'SIZE DELTA':<14} {'STATUS'}")
+    _v(f" {'STAGE':<34} {'TIME (s)':<12} {'% TOTAL':<10} {'SIZE DELTA':<14} {'STATUS'}")
     _v(" ─────────────────────────────────────────────────────────────────────────────")
 
     slowest_stage = None
@@ -5201,16 +5216,16 @@ def _print_profile_waterfall(total_elapsed: float, original_size: int, final_siz
         pct = (dur / total_elapsed * 100) if total_elapsed > 0 else 0
         delta = s.get("delta_bytes", 0)
         delta_str = f"+{delta:,} B" if delta >= 0 else f"-{abs(delta):,} B"
-        status = "[92m[OK][0m"
+        status = "[OK]"
 
         if dur > max_duration:
             max_duration = dur
             slowest_stage = (stg_name, dur, pct)
 
-        _v(f" {stg_name:<32} {dur:>8.4f}s    {pct:>6.1f}%    {delta_str:>12}    {status}")
+        _v(f" {stg_name:<34} {dur:>8.4f}s    {pct:>6.1f}%    {delta_str:>12}    {status}")
 
     for err in _STAGE_ERRORS:
-        _v(f" [91m{err['stage']:<32} {'FAILED':>8}        --               --    [ERROR][0m")
+        _v(f" [ERROR] {err['stage']:<26} FAILED        --               --    [ERROR]")
 
     _v(" ─────────────────────────────────────────────────────────────────────────────")
     current_ram = _get_current_ram_mb()
@@ -5218,9 +5233,9 @@ def _print_profile_waterfall(total_elapsed: float, original_size: int, final_siz
     _v(f" TOTAL TIME: {total_elapsed:.4f}s | EXPANSION: {original_size:,} B -> {final_size:,} B ({final_size/original_size if original_size>0 else 0:.1f}x){ram_str}")
 
     if slowest_stage and slowest_stage[1] > 0.1 and slowest_stage[2] >= 25.0:
-        _v(f" [93m[BOTTLENECK ADVISORY] Stage '{slowest_stage[0]}' took the longest ({slowest_stage[1]:.3f}s, {slowest_stage[2]:.1f}% of total).[0m")
+        _v(f" [BOTTLENECK ADVISORY] Stage '{slowest_stage[0]}' took the longest ({slowest_stage[1]:.3f}s, {slowest_stage[2]:.1f}% of total).")
     if _STAGE_ERRORS:
-        _v(f" [91m[WARNING] Encountered {len(_STAGE_ERRORS)} stage exception(s). Run with --debug or inspect log file for tracebacks.[0m")
+        _v(f" [WARNING] Encountered {len(_STAGE_ERRORS)} stage exception(s). Run with --debug or inspect log file for tracebacks.")
     _v(" ═════════════════════════════════════════════════════════════════════════════")
     _v("")
 
@@ -5230,14 +5245,20 @@ def _export_log_file():
     try:
         with open(_EngineState.log_file_path, "w", encoding="utf-8") as lf:
             lf.write(f"=== TR0NGX OBFUSCATOR EXECUTION & DIAGNOSTIC LOG ===\n")
-            lf.write(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            lf.write(f"Timestamp : {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            lf.write(f"Python    : {sys.version}\n")
+            lf.write(f"Platform  : {platform.platform()}\n")
+            lf.write(f"PID       : {os.getpid()}\n\n")
+            lf.write("=== EXECUTION CHRONOLOGY ===\n")
             for entry in _LOG_ENTRIES:
                 lf.write(entry + "\n")
             if _STAGE_ERRORS:
                 lf.write("\n=== STAGE ERROR TRACEBACKS ===\n")
                 for err in _STAGE_ERRORS:
-                    lf.write(f"\n--- Stage: {err['stage']} ({err['exception_type']}) ---\n")
-                    lf.write(err['traceback'] + "\n")
+                    lf.write(f"\n--- Stage: {err['stage']} ({err['exception_type']}) @ RAM {err['ram_mb']}MB ---\n")
+                    lf.write(f"Message  : {err['message']}\n")
+                    lf.write(f"Location : {err.get('location', '')}\n")
+                    lf.write(f"Traceback:\n{err['traceback']}\n")
         _v(f" [DIAGNOSTIC LOG SAVED] {_EngineState.log_file_path}")
     except Exception as e:
         _v(f" WARNING: Failed to export log file: {e}")
@@ -5251,7 +5272,8 @@ _DEBUG_MAP = {
     "renamed_functions": {},
     "renamed_builtins": {},
     "renamed_variables": {},
-    "stages": []
+    "stages": [],
+    "errors": []
 }
 
 def _track_debug_stage(name: str, duration_sec: float, initial_size: int, final_size: int, details: dict = None):
@@ -5264,6 +5286,7 @@ def _track_debug_stage(name: str, duration_sec: float, initial_size: int, final_
         "initial_size_bytes": initial_size,
         "final_size_bytes": final_size,
         "delta_bytes": delta,
+        "ram_mb": round(_get_current_ram_mb(), 2),
         "details": details or {}
     })
 
@@ -6072,7 +6095,7 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
                 _v("        - String bytewise encoding")
             _track_debug_stage(f"3_velimatix_level_{veli_level}", time.time() - t0, sz0, len(code))
         except Exception as e:
-            _v(f" WARNING: Velimatix partial: {e}")
+            _log_stage_error(f"3_velimatix_level_{veli_level}", e)
 
     # ═══ Step 5: Main obfuscation layers ═══
     _v_step(4, 8, f"Applying {mode}-layer tr0ngx obfuscation...")
@@ -6086,7 +6109,7 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
             _track_debug_stage(f"4_tr0ngx_layer_{i+1}_of_{mode}", time.time() - t0, sz0, len(code))
             _v(f"        - Layer {i + 1}/{mode} complete")
         except Exception as e:
-            _v(f" WARNING: Layer {i + 1} issue: {e}")
+            _log_stage_error(f"4_tr0ngx_layer_{i+1}_of_{mode}", e)
             break
 
     # ═══ Step 6: Anti-debug & Anti-Analysis Shield Matrix ═══
@@ -6173,7 +6196,7 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
                 _v_step(8, 8, "Double compilation complete!")
                 _track_debug_stage("7_double_compile_packaging", time.time() - t0, sz0, len(code))
             except Exception as e:
-                _v(f" WARNING: Double compile failed: {e}")
+                _log_stage_error("7_double_compile_packaging", e)
                 _v(" FALLBACK: Standard compilation...")
                 double_compile = "N"
 
@@ -6355,7 +6378,7 @@ except Exception as _e:
             _v("        - Dynamic Payload Reconstructor")
             _track_debug_stage("12_hyperion_camouflage", time.time() - t0, sz0, len(code))
         except Exception as e:
-            _v(f" WARNING: Camouflage error: {e}")
+            _log_stage_error("12_hyperion_camouflage", e)
 
     # ═══ Outer Dynamic Shield Matrix ═══
     if is_fused_shield:
@@ -6383,7 +6406,7 @@ except Exception as _e:
                 _v("        - Anti-Tamper String Inspection")
                 _track_debug_stage("8_kramer_outer_shield", time.time() - t0, sz0, len(code))
             except Exception as e:
-                _v(f" WARNING: Kramer wrap error: {e}")
+                _log_stage_error("8_kramer_outer_shield", e)
 
         # ═══ Emoji Obfuscation Layer ═══
         if emoji_obf_choice.upper() == "Y":

@@ -125,8 +125,8 @@ graph TD
 
 Before committing any modifications:
 ```bash
-# 1. Run full regression test matrix
-python tests/run_all_tests.py
+# 1. Run full regression test matrix (Multi-threaded across CPU workers)
+python tests/run_all_tests.py -w 6
 
 # 2. Run complex challenge paradigm test
 python tr0ngx_obfuscator.py -i complex_target.py -o test_full_matrix.py -m 3 --moreobf y --antidebug y --selfmod y --velimatix y --veli-level 3 --compile y --double-compile y --kramer y --hyperion y --camouflage y --zalgo y --matrix y --no-art
