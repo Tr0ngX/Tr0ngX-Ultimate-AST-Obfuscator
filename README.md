@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⚡ Tr0ngX Ultimate AST Obfuscator ⚡
+# Tr0ngX Ultimate AST Obfuscator
 
 **Next-Generation Multi-Layer Polymorphic AST Obfuscation & Dynamic Anti-Analysis Engine**  
 *Engineered for Python 3.10, 3.11, 3.12, 3.13, and 3.14+*
@@ -8,13 +8,13 @@
 [![CI/CD](https://github.com/Tr0ngX/Tr0ngX-Ultimate-AST-Obfuscator/actions/workflows/ci.yml/badge.svg)](https://github.com/Tr0ngX/Tr0ngX-Ultimate-AST-Obfuscator/actions)
 [![Python Version](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14+-blue.svg?logo=python)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Code Style](https://img.shields.io/badge/Obfuscation-Polymorphic%20AST-orange.svg)](#-key-architectures--features)
+[![Code Style](https://img.shields.io/badge/Obfuscation-Polymorphic%20AST-orange.svg)](#key-architectures--features)
 
 ---
 
 </div>
 
-## 📖 Overview
+## Overview
 
 **Tr0ngX Ultimate AST Obfuscator** is an enterprise-grade Python obfuscation framework designed to protect proprietary Python intellectual property against static analysis, decompilation (PyCDC, uncompyle6, decompyle3), dynamic debugging (PDB, PyDevd, Debugpy), audit-hook tampering (PEP 578 / PEP 669), and memory inspection.
 
@@ -22,7 +22,7 @@ Combining **deep Abstract Syntax Tree (AST) mutations**, **cryptographically aut
 
 ---
 
-## 🛡️ Key Architectures & Features
+## Key Architectures & Features
 
 ```mermaid
 graph TD
@@ -34,32 +34,32 @@ graph TD
     Shield --> Output[Protected Standalone Python Executable]
 ```
 
-### 1. 🧬 Multi-Layer AST Transformations
+### 1. Multi-Layer AST Transformations
 - **Control Flow Flattening & Opaque Predicates**: Converts linear block sequences into state-machine dispatchers with algebraic and bitwise opaque predicates.
 - **Arithmetic Mutator Ladders**: Replaces constants and operators with mathematical identity ladders, bit shifts, XOR chains, and trigonometric invariances.
 - **Velimatix `ExceptionJump` Dispatcher**: Routes normal control execution flow across structured `try...except` exception handlers.
 - **Method & Function Cloning**: Generates randomized decoy branches and polymorphic clones to mislead decompilers.
 - **Builtin Dynamic Obfuscation & Renaming**: Intercepts and remaps standard builtin calls (`print`, `exec`, `eval`, `globals`, `__import__`) through runtime resolution.
 
-### 2. 🔠 Polymorphic Identifier Renaming
+### 2. Polymorphic Identifier Renaming
 - **Collision-Free Variable Generation**: Deterministic, scope-aware renaming engine.
 - **CJK Chinese & PyCool Docstrings**: Obfuscates symbols into multi-byte CJK ideographs and synthetic docstrings.
 - **Homoglyph Disguise**: Uses Cyrillic and Greek unicode lookalikes (`а` vs `a`, `о` vs `o`) to render source code unreadable.
 - **Rare Ancient Unicode Scripts**: Leverages Egyptian Hieroglyphs, Cuneiform, Yi Syllables, Tangut, and CJK Extension-B codepoints.
 - **Blended Hybrid Matrix Names**: Interweaves multiple character sets across local and global scopes.
 
-### 3. 🔐 Dynamic Cryptography & Environment-Bound Key Derivation
+### 3. Dynamic Cryptography & Environment-Bound Key Derivation
 - **Cryptographic Randomness**: Employs Python `secrets` CSPRNG for all keys, salts, and nonces.
 - **Multi-Layer AEAD Encryption**: Combines zlib/bz2 compression with authenticated stream encryption and HMAC-SHA256 message authentication codes.
 - **Runtime Environment Key Derivation (`_derive_runtime_keys`)**: Keys are never stored in plain text inside the output file; instead, they are derived dynamically at runtime from the cryptographic salt and local interpreter environment (`sys.version`, `platform`, `sys.maxsize`, `sys.byteorder`).
 
-### 4. ⚡ Symbiotic Multi-Track Outer Shields
+### 4. Symbiotic Multi-Track Outer Shields
 - **Kramer Outer Shield (Kyrie Eleison)**: Encapsulates final payloads into dynamic polymorphic classes with fake type annotations, memory anti-dumping, and file-read self-verification.
-- **Emoji Stream Obfuscation**: Transforms bytecode stream into executable emoji sequences (🐀🐁🐂...).
+- **Emoji Stream Obfuscation**: Transforms bytecode stream into executable sequences of Unicode identifiers.
 - **Whitespace Invisible Bitfields**: Hides payloads within invisible Unicode tab/space bitfields.
 - **Fused 3-Track Symbiotic Matrix Shield**: Fuses Kramer Kyrie, Emoji Stream, and Whitespace Bitfields into a zero-bloat in-memory reconstruction pipeline.
 
-### 5. 🛑 Enterprise Anti-Tamper & Anti-Analysis Shield
+### 5. Enterprise Anti-Tamper & Anti-Analysis Shield
 - **Tracer & Profiler Nullification**: Intercepts `sys.settrace()` and `sys.setprofile()`.
 - **PEP 669 & PEP 578 Tamper Shield**: Neutralizes `sys.monitoring` monitoring tools and overrides Python-level audit hooks.
 - **Meta-Path Import Interceptor (PEP 451)**: `_ImportBlocker` blocks decompiler and debugger modules (`uncompyle6`, `pycdc`, `debugpy`, `pydevd`, `xdis`, `coverage`, etc.).
@@ -67,13 +67,13 @@ graph TD
 - **Frame Depth & C-Level Trace Vector**: Vector 7 anomaly detection checks for deep debug call stacks; Vector 8 checks C-level `PyEval_SetTrace` hooks via ctypes.
 - **Daemon Watchdog Thread**: Runs concurrent continuous patrols verifying builtin integrity and anti-monkey-patching.
 
-### 6. ⚙️ Resource Management & Diagnostic Profiling
+### 6. Resource Management & Diagnostic Profiling
 - **RAM & CPU Core Limits**: Built-in `--max-ram` (MB) and `--cores` limiter prevents memory exhaustion during heavy obfuscation passes.
 - **Micro-Stage Profiler & Debug Map**: High-resolution performance timer tracking and optional JSON mapping export (`--debug-map`).
 
 ---
 
-## 📦 Installation & Requirements
+## Installation & Requirements
 
 ### System Requirements
 - **Python Version**: Python 3.10, 3.11, 3.12, 3.13, or 3.14+ (64-bit recommended).
@@ -90,7 +90,7 @@ pip install -r requirements.txt
 
 ---
 
-## 🚀 Usage Guide
+## Usage Guide
 
 ### 1. Interactive Terminal UI (TUI) Mode
 Run the obfuscator without arguments to launch the step-by-step interactive configuration prompt:
@@ -131,7 +131,7 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
   --cores 4
 ```
 
-### 📋 CLI Options Reference
+### CLI Options Reference
 
 | Flag | Description | Options |
 | :--- | :--- | :--- |
@@ -147,7 +147,7 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--veli-level` | Velimatix intensity level | `1`, `2`, `3` |
 | `--kramer` | Wrap with Kramer Kyrie Eleison outer dynamic shield | `y` / `n` |
 | `--matrix`, `--fused` | Enable Fused 3-Track Symbiotic Matrix Shield | `y` / `n` |
-| `--emoji-obf` | Encode output payload as executable Emoji stream | `y` / `n` |
+| `--emoji-obf` | Encode output payload as executable Unicode identifier stream | `y` / `n` |
 | `--whitespace-obf` | Encode output as invisible whitespace bitfields | `y` / `n` |
 | `--cjk-vars` | Use CJK Chinese identifiers & PyCool docstrings | `y` / `n` |
 | `--homoglyph` | Use Cyrillic/Greek homoglyph variable names | `y` / `n` |
@@ -161,7 +161,7 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 
 ---
 
-## 🧪 Testing & Quality Assurance
+## Testing & Quality Assurance
 
 Tr0ngX includes comprehensive native test suites and end-to-end multi-configuration stress harnesses:
 
@@ -179,13 +179,13 @@ python complex_benchmark.py
 
 ---
 
-## ⚖️ Disclaimer
+## Disclaimer
 
 This software is developed and distributed for **legitimate software development, educational research, and proprietary code protection purposes only**. The authors assume no liability and are not responsible for any misuse or damage caused by this program.
 
 ---
 
-## 📄 License
+## License
 
 Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more information.
 
