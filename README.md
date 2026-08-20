@@ -1,103 +1,194 @@
------
+<div align="center">
 
-<p align="center">
-<img src="https://repository-images.githubusercontent.com/416417012/341bc39d-cabd-4bff-8702-d84b1b8cbe0e", width="500", height="500">
-</p>
+# ⚡ Tr0ngX Ultimate AST Obfuscator ⚡
 
------
+**Next-Generation Multi-Layer Polymorphic AST Obfuscation & Dynamic Anti-Analysis Engine**  
+*Engineered for Python 3.10, 3.11, 3.12, 3.13, and 3.14+*
 
-### <p align="center">🐸 Kramer 🐸</p>
+[![CI/CD](https://github.com/Tr0ngX/Tr0ngX-Ultimate-AST-Obfuscator/actions/workflows/ci.yml/badge.svg)](https://github.com/Tr0ngX/Tr0ngX-Ultimate-AST-Obfuscator/actions)
+[![Python Version](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14+-blue.svg?logo=python)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Code Style](https://img.shields.io/badge/Obfuscation-Polymorphic%20AST-orange.svg)](#-key-architectures--features)
 
-<br><br>
-<p align="center">
-<strong>
-First of all, if you're looking for the <strong>BEST</strong> fully Python obfuscator, you should check <a href="https://github.com/billythegoat356/Hyperion">Hyperion</a>!
-<br><br>
-Kramer is a next level obfuscation tool written in Python3 allowing you to obfuscate
-<br>
-your Python3 code easily and securely. It uses <a href="https://github.com/billythegoat356/Berserker">Berserker</a>'s obfuscation but in a more advanced way
-<br>
-making your code really hard to be deobfuscated.
-</strong>
-</p>
-<br>
+---
 
------
+</div>
 
-### <p align="center">📋 Examples 📋</p>
+## 📖 Overview
 
-<br><br>
-**Unobfuscated**:<br>
-```python3
-input("Hello world!")
+**Tr0ngX Ultimate AST Obfuscator** is an enterprise-grade Python obfuscation framework designed to protect proprietary Python intellectual property against static analysis, decompilation (PyCDC, uncompyle6, decompyle3), dynamic debugging (PDB, PyDevd, Debugpy), audit-hook tampering (PEP 578 / PEP 669), and memory inspection.
+
+Combining **deep Abstract Syntax Tree (AST) mutations**, **cryptographically authenticated multi-layer AEAD encapsulation**, **symbiotic multi-track shield loaders**, and **continuous runtime watchdog threads**, Tr0ngX delivers unbreakable protection while preserving 100% semantic runtime equivalence.
+
+---
+
+## 🛡️ Key Architectures & Features
+
+```mermaid
+graph TD
+    Source[Raw Python Source Code] --> AST[Multi-Pass AST Transformations]
+    AST --> Renaming[Polymorphic Identifier Renamer]
+    Renaming --> Protection[Anti-Debug & Anti-Analysis Shield]
+    Protection --> Compilation[Multi-Layer AEAD Bytecode Encapsulation]
+    Compilation --> Shield[Symbiotic Matrix & Kramer Outer Shield]
+    Shield --> Output[Protected Standalone Python Executable]
 ```
-<br><br>
-**Obfuscated**:<br>
-```python3
-�������������������������������������������������������������
+
+### 1. 🧬 Multi-Layer AST Transformations
+- **Control Flow Flattening & Opaque Predicates**: Converts linear block sequences into state-machine dispatchers with algebraic and bitwise opaque predicates.
+- **Arithmetic Mutator Ladders**: Replaces constants and operators with mathematical identity ladders, bit shifts, XOR chains, and trigonometric invariances.
+- **Velimatix `ExceptionJump` Dispatcher**: Routes normal control execution flow across structured `try...except` exception handlers.
+- **Method & Function Cloning**: Generates randomized decoy branches and polymorphic clones to mislead decompilers.
+- **Builtin Dynamic Obfuscation & Renaming**: Intercepts and remaps standard builtin calls (`print`, `exec`, `eval`, `globals`, `__import__`) through runtime resolution.
+
+### 2. 🔠 Polymorphic Identifier Renaming
+- **Collision-Free Variable Generation**: Deterministic, scope-aware renaming engine.
+- **CJK Chinese & PyCool Docstrings**: Obfuscates symbols into multi-byte CJK ideographs and synthetic docstrings.
+- **Homoglyph Disguise**: Uses Cyrillic and Greek unicode lookalikes (`а` vs `a`, `о` vs `o`) to render source code unreadable.
+- **Rare Ancient Unicode Scripts**: Leverages Egyptian Hieroglyphs, Cuneiform, Yi Syllables, Tangut, and CJK Extension-B codepoints.
+- **Blended Hybrid Matrix Names**: Interweaves multiple character sets across local and global scopes.
+
+### 3. 🔐 Dynamic Cryptography & Environment-Bound Key Derivation
+- **Cryptographic Randomness**: Employs Python `secrets` CSPRNG for all keys, salts, and nonces.
+- **Multi-Layer AEAD Encryption**: Combines zlib/bz2 compression with authenticated stream encryption and HMAC-SHA256 message authentication codes.
+- **Runtime Environment Key Derivation (`_derive_runtime_keys`)**: Keys are never stored in plain text inside the output file; instead, they are derived dynamically at runtime from the cryptographic salt and local interpreter environment (`sys.version`, `platform`, `sys.maxsize`, `sys.byteorder`).
+
+### 4. ⚡ Symbiotic Multi-Track Outer Shields
+- **Kramer Outer Shield (Kyrie Eleison)**: Encapsulates final payloads into dynamic polymorphic classes with fake type annotations, memory anti-dumping, and file-read self-verification.
+- **Emoji Stream Obfuscation**: Transforms bytecode stream into executable emoji sequences (🐀🐁🐂...).
+- **Whitespace Invisible Bitfields**: Hides payloads within invisible Unicode tab/space bitfields.
+- **Fused 3-Track Symbiotic Matrix Shield**: Fuses Kramer Kyrie, Emoji Stream, and Whitespace Bitfields into a zero-bloat in-memory reconstruction pipeline.
+
+### 5. 🛑 Enterprise Anti-Tamper & Anti-Analysis Shield
+- **Tracer & Profiler Nullification**: Intercepts `sys.settrace()` and `sys.setprofile()`.
+- **PEP 669 & PEP 578 Tamper Shield**: Neutralizes `sys.monitoring` monitoring tools and overrides Python-level audit hooks.
+- **Meta-Path Import Interceptor (PEP 451)**: `_ImportBlocker` blocks decompiler and debugger modules (`uncompyle6`, `pycdc`, `debugpy`, `pydevd`, `xdis`, `coverage`, etc.).
+- **Bytecode Integrity Verification**: `_ExecGuard` and `_EvalGuard` verify runtime function identity and SHA-256 bytecode hashes.
+- **Frame Depth & C-Level Trace Vector**: Vector 7 anomaly detection checks for deep debug call stacks; Vector 8 checks C-level `PyEval_SetTrace` hooks via ctypes.
+- **Daemon Watchdog Thread**: Runs concurrent continuous patrols verifying builtin integrity and anti-monkey-patching.
+
+### 6. ⚙️ Resource Management & Diagnostic Profiling
+- **RAM & CPU Core Limits**: Built-in `--max-ram` (MB) and `--cores` limiter prevents memory exhaustion during heavy obfuscation passes.
+- **Micro-Stage Profiler & Debug Map**: High-resolution performance timer tracking and optional JSON mapping export (`--debug-map`).
+
+---
+
+## 📦 Installation & Requirements
+
+### System Requirements
+- **Python Version**: Python 3.10, 3.11, 3.12, 3.13, or 3.14+ (64-bit recommended).
+- **Operating System**: Windows, Linux, macOS.
+
+### Dependencies
+```bash
+git clone https://github.com/Tr0ngX/Tr0ngX-Ultimate-AST-Obfuscator.git
+cd Tr0ngX-Ultimate-AST-Obfuscator
+
+# Install dependencies (optional, for enhanced TUI and CPU/RAM management)
+pip install -r requirements.txt
 ```
-<br><br><br>
-<p align="center">
-<img src="https://cdn.discordapp.com/attachments/892840615732195340/904851557311455252/unknown.png" width="850", height="300">
-</p>
-<br>
 
------
+---
 
-### <p align="center">⭐ Features ⭐</p>
+## 🚀 Usage Guide
 
-<br><br>
-<strong>+ This time you can be sure skids won't be able to get your code</strong>
-<br>
-<strong>+ Very fast execution</strong>
-<br>
-<strong>+ Easy to use</strong>
-<br>
+### 1. Interactive Terminal UI (TUI) Mode
+Run the obfuscator without arguments to launch the step-by-step interactive configuration prompt:
+```bash
+python tr0ngx_obfuscator.py
+```
 
-<p align="right">
-<img src="https://repository-images.githubusercontent.com/416417012/341bc39d-cabd-4bff-8702-d84b1b8cbe0e" width="250", height="250">
-</p>
+### 2. Command Line Interface (CLI) Mode
+Execute automated obfuscation directly via CLI arguments:
 
-<br>
-<strong>- The result file is not a python file (.PY) but a compiled python file (.PYC) renamed to .PY</strong>
-<br>
-<strong>- Can't compile the file to exe (since it's basically a PYC file) but you can compile the PY file in the logs folder</strong>
-<br>
-<strong>- Can be deobfuscated using a PYC decompilator then some Python algorithmic, but it requires a certain knowledge</strong>
-<br><br>
+```bash
+# Basic Mode 1 (Fast AST + String obfuscation)
+python tr0ngx_obfuscator.py -i input.py -o output.py -m 1
 
------
+# Standard Mode 2 with Compilation & Kramer Outer Shield
+python tr0ngx_obfuscator.py -i input.py -o output.py -m 2 --compile y --kramer y
 
-### <p align="center">🎯 Levels 🎯</p>
+# Mode 3 + Velimatix Engine + Double Compilation
+python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 --compile y --velimatix y --veli-level 3 --double-compile y
 
-<p align="center"><strong><i>This section shows the "levels" of this project, from 0/5 ⚪ to 5/5 ⚫!</i></strong</p>
-<p align="center"><strong><i>⚪🟢🔵🔴🟣⚫</i></strong</p>
+# MAXIMUM POWER MODE (All transformations, Anti-Debug, SelfMod, Fused Matrix Shield & Rare Unicode)
+python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
+  --moreobf y \
+  --antidebug y \
+  --selfmod y \
+  --compile y \
+  --velimatix y \
+  --veli-level 3 \
+  --double-compile y \
+  --matrix y \
+  --kramer y \
+  --emoji-obf y \
+  --whitespace-obf y \
+  --cjk-vars y \
+  --rare-unicode y \
+  --homoglyph y \
+  --max-ram 2048 \
+  --cores 4
+```
 
-<br><br>
-* Time: 🔴
-* Complexity: 🟣
-* Service: 🔴
-<br><br>
+### 📋 CLI Options Reference
 
------
+| Flag | Description | Options |
+| :--- | :--- | :--- |
+| `-i`, `--input` | Path to target Python file to obfuscate | `<filepath>` |
+| `-o`, `--output` | Custom destination output path | `<filepath>` |
+| `-m`, `--mode` | Obfuscation complexity level | `1`, `2`, `3` |
+| `--moreobf` | Extra string & integer mutation pass | `y` / `n` |
+| `--antidebug` | Inject multi-vector Anti-Debug watchdog shield | `y` / `n` |
+| `--selfmod` | Inject self-modifying code & anti-tamper layer | `y` / `n` |
+| `--compile` | Authenticated AEAD bytecode compilation | `y` / `n` |
+| `--double-compile` | Double compile (Tr0ngX + Velimatix loader) | `y` / `n` |
+| `--velimatix` | Enable Velimatix ExceptionJump & AST spam engine | `y` / `n` |
+| `--veli-level` | Velimatix intensity level | `1`, `2`, `3` |
+| `--kramer` | Wrap with Kramer Kyrie Eleison outer dynamic shield | `y` / `n` |
+| `--matrix`, `--fused` | Enable Fused 3-Track Symbiotic Matrix Shield | `y` / `n` |
+| `--emoji-obf` | Encode output payload as executable Emoji stream | `y` / `n` |
+| `--whitespace-obf` | Encode output as invisible whitespace bitfields | `y` / `n` |
+| `--cjk-vars` | Use CJK Chinese identifiers & PyCool docstrings | `y` / `n` |
+| `--homoglyph` | Use Cyrillic/Greek homoglyph variable names | `y` / `n` |
+| `--rare-unicode` | Use Rare Unicode characters (CJK Ext-B, Kangxi, Hieroglyphs) | `y` / `n` |
+| `--force-py` | Target specific Python version check (`off` to disable) | `3.10`, `3.11`, `3.12`, etc. |
+| `--max-ram` | Capping maximum RAM consumption (in MB) | e.g. `2048` |
+| `--cores` | Capping maximum CPU cores used | e.g. `2`, `4` |
+| `--debug-map` | Export detailed JSON rename mapping & stage metrics | `AUTO` or `<path>` |
+| `--no-art` | Disable ASCII banner (quiet CLI mode) | Flag |
+| `--strict` | Abort immediately on any stage warnings | Flag |
 
-### <p align="center">💡 Ideas 💡</p>
+---
 
-<p align="center"><strong><i>Feel free to make a pull request on this repository to submit any idea!</i></strong</p>
+## 🧪 Testing & Quality Assurance
 
-<br><br>
-* Complexify the obfuscation
-<br><br>
+Tr0ngX includes comprehensive native test suites and end-to-end multi-configuration stress harnesses:
 
------
+```bash
+# Run all automated integration & stress matrix tests
+python tests/run_all_tests.py
 
-### <p align="center">📌 Disclaimer 📌</p>
+# Run individual functional validation suites
+python tests/test_01_core_features.py
+python tests/test_02_crypto_math.py
+python tests/test_03_data_structures.py
+python tests/test_04_dynamic_reflection.py
+python complex_benchmark.py
+```
 
-<br><br>
-* ***Please use this program only for educational purposes.***
-* ***It is not meant to be used in any malicious way, and I decline any responsibility for what you do with it.***
-<br><br>
+---
 
------
+## ⚖️ Disclaimer
 
-### <p align="center">billythegoat356</p>
+This software is developed and distributed for **legitimate software development, educational research, and proprietary code protection purposes only**. The authors assume no liability and are not responsible for any misuse or damage caused by this program.
+
+---
+
+## 📄 License
+
+Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more information.
+
+<div align="center">
+<b>Made with ❤️ by Tr0ngX & Anti-Reverse Engineering Research Community</b>
+</div>

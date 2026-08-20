@@ -1,16 +1,64 @@
-# Byte-compiled / optimized / DLL files
+# ==========================================
+# Python & Bytecode
+# ==========================================
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyd
+*.pyo
 
-# Large generated benchmark output files
+# ==========================================
+# Environments & Packages
+# ==========================================
+.env
+.venv
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ==========================================
+# Generated Obfuscator & Test Artifacts
+# ==========================================
+tr0ngx-*.py
 obf_*.py
+test_out_*.py
 test_cjk_*.py
-trongdepzai-dev-sample_complex.py
+test_*.py
+!tests/test_*.py
+*.obf.py
+*_obf.py
 *.debug.json
-
-# Logs & temp
+diff_*.patch
+*.patch
 *.log
+*.tmp
+*.bak
+
+# ==========================================
+# IDE & System Files
+# ==========================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.lnk
 scratch/
 .system_generated/
-*.lnk
