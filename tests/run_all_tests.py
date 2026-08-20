@@ -41,25 +41,25 @@ def main():
     total_failed = 0
 
     # 1. Native Execution Verification
-    print("\n[PHASE 1] Verifying Native Test Suites Execution...")
+    print("\n[PHASE 1] Verifying Native Test Suites Execution...", flush=True)
     for tf in TEST_FILES:
         if not os.path.exists(tf):
-            print(f"  [!] Missing test file: {tf}")
+            print(f"  [!] Missing test file: {tf}", flush=True)
             continue
         p = subprocess.run([sys.executable, tf], capture_output=True, text=True, encoding="utf-8", errors="replace")
         if p.returncode == 0:
-            print(f"  [PASS] Native: {tf}")
+            print(f"  [PASS] Native: {tf}", flush=True)
             total_passed += 1
         else:
-            print(f"  [FAIL] Native: {tf}\n    {p.stderr}")
+            print(f"  [FAIL] Native: {tf}\n    {p.stderr}", flush=True)
             total_failed += 1
 
     # 2. Obfuscation and Post-Obfuscation Execution Verification
-    print("\n[PHASE 2] Obfuscating & Verifying Functional Invariance Across Matrix Configs...")
+    print("\n[PHASE 2] Obfuscating & Verifying Functional Invariance Across Matrix Configs...", flush=True)
     obf_script = "tr0ngx_obfuscator.py"
     
     for cfg in OBF_CONFIGS:
-        print(f"\n---> Testing Configuration: {cfg['name']}")
+        print(f"\n---> Testing Configuration: {cfg['name']}", flush=True)
         for tf in TEST_FILES:
             if not os.path.exists(tf):
                 continue
@@ -71,17 +71,17 @@ def main():
                 cmd = [sys.executable, obf_script, "-i", tf, "-o", out_path] + cfg["args"]
                 p_obf = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
                 if p_obf.returncode != 0:
-                    print(f"  [FAIL] OBFUSCATION ERROR on {tf}: {p_obf.stderr.strip() or p_obf.stdout.strip()}")
+                    print(f"  [FAIL] OBFUSCATION ERROR on {tf}: {p_obf.stderr.strip() or p_obf.stdout.strip()}", flush=True)
                     total_failed += 1
                     continue
 
                 # Run obfuscated file
                 p_run = subprocess.run([sys.executable, out_path], capture_output=True, text=True, encoding="utf-8", errors="replace")
                 if p_run.returncode == 0:
-                    print(f"  [PASS] VERIFIED: {tf} -> {os.path.basename(out_path)} ({os.path.getsize(out_path):,} bytes)")
+                    print(f"  [PASS] VERIFIED: {tf} -> {os.path.basename(out_path)} ({os.path.getsize(out_path):,} bytes)", flush=True)
                     total_passed += 1
                 else:
-                    print(f"  [FAIL] EXECUTION FAILURE on {tf} [Return Code {p_run.returncode}]:\n{p_run.stderr.strip()}")
+                    print(f"  [FAIL] EXECUTION FAILURE on {tf} [Return Code {p_run.returncode}]:\n{p_run.stderr.strip()}", flush=True)
                     total_failed += 1
             finally:
                 if os.path.exists(out_path):
@@ -90,9 +90,9 @@ def main():
                     except:
                         pass
 
-    print("\n" + "=" * 70)
-    print(f" TEST RUN COMPLETED: {total_passed} PASSED | {total_failed} FAILED")
-    print("=" * 70)
+    print("\n" + "=" * 70, flush=True)
+    print(f" TEST RUN COMPLETED: {total_passed} PASSED | {total_failed} FAILED", flush=True)
+    print("=" * 70, flush=True)
     
     if total_failed > 0:
         sys.exit(1)
