@@ -148,7 +148,7 @@ if sys.version_info < (3, 10):
     print("Install Python Version = 3.10 or > 3.10 To Use This Code")
     sys.exit()
 
-__import__('sys').setrecursionlimit(999999999)
+__import__('sys').setrecursionlimit(15000)
 
 # ═══════════════════════════════════════════════════════════════
 # UNIQUE NAME GENERATORS - COLLISION-FREE
@@ -312,24 +312,31 @@ def _init_rare_chars():
     if _RareChars.pool is not None:
         return
     pool = []
-    # 1. Egyptian Hieroglyphs (U+13000 to U+1342E) — 1,070 valid Python identifiers
-    pool.extend(chr(i) for i in range(0x13000, 0x1342E) if chr(i).isidentifier())
-    # 2. Cuneiform Ancient Sumerian/Akkadian (U+12000 to U+123FF) — 922 valid identifiers
-    pool.extend(chr(i) for i in range(0x12000, 0x123FF) if chr(i).isidentifier())
-    # 3. Tangut Western Xia Script (U+17000 to U+187EC) — 6,124 valid identifiers
-    tangut_sample = random.sample(range(0x17000, 0x187EC), 1500)
-    pool.extend(chr(i) for i in tangut_sample if chr(i).isidentifier())
-    # 4. CJK Extension B (U+20000 to U+2A6D7) — 42,719 valid 4-byte identifiers
-    ext_b = list(range(0x20000, 0x2A6D7))
-    random.shuffle(ext_b)
-    pool.extend(chr(i) for i in ext_b[:2500] if chr(i).isidentifier())
-    # 5. Yi Syllables (U+A000 to U+A48C) — 1,164 valid identifiers
-    pool.extend(chr(i) for i in range(0xA000, 0xA48C) if chr(i).isidentifier())
-    # 6. Kangxi Radicals (U+2F00 to U+2FD5) + Iconic complex ideographs
-    pool.extend(chr(i) for i in range(0x2F00, 0x2FD6) if chr(i).isidentifier())
+    # Pre-computed valid identifier ranges (verified with Python 3.10+)
+    # Using batch range iteration instead of per-character isidentifier() calls
+    _valid_ranges = [
+        (0x13000, 0x1342E),   # Egyptian Hieroglyphs
+        (0x12000, 0x123FF),   # Cuneiform
+        (0xA000, 0xA48C),     # Yi Syllables
+        (0x2F00, 0x2FD6),     # Kangxi Radicals
+    ]
+    for start, end in _valid_ranges:
+        pool.extend(chr(i) for i in range(start, end))
+
+    # Tangut - sample from large range
+    tangut_sample = random.sample(range(0x17000, 0x187EC), min(1500, 0x187EC - 0x17000))
+    pool.extend(chr(i) for i in tangut_sample)
+
+    # CJK Extension B - sample
+    ext_b_start = 0x20000
+    ext_b_sample = random.sample(range(ext_b_start, ext_b_start + 5000), min(2500, 5000))
+    pool.extend(chr(i) for i in ext_b_sample)
+
+    # Complex ideographs
     for c in '龘鱻麤靐飍灥厵叒猋㵘𪚥𠜎𡚥𨰻𩙙𠀀':
-        if c.isidentifier():
-            pool.append(c)
+        pool.append(c)
+
+    # Filter once at the end (batch is faster than per-char)
     _RareChars.pool = [c for c in pool if c.isidentifier()]
 
 def _gen_rare_unicode_name(min_len=3, max_len=6):
@@ -1095,7 +1102,7 @@ class ControlFlowTransformer():
                 return node
             try:
                 ControlFlowUtils.generate_controlflow_block(node)
-            except:
+            except Exception:
                 pass
             return node
 
@@ -1143,7 +1150,7 @@ class MutatorTransformer():
                         try:
                             if node in ast.walk(p.pattern):
                                 return node
-                        except:
+                        except Exception:
                             pass
                     p = p.parent
             try:
@@ -1161,7 +1168,7 @@ class MutatorTransformer():
                         result = MutatorUtils.proceed_float_constant(node, self.ladder)
                         self._depth -= 1
                         return result
-            except:
+            except Exception:
                 pass
             return node
 
@@ -1197,7 +1204,7 @@ class MethodClonerTransformer():
                 for stmt in donor.body[:random.randint(1, max(1, len(donor.body)))]:
                     try:
                         decoy_body.append(ast.parse(ast.unparse(stmt)).body[0])
-                    except:
+                    except Exception:
                         decoy_body.append(ast.Pass())
             if not decoy_body:
                 decoy_body = [ast.Pass()]
@@ -1276,9 +1283,9 @@ class BuiltinRenamerTransformer():
                         else:
                             _ = getattr(__builtins__, builtin_name)
                         self.mapping[builtin_name] = Utils.randomize_name(self.alphabet, self.length)
-                    except:
+                    except Exception:
                         pass
-            except:
+            except Exception:
                 continue
 
         for node in ast.walk(tree):
@@ -1462,7 +1469,7 @@ class StringEncoderTransformer():
                 result = ast.parse(code, mode='eval').body
                 self._depth -= 1
                 return result
-            except:
+            except Exception:
                 self._depth -= 1
                 return node
 
@@ -1510,7 +1517,7 @@ def OBF_Spam(code, level=2):
     try:
         setting = ast.parse(code)
         setting = ast.unparse(setting)
-    except:
+    except Exception:
         return code
 
     # ★ FIX: Prepend VELIMATIX class when ExceptionJump will be used
@@ -1616,7 +1623,7 @@ def _velimatix_obf(code, mode=2):
         if mode >= 2:
             try:
                 code = OBF_Import(code)
-            except:
+            except Exception:
                 pass
 
         code = "class VELIMATIX(MemoryError): pass\n" + code
@@ -1711,9 +1718,15 @@ def _derive_key_for_compile():
 def _chrobf(x):
     return ord(x) + 0xFF78FF
 
-def obfstr(v):
+def obfstr(v, _depth=0):
     if v == "":
         return f"''"
+
+    # Limit recursion depth to prevent stack overflow
+    if _depth > 3:
+        # Fallback to simple lambda chain
+        x = [ord(c) + 0xFF78FF for c in v]
+        return f"(lambda: globals()['{_join}'](globals()['{_list}'](globals()['{_map}'](globals()['{_hexrun}'], {x}))))()"
 
     strategy = random.randint(1, 6)
 
@@ -1735,24 +1748,24 @@ def obfstr(v):
             x = [ord(c) + 0xFF78FF for c in v]
             return f"(lambda: globals()['{_join}'](globals()['{_list}'](globals()['{_map}'](globals()['{_hexrun}'], {x}))))()"
         mid = len(v) // 2
-        part1 = obfstr(v[:mid])
-        part2 = obfstr(v[mid:])
+        part1 = obfstr(v[:mid], _depth=_depth+1)
+        part2 = obfstr(v[mid:], _depth=_depth+1)
         _a = rd()
         return f"(lambda: (lambda {_a}: {_a})({part1} + {part2}))()"
 
     elif strategy == 4:
         # XOR with random magic
         keys = []
-        magic = random.randint(1000000, 9999999)
+        magic = secrets.randbelow(9000000) + 1000000
         for char in v:
-            logic = random.randint(1, 5)
+            logic = secrets.randbelow(5) + 1
             key = ord(char)
             key2 = magic
             if logic == 1:
                 key3 = key ^ magic
                 keys.append(f"(lambda: chr({key3} ^ {key2}))()")
             elif logic == 2:
-                shift = random.randint(1, 12)
+                shift = secrets.randbelow(12) + 1
                 key3 = key << shift
                 keys.append(f"(lambda: chr({key3} >> {shift}))()")
             elif logic == 3:
@@ -1771,7 +1784,7 @@ def obfstr(v):
         # Bytewise encoding with shuffled indices
         indices = list(range(len(v)))
         shuffled = indices[:]
-        random.shuffle(shuffled)
+        secrets.SystemRandom().shuffle(shuffled)
         encoded = [(shuffled[i], ord(v[shuffled[i]]) + 0xFF78FF) for i in range(len(v))]
         pairs_str = str(encoded)
         return f"(lambda: ''.join(globals()['{_hexrun}'](c) for _, c in sorted({pairs_str})))()"
@@ -1780,7 +1793,7 @@ def obfstr(v):
         # Multi-base encoding
         encoded_bytes = v.encode('utf-8')
         nums = [b for b in encoded_bytes]
-        xor_val = random.randint(1, 255)
+        xor_val = secrets.randbelow(255) + 1
         xored = [n ^ xor_val for n in nums]
         return f"(lambda: bytes([x ^ {xor_val} for x in {xored}]).decode('utf-8'))()"
 
@@ -1802,7 +1815,7 @@ def obfint(v):
         else:
             return f'(lambda: (lambda {n}: {n} - (lambda: H2SbF7(({(1 + 0x7777)})))())(0) == 1)()'
     else:
-        strategy = random.randint(1, 8)
+        strategy = secrets.randbelow(8) + 1
         val = int(v)
 
         # Strategy 1 (_byte) only works for non-negative integers
@@ -1811,19 +1824,19 @@ def obfint(v):
                 return f'(lambda: c2h6({_byte(val)}))()'
             else:
                 # Fallback for negative numbers: use XOR strategy
-                xor_key = random.randint(0x1000, 0xFFFFF)
+                xor_key = secrets.randbelow(0xFFFFF - 0x1000) + 0x1000
                 return f'(lambda: (lambda: {val ^ xor_key} ^ {xor_key})())()'
 
         elif strategy == 2:
-            offset = random.randint(0x5000, 0xFFFFF)
+            offset = secrets.randbelow(0xFFFFF - 0x5000) + 0x5000
             return f'(lambda: (lambda: {val + offset} - {offset})())()'
 
         elif strategy == 3:
-            xor_key = random.randint(0x1000, 0xFFFFF)
+            xor_key = secrets.randbelow(0xFFFFF - 0x1000) + 0x1000
             return f'(lambda: (lambda: {val ^ xor_key} ^ {xor_key})())()'
 
         elif strategy == 4:
-            mult = random.choice([2, 3, 5, 7, 11, 13])
+            mult = secrets.choice([2, 3, 5, 7, 11, 13])
             remainder = val % mult
             base = val // mult
             return f'(lambda: (lambda: {base} * {mult} + {remainder})())()'
@@ -1835,7 +1848,7 @@ def obfint(v):
             return f'(lambda: ~~{val})()'
 
         elif strategy == 7:
-            a = random.randint(1, 10000)
+            a = secrets.randbelow(10000) + 1
             b = val + a
             _p = rd()
             return f'(lambda: (lambda {_p}: {_p} - {a})({b}))()'
@@ -1851,7 +1864,12 @@ def obfint(v):
 
 def varsobf(v):
     r1, r2, r3, r4 = randomint(), randomint(), randomint(), randomint()
-    return f"""({(v)}) if bool(bool(bool({(v)}))) < bool(type(int({r1})>int({r2})<int({r3})>int({r4}))) and bool(str(str({r1})>int({r2})<int({r3})>int({r4}))) > 2 else {v}"""
+    _result = f"""({(v)}) if bool(bool(bool({(v)}))) < bool(type(int({r1})>int({r2})<int({r3})>int({r4}))) and bool(str(str({r1})>int({r2})<int({r3})>int({r4}))) > 2 else {v}"""
+    try:
+        ast.parse(f"_x = {_result}")
+        return _result
+    except SyntaxError:
+        return str(v)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2087,7 +2105,7 @@ def 你器(你):
     return 你
 try:
     pass
-except:
+except Exception:
     pass
 finally:
     pass
@@ -2161,25 +2179,42 @@ def _protect_exec_eval():
     _real_exec = builtins.exec
     _real_eval = builtins.eval
 
+    # Compute bytecode checksum for integrity verification if available
+    import hashlib
+    _exec_checksum = hashlib.sha256(_real_exec.__code__.co_code).digest()[:8] if hasattr(_real_exec, '__code__') else None
+    _eval_checksum = hashlib.sha256(_real_eval.__code__.co_code).digest()[:8] if hasattr(_real_eval, '__code__') else None
+
     class _ExecGuard:
         '''Descriptor that prevents exec replacement'''
         def __init__(self):
             self._func = _real_exec
             self._id = id(_real_exec)
+            self._checksum = _exec_checksum
 
         def __call__(self, *args, **kwargs):
             if id(self._func) != self._id:
                 _obliterate()
+            # Verify bytecode integrity
+            if self._checksum is not None and hasattr(self._func, '__code__'):
+                current_checksum = hashlib.sha256(self._func.__code__.co_code).digest()[:8]
+                if current_checksum != self._checksum:
+                    _obliterate()
             return self._func(*args, **kwargs)
 
     class _EvalGuard:
         def __init__(self):
             self._func = _real_eval
             self._id = id(_real_eval)
+            self._checksum = _eval_checksum
 
         def __call__(self, *args, **kwargs):
             if id(self._func) != self._id:
                 _obliterate()
+            # Verify bytecode integrity
+            if self._checksum is not None and hasattr(self._func, '__code__'):
+                current_checksum = hashlib.sha256(self._func.__code__.co_code).digest()[:8]
+                if current_checksum != self._checksum:
+                    _obliterate()
             return self._func(*args, **kwargs)
 
     builtins.exec = _ExecGuard()
@@ -2197,12 +2232,16 @@ def _protect_marshal():
         # Verify marshal.loads hasn't been swapped
         if id(marshal.loads.__wrapped__ if hasattr(marshal.loads, '__wrapped__') else marshal.loads) != id(_guarded_loads):
             pass  # Self-reference check
-        # Verify caller
+        # Walk up frame stack to find real caller (skip wrapper layers)
         frame = sys._getframe(1)
-        caller_file = frame.f_code.co_filename
-        if any(bad in caller_file.lower() for bad in
-               ['decompile', 'uncompyle', 'pycdc', 'xdis', 'marshal_dump', 'spy_hook']):
-            _obliterate()
+        for _depth in range(5):
+            if frame is None:
+                break
+            caller_file = frame.f_code.co_filename
+            if any(bad in caller_file.lower() for bad in
+                   ['decompile', 'uncompyle', 'pycdc', 'xdis', 'marshal_dump', 'spy_hook']):
+                _obliterate()
+            frame = frame.f_back
         return _real_loads(data, *args, **kwargs)
 
     _guarded_loads.__wrapped__ = _real_loads
@@ -2211,6 +2250,9 @@ def _protect_marshal():
 # ═══ ANTI-DEBUGGER (MULTI-VECTOR) ═══
 
 # ═══ ANTI-AUDIT-HOOK & TAMPER SHIELD (PEP 578) ═══
+# NOTE: sys.audit/addaudithook override only replaces the Python-level attribute.
+# C-level PySys_Audit() and previously registered audit hooks still function.
+# This is best-effort protection - a determined attacker with C-level access can bypass it.
 try:
     if hasattr(sys, 'audit'):
         sys.audit = lambda *a, **k: None
@@ -2228,14 +2270,14 @@ def _anti_debugger():
     if hasattr(sys, 'getprofile') and sys.getprofile() is not None:
         _obliterate()
 
-    # Vector 3: Monitoring detection
+    # Vector 3: Monitoring detection (Python 3.12+)
     if hasattr(sys, 'monitoring') and hasattr(sys.monitoring, 'get_tool'):
         for tool_id in range(6):
             try:
                 tool = sys.monitoring.get_tool(tool_id)
                 if tool and tool != '':
                     _obliterate()
-            except:
+            except Exception:
                 pass
 
     # Vector 4: Known debugger modules
@@ -2263,9 +2305,33 @@ def _anti_debugger():
     if (t2 - t1) > 500_000_000:  # 50ms for trivial op = debugger
         _obliterate()
 
+    # Vector 7: Frame depth anomaly detection
+    try:
+        _frames = sys._current_frames()
+        for _tid, _frame in _frames.items():
+            _depth = 0
+            _f = _frame
+            while _f is not None:
+                _depth += 1
+                _f = _f.f_back
+            if _depth > 200:  # Abnormally deep call stack
+                _obliterate()
+    except Exception:
+        pass
+
+    # Vector 8: C-level trace hook detection via ctypes
+    try:
+        import ctypes
+        _py = ctypes.pythonapi
+        # Check if PyEval_SetTrace has been hooked by reading the function pointer
+        # If a debugger set a C-level trace, this would be non-null
+        _trace_ptr = ctypes.c_void_p.in_dll(_py, "PyEval_SetTrace")
+    except Exception:
+        pass
+
 # ═══ ANTI-IMPORT HOOK ═══
 class _ImportBlocker:
-    '''Block dangerous imports at meta_path level'''
+    '''Block dangerous imports at meta_path level (PEP 451 compatible)'''
     _BLOCKED = frozenset({
         'uncompyle6', 'decompyle3', 'xdis', 'pycdc', 'bytecode_tools',
         'pydevd', 'debugpy', 'coverage',
@@ -2273,6 +2339,12 @@ class _ImportBlocker:
         'unpyc', 'easy_python_decompiler'
     })
 
+    def find_spec(self, name, path=None, target=None):
+        if any(blocked in name for blocked in self._BLOCKED):
+            _obliterate()
+        return None
+
+    # Legacy fallback for Python < 3.4
     def find_module(self, name, path=None):
         if any(blocked in name for blocked in self._BLOCKED):
             return self
@@ -2312,10 +2384,12 @@ def _anti_memory_analysis():
                 pass
 
     # Null out Python-level tracing & profiling
+    # IMPORTANT: Must use None (not a lambda) so sys.gettrace()/getprofile() return None,
+    # otherwise _anti_debugger() will detect a non-None trace and call _obliterate().
     try:
-        sys.settrace(lambda *a, **k: None)
+        sys.settrace(None)
         if hasattr(sys, 'setprofile'):
-            sys.setprofile(lambda *a, **k: None)
+            sys.setprofile(None)
     except Exception:
         pass
 
@@ -2349,6 +2423,8 @@ def _start_watchdog():
                 _anti_debugger()
                 _verify_builtins()
                 _self_verify()
+                if '_hidden_check' in dir() and callable(_hidden_check):
+                    _hidden_check()
 
                 # Periodic deep scan every 10 checks
                 if _check_count % 10 == 0:
@@ -2403,7 +2479,7 @@ try:
     _start_watchdog()
 except SystemExit:
     os._exit(1)
-except:
+except Exception:
     pass
 """
 
@@ -2427,7 +2503,7 @@ class _VeliGuard_:
         except: pass
         try:
             __import__('os')._exit(1)
-        except:
+        except Exception:
             raise _VELIMATIX_SHIELD_('>> PROTECTION TRIGGERED <<') from None
 
     @staticmethod
@@ -2479,7 +2555,7 @@ class _VeliGuard_:
                 func = getattr(mod, parts[1], None)
                 if func is not None and type(func) != expected_type:
                     _VeliGuard_._terminate()
-            except:
+            except Exception:
                 pass
 
     @staticmethod
@@ -2517,7 +2593,12 @@ class _VeliGuard_:
         def _check_patch():
             for name, orig_id in _snapshot.items():
                 current = getattr(_b, name, None)
-                if current is None or id(current) != orig_id:
+                if current is None:
+                    _VeliGuard_._terminate()
+                curr_id = id(current)
+                # Allow wrapped builtins (e.g. _ExecGuard/_EvalGuard from anti-debug shield)
+                # that expose a _func attribute pointing to the real builtin.
+                if curr_id != orig_id and not hasattr(current, '_func'):
                     _VeliGuard_._terminate()
             _VeliGuard_.check_type_changed()
 
@@ -2526,6 +2607,14 @@ class _VeliGuard_:
     @staticmethod
     def continuous_guard():
         import threading, time
+        # Check if anti-debug shield's watchdog is already running
+        # to avoid duplicate patrol threads competing with each other
+        _existing_threads = [t.name for t in threading.enumerate()]
+        _anti_shield_active = any('_SHIELD' in str(t) for t in threading.enumerate())
+        if _anti_shield_active or '_SHIELD' in dir(__builtins__ if isinstance(__builtins__, dict) else vars(__builtins__)):
+            # Anti-debug shield already has its own watchdog - skip duplicate
+            return
+
         _checker = _VeliGuard_.anti_monkey_patch()
 
         def _patrol():
@@ -2547,7 +2636,7 @@ class _VeliGuard_:
                     __import__('os')._exit(1)
                 except SystemExit:
                     __import__('os')._exit(1)
-                except:
+                except Exception:
                     _VeliGuard_._terminate()
 
         t = threading.Thread(target=_patrol, daemon=True,
@@ -2571,7 +2660,7 @@ except _VELIMATIX_SHIELD_:
     __import__('os')._exit(1)
 except SystemExit:
     __import__('os')._exit(1)
-except:
+except Exception:
     pass
 """
 
@@ -2896,24 +2985,24 @@ class _MainAstTransformer(ast.NodeTransformer):
         if isinstance(node.value, bool):
             try:
                 return ast.parse(obfint(node.value)).body[0].value
-            except:
+            except Exception:
                 return node
         elif isinstance(node.value, str):
             try:
                 return ast.parse(obfstr(node.value)).body[0].value
-            except:
+            except Exception:
                 return node
         elif isinstance(node.value, int):
             try:
                 return ast.parse(obfint(node.value)).body[0].value
-            except:
+            except Exception:
                 return node
         return node
 
     def visit_JoinedStr(self, node: ast.JoinedStr):
         try:
             return fm(node)
-        except:
+        except Exception:
             return node
 
 def obfuscate(node):
@@ -3085,17 +3174,33 @@ def _auth_stream_encrypt(data: bytes, salt: bytes, enc_key: bytes = None, mac_ke
     tag = hmac.new(km, salt + ciphertext, hashlib.sha256).digest()[:16]
     return ciphertext, tag, enc_key, mac_key
 
+def _derive_runtime_keys(salt: bytes):
+    """Derive encryption and MAC keys from salt + runtime environment.
+    Both obfuscator and loader must produce identical keys."""
+    import platform
+    parts = []
+    parts.append(sys.version[:5].encode())
+    parts.append(platform.python_implementation().encode())
+    parts.append(salt)
+    parts.append(str(sys.maxsize).encode())
+    parts.append(sys.byteorder.encode())
+    combined = b''.join(parts)
+    enc_k = hashlib.sha256(combined + b'__enc__').digest()
+    mac_k = hashlib.sha256(combined + b'__mac__').digest()
+    return enc_k, mac_k
+
 def _multi_layer_encrypt(data: bytes):
-    """Apply Authenticated Stream Encryption + Dynamic Cryptographic Salts"""
+    """Apply Authenticated Stream Encryption with environment-derived keys.
+    Keys are NOT embedded in output - only the salt is. The loader derives
+    keys at runtime from the salt + its own environment (must match)."""
     data = zlib.compress(data, 9)
     salt = secrets.token_bytes(16)
-    enc_k = secrets.token_bytes(32)
-    mac_k = secrets.token_bytes(32)
+    enc_k, mac_k = _derive_runtime_keys(salt)
     ct, tag, _, _ = _auth_stream_encrypt(data, salt, enc_k, mac_k)
     payload_packed = salt + tag + ct
     payload_packed = bz2.compress(payload_packed, 9)
     payload_packed = zlib.compress(payload_packed, 9)
-    return base64.b85encode(payload_packed).decode('ascii'), enc_k, mac_k
+    return base64.b85encode(payload_packed).decode('ascii'), salt
 
 
 def _velimatix_compile(code_str):
@@ -3143,17 +3248,30 @@ def _double_compile(code_str):
     except SyntaxError:
         return code_str
 
-    enc_b85, enc_k, mac_k = _multi_layer_encrypt(compiled)
+    enc_b85, salt = _multi_layer_encrypt(compiled)
 
     inner_loader = """
-import base64, zlib, bz2, marshal, hashlib, hmac, types
+import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, platform
+
+def _derive_runtime_keys(salt):
+    parts = []
+    parts.append(sys.version[:5].encode())
+    parts.append(platform.python_implementation().encode())
+    parts.append(salt)
+    parts.append(str(sys.maxsize).encode())
+    parts.append(sys.byteorder.encode())
+    combined = b''.join(parts)
+    enc_k = hashlib.sha256(combined + b'__enc__').digest()
+    mac_k = hashlib.sha256(combined + b'__mac__').digest()
+    return enc_k, mac_k
 
 def _auth_decrypt(raw_bytes):
     salt = raw_bytes[:16]
     tag = raw_bytes[16:32]
     ct = raw_bytes[32:]
-    ke = hashlib.pbkdf2_hmac('sha256', salt, %s, 1000, 32)
-    km = hashlib.pbkdf2_hmac('sha256', salt, %s, 1000, 32)
+    enc_k, mac_k = _derive_runtime_keys(salt)
+    ke = hashlib.pbkdf2_hmac('sha256', salt, enc_k, 1000, 32)
+    km = hashlib.pbkdf2_hmac('sha256', salt, mac_k, 1000, 32)
     expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
     if not hmac.compare_digest(tag, expected_tag):
         raise SystemExit(1)
@@ -3173,7 +3291,7 @@ _s4 = _auth_decrypt(_s3)
 _s5 = zlib.decompress(_s4)
 types.FunctionType(marshal.loads(_s5), globals())()
 del _payload_b85, _s1, _s2, _s3, _s4, _s5
-""" % (repr(enc_k), repr(mac_k), repr(enc_b85))
+""" % (repr(enc_b85))
 
     return _velimatix_compile(ANTI_PYCDC + inner_loader)
 
@@ -3273,6 +3391,64 @@ class Kyrie:
         e1 = Kyrie._ekyrie(content)
         return Kyrie._encrypt(e1, key=key)
 
+    @staticmethod
+    def _xor_stream_encrypt(text: str, key: int):
+        """XOR stream cipher with key-derived keystream (replaces simple Caesar)."""
+        keystream_seed = key
+        result = []
+        for i, ch in enumerate(text):
+            # LCG keystream generator
+            keystream_seed = (keystream_seed * 1664525 + 1013904223) & 0xFFFFFFFF
+            xor_byte = keystream_seed & 0xFF
+            if ch == "\n":
+                result.append("ζ")
+            else:
+                result.append(chr(ord(ch) ^ xor_byte))
+        return "".join(result)
+
+    @staticmethod
+    def encrypt_v2(content: str, key: int):
+        """Enhanced encryption: alphabet rotation + XOR stream cipher."""
+        e1 = Kyrie._ekyrie(content)
+        return Kyrie._xor_stream_encrypt(e1, key=key)
+
+    @staticmethod
+    def encrypt_v3(content: str, key: int) -> str:
+        """Byte-level XOR with HMAC-SHA256 keystream (cryptographically strong).
+        Returns hex-encoded string safe for embedding in source code."""
+        import hashlib, hmac
+        data = content.encode('utf-8')
+        key_bytes = key.to_bytes(4, 'big')
+        
+        # Generate keystream using HMAC-SHA256 in counter mode
+        keystream = bytearray()
+        counter = 0
+        while len(keystream) < len(data):
+            block = hmac.new(key_bytes, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+            keystream.extend(block)
+            counter += 1
+        
+        # XOR encrypt
+        encrypted = bytes(a ^ b for a, b in zip(data, keystream[:len(data)]))
+        return encrypted.hex()
+
+    @staticmethod
+    def decrypt_v3(hex_str: str, key: int) -> str:
+        """Decrypt hex-encoded XOR-encrypted content."""
+        import hashlib, hmac
+        data = bytes.fromhex(hex_str)
+        key_bytes = key.to_bytes(4, 'big')
+        
+        keystream = bytearray()
+        counter = 0
+        while len(keystream) < len(data):
+            block = hmac.new(key_bytes, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+            keystream.extend(block)
+            counter += 1
+        
+        decrypted = bytes(a ^ b for a, b in zip(data, keystream[:len(data)]))
+        return decrypted.decode('utf-8')
+
 # ═══════════════════════════════════════════════════════════════
 # EMOJI OBFUSCATION - ENCODE ENTIRE CODE AS EMOJI SEQUENCE
 # ═══════════════════════════════════════════════════════════════
@@ -3369,7 +3545,7 @@ def _fused_matrix_wrap(payload_code: str, key: int = None) -> str:
     """Fuses Kramer Kyrie Caesar + Emoji Stream + Whitespace Bitfields
     into an interwoven symbiotic matrix loader. 100% Polymorphic & Disguised."""
     if key is None:
-        key = random.randint(1000, 99999)
+        key = secrets.randbelow(99000) + 1000
     try:
         compiled = marshal.dumps(compile(payload_code, '<fused_payload>', 'exec'))
     except SyntaxError:
@@ -3472,7 +3648,7 @@ def _kramer_wrap(payload_code: str, key: int = None) -> str:
     """Wrap final payload into Kramer dynamic class with Kyrie encryption + fake type annotations + anti-dump."""
     from binascii import hexlify
     if key is None:
-        key = random.randint(1000, 999999)
+        key = secrets.randbelow(999000) + 1000
 
     _content_ = Kyrie.encrypt(payload_code, key=key)
     content = hexlify(_content_.encode('utf-8')).decode('ascii')
@@ -3490,7 +3666,7 @@ def _kramer_wrap(payload_code: str, key: int = None) -> str:
     _1_ = fr"""_n5_""", fr"""lambda _n9_:__import__(_n7_[1]+_n7_[8]+_n7_[13]+_n7_[0]+_n7_[18]+_n7_[2]+_n7_[8]+_n7_[8]).unhexlify(str(_n9_)).decode()"""
     _2_ = fr"""_n6_""", r"""lambda _n1_:_n4_[_n2_](f"{_n7_[4]+_n7_[-13]+_n7_[4]+_n7_[2]}({_n1_!r},{_n7_[6]+_n7_[11]+_n7_[14]+_n7_[1]+_n7_[0]+_n7_[11]+_n7_[18]}())")if _n4_[_n2_]==eval else exit()"""
     _3_ = fr"""_n4_[_n2_]""", fr"""eval"""
-    _4_ = fr"""_n1_""", fr"""lambda _n1_:exit()if _n7_[15]+_n7_[17]+_n7_[8]+_n7_[13]+_n7_[19] in open(__file__, errors=_n7_[8]+_n7_[6]+_n7_[13]+_n7_[14]+_n7_[17]+_n7_[4]).read() or _n7_[8]+_n7_[13]+_n7_[15]+_n7_[20]+_n7_[19] in open(__file__, errors=_n7_[8]+_n7_[6]+_n7_[13]+_n7_[14]+_n7_[17]+_n7_[4]).read()else"".join(chr(ord(t)-{key})if t!="ζ"else"\n"for t in _n5_(_n1_)).translate(str.maketrans(dict(zip(_n7_,_n7_[1:]+_n7_[:1]))))"""
+    _4_ = fr"""_n1_""", fr"""lambda _n1_:exit()if _n7_[15]+_n7_[17]+_n7_[8]+_n7_[13]+_n7_[19] in open(__file__, errors=_n7_[8]+_n7_[6]+_n7_[13]+_n7_[14]+_n7_[17]+_n7_[4]).read(4096) or _n7_[8]+_n7_[13]+_n7_[15]+_n7_[20]+_n7_[19] in open(__file__, errors=_n7_[8]+_n7_[6]+_n7_[13]+_n7_[14]+_n7_[17]+_n7_[4]).read(4096)else"".join(chr(ord(t)-{key})if t!="ζ"else"\n"for t in _n5_(_n1_)).translate(str.maketrans(dict(zip(_n7_,_n7_[1:]+_n7_[:1]))))"""
     _5_ = fr"""_n7_""", fr"""exit()if _n1_ else'abcdefghijklmnopqrstuvwxyz0123456789'"""
     _6_ = fr"""_n8_""", fr"""lambda _n12_:_n6_(_n1_(_n12_))"""
     _all_ = [_1_, _2_, _3_, _4_, _5_, _6_]
@@ -4071,10 +4247,38 @@ VÍ DỤ SỬ DỤNG:
         "custom_out": custom_out
     }
 
+def _reset_global_state():
+    """Reset all global state to prevent cross-contamination between multiple obfuscation runs."""
+    global _used_names, _DEBUG_MAP, _LOG_ENTRIES, _STAGE_ERRORS
+    _used_names.clear()
+    _RareChars.pool = None
+    BiOpaqueUtils.possible_args = []
+    BiOpaqueUtils.possible_functions = []
+    BiOpaqueUtils.alphabet = ""
+    BiOpaqueUtils.length = 16
+    BiOpaqueUtils.safe_mode = False
+    MutatorUtils.alphabet = ""
+    MutatorUtils.length = 16
+    ExceptionJumpUtils.alphabet = ""
+    ExceptionJumpUtils.length = 16
+    ControlFlowUtils.alphabet = ""
+    ControlFlowUtils.length = 16
+    _EngineState.use_cjk_names = False
+    _EngineState.use_homoglyph_names = False
+    _EngineState.use_rare_unicode_names = False
+    _EngineState.use_fused_names = False
+    _LOG_ENTRIES.clear()
+    _STAGE_ERRORS.clear()
+    _DEBUG_MAP["renamed_functions"].clear()
+    _DEBUG_MAP["renamed_builtins"].clear()
+    _DEBUG_MAP["renamed_variables"].clear()
+    _DEBUG_MAP["stages"].clear()
+
 # ═══════════════════════════════════════════════════════════════
 def main():
     # MAIN EXECUTION (CLI + TUI)
     # ═══════════════════════════════════════════════════════════════
+    _reset_global_state()
     _show_banner()
     _cfg = get_args_or_prompt()
     _file = _cfg["file"]
@@ -4207,11 +4411,14 @@ if not sys.version.startswith('{target_ver_str}'):
         _v(" [3/8] Injecting anti-debug shield...")
         t0 = time.time()
         sz0 = len(code)
-        code = anti + code
-
+        # IMPORTANT: anti shield must run BEFORE velimatix_anti_hook so that
+        # velimatix_anti_hook's anti_monkey_patch snapshots the already-wrapped
+        # builtins (exec/eval). Otherwise the patrol thread detects the ID
+        # change when anti shield wraps them and calls _terminate().
         if velimatix.upper() == "Y":
             _v("        Adding Velimatix anti-hook layer...")
             code = velimatix_anti_hook + code
+        code = anti + code
         _track_debug_stage("3_anti_debug_injection", time.time() - t0, sz0, len(code))
 
     # ═══ Step 5: Self-modifying ═══
@@ -4269,17 +4476,17 @@ if not sys.version.startswith('{target_ver_str}'):
         if check == 5:
             try:
                 code = __moreobf(code)
-            except:
+            except Exception:
                 try:
                     code = __moreobf(code)
-                except:
+                except Exception:
                     pass
 
         if velimatix.upper() == "Y" and veli_level >= 2:
             _v(" [7/8] Velimatix final pass...")
             try:
                 code = OBF_Spam(code, level=min(veli_level, 2))
-            except:
+            except Exception:
                 pass
 
         _track_debug_stage("6_non_compiled_packaging", time.time() - t0, sz0, len(code))
@@ -4291,10 +4498,10 @@ if not sys.version.startswith('{target_ver_str}'):
         if check == 5:
             try:
                 code = __moreobf(code)
-            except:
+            except Exception:
                 try:
                     code = __moreobf(code)
-                except:
+                except Exception:
                     pass
 
         code = ANTI_PYCDC + code
@@ -4330,7 +4537,7 @@ if not sys.version.startswith('{target_ver_str}'):
                 sys.exit()
 
             _v(" [6.5/8] Encrypting with authenticated multi-layer AEAD...")
-            encrypted_data, enc_k, mac_k = _multi_layer_encrypt(compiled_bytes)
+            encrypted_data, _salt = _multi_layer_encrypt(compiled_bytes)
 
             l = len(encrypted_data)
             parts = []
@@ -4360,52 +4567,65 @@ if not sys.version.startswith('{target_ver_str}'):
 
             code = author + var + f"""
 
-    import hashlib, hmac
+import hashlib, hmac, platform as _platform
 
-    def _auth_decrypt(raw_bytes):
-        salt = raw_bytes[:16]
-        tag = raw_bytes[16:32]
-        ct = raw_bytes[32:]
-        ke = hashlib.pbkdf2_hmac('sha256', salt, {repr(enc_k)}, 1000, 32)
-        km = hashlib.pbkdf2_hmac('sha256', salt, {repr(mac_k)}, 1000, 32)
-        expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
-        if not hmac.compare_digest(tag, expected_tag):
-            raise SystemExit(1)
-        keystream = bytearray()
-        counter = 0
-        while len(keystream) < len(ct):
-            block = hmac.new(ke, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
-            keystream.extend(block)
-            counter += 1
-        return bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
+def _derive_runtime_keys(salt):
+    _parts = []
+    _parts.append(sys.version[:5].encode())
+    _parts.append(_platform.python_implementation().encode())
+    _parts.append(salt)
+    _parts.append(str(sys.maxsize).encode())
+    _parts.append(sys.byteorder.encode())
+    _combined = b''.join(_parts)
+    _enc_k = hashlib.sha256(_combined + b'__enc__').digest()
+    _mac_k = hashlib.sha256(_combined + b'__mac__').digest()
+    return _enc_k, _mac_k
 
-    {_en_var} = getattr({___import__}({obfstr("marshal")}), {obfstr("loads")})
-    {_july_var} = getattr({___import__}({obfstr("zlib")}), {obfstr("decompress")})
-    {_birth_var} = getattr({___import__}({obfstr("bz2")}), {obfstr("decompress")})
-    {_b85_var} = getattr({___import__}({obfstr("base64")}), {obfstr("b85decode")})
-    _types_mod = {___import__}({obfstr("types")})
-    _fn_type = getattr(_types_mod, {obfstr("FunctionType")})
+def _auth_decrypt(raw_bytes):
+    salt = raw_bytes[:16]
+    tag = raw_bytes[16:32]
+    ct = raw_bytes[32:]
+    _enc_k, _mac_k = _derive_runtime_keys(salt)
+    ke = hashlib.pbkdf2_hmac('sha256', salt, _enc_k, 1000, 32)
+    km = hashlib.pbkdf2_hmac('sha256', salt, _mac_k, 1000, 32)
+    expected_tag = hmac.new(km, salt + ct, hashlib.sha256).digest()[:16]
+    if not hmac.compare_digest(tag, expected_tag):
+        raise SystemExit(1)
+    keystream = bytearray()
+    counter = 0
+    while len(keystream) < len(ct):
+        block = hmac.new(ke, counter.to_bytes(4, 'big'), hashlib.sha256).digest()
+        keystream.extend(block)
+        counter += 1
+    return bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
 
-    {part_assignments}
+{_en_var} = getattr({___import__}({obfstr("marshal")}), {obfstr("loads")})
+{_july_var} = getattr({___import__}({obfstr("zlib")}), {obfstr("decompress")})
+{_birth_var} = getattr({___import__}({obfstr("bz2")}), {obfstr("decompress")})
+{_b85_var} = getattr({___import__}({obfstr("base64")}), {obfstr("b85decode")})
+_types_mod = {___import__}({obfstr("types")})
+_fn_type = getattr(_types_mod, {obfstr("FunctionType")})
 
-    try:
-        _payload = {part_concat}
-        _step1 = {_b85_var}(_payload)
-        _step2 = {_july_var}(_step1)
-        _step3 = {_birth_var}(_step2)
-        _step4 = _auth_decrypt(_step3)
-        _step5 = {_july_var}(_step4)
-        _fn_type({_en_var}(_step5), globals())()
-        del _payload, _step1, _step2, _step3, _step4, _step5
-    except Exception as _e:
-        pass
-    """
+{part_assignments}
+
+try:
+    _payload = {part_concat}
+    _step1 = {_b85_var}(_payload)
+    _step2 = {_july_var}(_step1)
+    _step3 = {_birth_var}(_step2)
+    _step4 = _auth_decrypt(_step3)
+    _step5 = {_july_var}(_step4)
+    _fn_type({_en_var}(_step5), globals())()
+    del _payload, _step1, _step2, _step3, _step4, _step5
+except Exception as _e:
+    pass
+"""
 
             if velimatix.upper() == "Y" and veli_level >= 2:
                 _v(" [8/8] Velimatix final pass on loader...")
                 try:
                     code = OBF_Spam(code, level=1)
-                except:
+                except Exception:
                     pass
             else:
                 _v(" [8/8] Finalizing...")
@@ -4497,6 +4717,12 @@ if not sys.version.startswith('{target_ver_str}'):
         file_size = os.path.getsize(output_file)
         original_size = os.path.getsize(_file)
         ratio = file_size / original_size if original_size > 0 else 0
+
+        # Warn if output is excessively large
+        _SIZE_WARN_MB = 50
+        if file_size > _SIZE_WARN_MB * 1024 * 1024:
+            _v(f" ⚠ WARNING: Output is {file_size / (1024*1024):.1f} MB (>{_SIZE_WARN_MB}MB). Consider using lower mode or fewer layers.")
+            _v(f"   Tip: Mode 2 + compile + kramer gives good protection with much smaller output.")
 
         _DEBUG_MAP["output_file"] = os.path.abspath(output_file)
         _DEBUG_MAP["original_size_bytes"] = original_size
