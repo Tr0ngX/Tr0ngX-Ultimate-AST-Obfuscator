@@ -1516,7 +1516,7 @@ class BuiltinRenamerTransformer():
                 continue
 
         for node in ast.walk(tree):
-            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in self.mapping:
+            if isinstance(node, ast.Name) and isinstance(getattr(node, 'ctx', None), ast.Load) and node.id in self.mapping:
                 node.id = self.mapping[node.id]
 
         xor_key = secrets.randbelow(200) + 55
@@ -4868,7 +4868,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
                 self.emit(_TVMOpcodes.DEL_GLOBAL, self.code_obj.get_name_idx(node.id))
             elif node.id in self.explicit_nonlocals:
                 self.emit(_TVMOpcodes.DEL_FAST, self.code_obj.get_local_idx(node.id))
-            elif self.is_class or (self.is_function and node.id in self.code_obj.local_names):
+            elif (self.is_class or self.is_function) and node.id in self.code_obj.local_names:
                 self.emit(_TVMOpcodes.DEL_FAST, self.code_obj.get_local_idx(node.id))
             else:
                 self.emit(_TVMOpcodes.DEL_GLOBAL, self.code_obj.get_name_idx(node.id))
@@ -4878,7 +4878,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
                 self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx(node.id))
             elif node.id in self.explicit_nonlocals:
                 self.emit(_TVMOpcodes.LOAD_DEREF, self.code_obj.get_name_idx(node.id))
-            elif self.is_class or (self.is_function and node.id in self.code_obj.local_names):
+            elif (self.is_class or self.is_function) and node.id in self.code_obj.local_names:
                 self.emit(_TVMOpcodes.LOAD_FAST, self.code_obj.get_local_idx(node.id))
             else:
                 self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx(node.id))
@@ -5938,6 +5938,137 @@ class _TVMASTCompiler(ast.NodeVisitor):
             self.visit(node.value)
             self.emit(_TVMOpcodes.RETURN_VALUE)
 
+    def _capture_target(self, name: str) -> ast.Name:
+        """Registers a match capture as a proper local (inside functions) and returns a Store target."""
+        if self.is_function and name not in self.explicit_globals and name not in self.explicit_nonlocals:
+            self.code_obj.get_local_idx(name)
+        return ast.Name(id=name, ctx=ast.Store())
+
+    def _match_pattern(self, pat, subj_slot: int, lbl_fail: int):
+        """Emits bytecode matching `pat` against the subject held in local slot `subj_slot`.
+        Jumps to `lbl_fail` on mismatch; stores capture bindings on success."""
+        if isinstance(pat, ast.MatchValue):
+            self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+            if isinstance(pat.value, ast.AST):
+                self.visit(pat.value)
+            else:
+                self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(pat.value))
+            self.emit(_TVMOpcodes.COMPARE_OP, 2)  # ==
+            self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fail)
+        elif isinstance(pat, ast.MatchSingleton):
+            self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(pat.value))
+            self.emit(_TVMOpcodes.COMPARE_OP, 8)  # is
+            self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fail)
+        elif isinstance(pat, ast.MatchAs):
+            if pat.name is not None:
+                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                self._store_target(self._capture_target(pat.name))
+        elif isinstance(pat, ast.MatchClass):
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('isinstance'))
+            self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+            self.visit(pat.cls)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
+            self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fail)
+            for attr_name, kp_node in zip(pat.kwd_attrs, pat.kwd_patterns):
+                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx(attr_name))
+                tmp_slot = self.code_obj.get_local_idx(f'_$mk_{self.new_label()}')
+                self.emit(_TVMOpcodes.STORE_FAST, tmp_slot)
+                self._match_pattern(kp_node, tmp_slot, lbl_fail)
+            if pat.patterns:
+                if len(pat.patterns) == 1 and isinstance(pat.patterns[0], ast.MatchAs):
+                    cap = pat.patterns[0]
+                    if cap.name is not None:
+                        self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                        self._store_target(self._capture_target(cap.name))
+                else:
+                    for p_idx, pp_node in enumerate(pat.patterns):
+                        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('getattr'))
+                        self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('getattr'))
+                        self.visit(pat.cls)
+                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx('__match_args__'))
+                        self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
+                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(p_idx))
+                        self.emit(_TVMOpcodes.GET_ITEM)
+                        self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
+                        tmp_slot = self.code_obj.get_local_idx(f'_$mk_{self.new_label()}')
+                        self.emit(_TVMOpcodes.STORE_FAST, tmp_slot)
+                        self._match_pattern(pp_node, tmp_slot, lbl_fail)
+        elif isinstance(pat, ast.MatchMapping):
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('isinstance'))
+            self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('dict'))
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
+            self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fail)
+            for key_node, pat_node in zip(pat.keys, pat.patterns):
+                self.visit(key_node)
+                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                self.emit(_TVMOpcodes.COMPARE_OP, 6)  # in
+                self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fail)
+                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                self.visit(key_node)
+                self.emit(_TVMOpcodes.GET_ITEM)
+                tmp_slot = self.code_obj.get_local_idx(f'_$mm_{self.new_label()}')
+                self.emit(_TVMOpcodes.STORE_FAST, tmp_slot)
+                self._match_pattern(pat_node, tmp_slot, lbl_fail)
+            if pat.rest is not None:
+                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_match_rest__'))
+                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                for key_node in pat.keys:
+                    self.visit(key_node)
+                self.emit(_TVMOpcodes.BUILD_TUPLE, len(pat.keys))
+                self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
+                self._store_target(self._capture_target(pat.rest))
+        elif isinstance(pat, ast.MatchSequence):
+            has_star = any(isinstance(p, ast.MatchStar) for p in pat.patterns)
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('isinstance'))
+            self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('tuple'))
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('list'))
+            self.emit(_TVMOpcodes.BUILD_TUPLE, 2)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
+            self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fail)
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('len'))
+            self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(len(pat.patterns)))
+            if has_star:
+                self.emit(_TVMOpcodes.COMPARE_OP, 5)  # >=
+            else:
+                self.emit(_TVMOpcodes.COMPARE_OP, 2)  # ==
+            self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fail)
+            for p_idx, p_node in enumerate(pat.patterns):
+                if isinstance(p_node, ast.MatchStar):
+                    if p_node.name is not None:
+                        n_after = len(pat.patterns) - p_idx - 1
+                        upper_val = None if n_after == 0 else -n_after
+                        self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(p_idx))
+                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(upper_val))
+                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+                        self.emit(_TVMOpcodes.BUILD_SLICE, 3)
+                        self.emit(_TVMOpcodes.GET_ITEM)
+                        self._store_target(self._capture_target(p_node.name))
+                else:
+                    self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                    self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(p_idx))
+                    self.emit(_TVMOpcodes.GET_ITEM)
+                    tmp_slot = self.code_obj.get_local_idx(f'_$ms_{self.new_label()}')
+                    self.emit(_TVMOpcodes.STORE_FAST, tmp_slot)
+                    self._match_pattern(p_node, tmp_slot, lbl_fail)
+        elif isinstance(pat, ast.MatchOr):
+            lbl_ok = self.new_label()
+            for alt in pat.patterns:
+                lbl_alt_fail = self.new_label()
+                self._match_pattern(alt, subj_slot, lbl_alt_fail)
+                self.emit_jump(_TVMOpcodes.JUMP, lbl_ok)
+                self.mark_label(lbl_alt_fail)
+            self.emit_jump(_TVMOpcodes.JUMP, lbl_fail)
+            self.mark_label(lbl_ok)
+        # Unknown/unsupported pattern kinds: emit no constraint (always matches).
+
     def visit_Match(self, node: ast.Match):
         lbl_match_end = self.new_label()
         self.visit(node.subject)
@@ -5946,81 +6077,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
 
         for case_clause in node.cases:
             lbl_next_case = self.new_label()
-            pat = case_clause.pattern
-
-            if isinstance(pat, ast.MatchValue):
-                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
-                self.visit(pat.value)
-                self.emit(_TVMOpcodes.COMPARE_OP, 2)  # ==
-                self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
-            elif isinstance(pat, ast.MatchAs) and pat.name is None:
-                pass
-            elif isinstance(pat, ast.MatchMapping):
-                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('isinstance'))
-                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
-                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('dict'))
-                self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
-                self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
-
-                for key_node, pat_node in zip(pat.keys, pat.patterns):
-                    self.visit(key_node)
-                    self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
-                    self.emit(_TVMOpcodes.COMPARE_OP, 6)  # in
-                    self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
-
-                    self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
-                    self.visit(key_node)
-                    self.emit(_TVMOpcodes.GET_ITEM)
-                    if isinstance(pat_node, ast.MatchValue):
-                        self.visit(pat_node.value)
-                        self.emit(_TVMOpcodes.COMPARE_OP, 2)
-                        self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
-                    elif isinstance(pat_node, ast.MatchAs) and pat_node.name:
-                        self._store_target(ast.Name(id=pat_node.name, ctx=ast.Store()))
-                    else:
-                        self.emit(_TVMOpcodes.POP_TOP)
-            elif isinstance(pat, ast.MatchSequence):
-                has_star = any(isinstance(p, ast.MatchStar) for p in pat.patterns)
-                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('isinstance'))
-                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
-                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('tuple'))
-                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('list'))
-                self.emit(_TVMOpcodes.BUILD_TUPLE, 2)
-                self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
-                self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
-
-                # Length check
-                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('len'))
-                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
-                self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
-                self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(len(pat.patterns)))
-                if has_star:
-                    self.emit(_TVMOpcodes.COMPARE_OP, 5)  # >=
-                else:
-                    self.emit(_TVMOpcodes.COMPARE_OP, 2)  # ==
-                self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
-
-                for p_idx, p_node in enumerate(pat.patterns):
-                    if isinstance(p_node, ast.MatchValue):
-                        self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
-                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(p_idx))
-                        self.emit(_TVMOpcodes.GET_ITEM)
-                        self.visit(p_node.value)
-                        self.emit(_TVMOpcodes.COMPARE_OP, 2)
-                        self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
-                    elif isinstance(p_node, ast.MatchAs) and p_node.name:
-                        self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
-                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(p_idx))
-                        self.emit(_TVMOpcodes.GET_ITEM)
-                        self._store_target(ast.Name(id=p_node.name, ctx=ast.Store()))
-                    elif isinstance(p_node, ast.MatchStar) and p_node.name:
-                        self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
-                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(p_idx))
-                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-                        self.emit(_TVMOpcodes.BUILD_SLICE, 3)
-                        self.emit(_TVMOpcodes.GET_ITEM)
-                        self._store_target(ast.Name(id=p_node.name, ctx=ast.Store()))
+            self._match_pattern(case_clause.pattern, subj_slot, lbl_next_case)
 
             if case_clause.guard:
                 self.visit(case_clause.guard)
@@ -6100,7 +6157,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
         return self.code_obj
 
 
-def _derive_runtime_keys(seed_bytes: bytes, salt_bytes: bytes = b'') -> Tuple[bytes, bytes]:
+def _tvm_derive_runtime_keys(seed_bytes: bytes, salt_bytes: bytes = b'') -> Tuple[bytes, bytes]:
     """
     Derives dynamic cryptographic keystream and HMAC keys using iterative SHA-256 expansion.
     Returns (k_enc, k_mac).
@@ -6143,7 +6200,7 @@ def _serialize_tvm_code_object(code: _TVMCodeObject, isa_map: Dict[int, int], k_
     for c in code.constants:
         if isinstance(c, _TVMCodeObject):
             child_salt = secrets.token_bytes(16)
-            child_k_enc, child_k_mac = _derive_runtime_keys(k_enc, child_salt)
+            child_k_enc, child_k_mac = _tvm_derive_runtime_keys(k_enc, child_salt)
             child_encrypted = _serialize_tvm_code_object(c, isa_map, child_k_enc, child_k_mac)
             serialized_consts.append(('__TVM_LAZY__', child_salt, child_encrypted))
         else:
@@ -6168,7 +6225,7 @@ def _vm_emit_runtime_interpreter_v2(root_code: _TVMCodeObject, isa_map: Dict[int
     """Emits the pure Python Polymorphic Virtual Machine Runtime Interpreter 2.0 with AEAD decryption and dynamic affine dispatch."""
     master_seed = secrets.token_bytes(32)
     runtime_salt = secrets.token_bytes(16)
-    k_enc, k_mac = _derive_runtime_keys(master_seed, runtime_salt)
+    k_enc, k_mac = _tvm_derive_runtime_keys(master_seed, runtime_salt)
     serialized_root_packet = _serialize_tvm_code_object(root_code, isa_map, k_enc, k_mac)
 
     v = {k: rd() for k in [
@@ -6694,7 +6751,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         _args = [_f.stack.pop() for _ in range(_a)][::-1] if _a else []
         _fn = _f.stack.pop()
         _nms = _f.code_obj.names
-        if (_nms and _a < len(_nms) and _nms[_a] == '__vm_await__') or (hasattr(_fn, '__name__') and _fn.__name__ == '_vm_await'):
+        if (_fn is _g_env.get('__vm_await__')) or (_nms and _a < len(_nms) and _nms[_a] == '__vm_await__') or (hasattr(_fn, '__name__') and _fn.__name__ == '_vm_await'):
             import inspect
             if _args and (inspect.iscoroutine(_args[0]) or inspect.isawaitable(_args[0])):
                 return ({v['await_sig']}, _args[0])
@@ -6860,6 +6917,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         return _val
 
     _g_env['__vm_await__'] = {v['vm_await_fn']}
+    _g_env['__vm_match_rest__'] = (lambda _subj, _excl: {{k: v for k, v in _subj.items() if k not in _excl}})
 
     async def {v['eval_frame_async_fn']}(_frame):
         _c_arr = _frame.code_obj.code
@@ -9466,12 +9524,13 @@ def main():
         if _cfg.get("dyn_strings", "N").upper() == "Y": _new_modes.append("DYN-STRINGS (Per-Callsite XOR)")
         if _cfg.get("anti_dump", "N").upper() == "Y": _new_modes.append("ANTI-DUMP (GC Scrubber)")
 
+        _veli_suffix = f"(L{_cfg.get('veli_level', 1)})" if _cfg['velimatix'].upper() == 'Y' else ""
         _summary_lines = [
             f"File Saved   : {output_file}",
             f"Original Size: {original_size:,} bytes",
             f"Output Size  : {file_size:,} bytes ({ratio:.1f}x)",
             f"Time Taken   : {elapsed:.2f}s",
-            f"Mode         : {_cfg['mode']} | Veli: {_cfg['velimatix'].upper()}{f'(L{_cfg.get("veli_level", 1)})' if _cfg['velimatix'].upper()=='Y' else ''}",
+            f"Mode         : {_cfg['mode']} | Veli: {_cfg['velimatix'].upper()}{_veli_suffix}",
             f"Compile      : {_cfg['method'].upper()} | Double: {_cfg['double_compile'].upper() if _cfg['method'].upper()=='Y' else 'N'}",
             f"Protections  : Anti-Debug={_cfg['antidebug'].upper()} | Anti-VM={_cfg['antivm'].upper()} | Anti-Dump={_cfg['anti_dump'].upper()} | Self-Mod={_cfg['selfmodify'].upper()} | Kramer={_cfg['kramer'].upper()}"
         ]
