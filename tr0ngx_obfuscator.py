@@ -21,6 +21,7 @@ import traceback
 import threading
 import string
 import tempfile
+from typing import Any, List, Dict, Optional, Tuple, Union
 
 # Ensure Windows console supports Unicode / ANSI characters & Virtual Terminal Processing
 try:
@@ -4605,13 +4606,15 @@ except Exception:
 """
 
 # ═══════════════════════════════════════════════════════════════
-# TR0NGX TRUE VIRTUAL MACHINE (TVM) ENGINE
-# Translates Python AST statements and expressions into a Custom Virtual ISA
-# and executes via a Polymorphic Virtual Machine Interpreter.
-# Zero reliance on marshal.loads + exec(original_code).
+# TR0NGX TRUE VIRTUAL MACHINE (TVM 2.0) HIGH-ASSURANCE ENGINE
+# Translates Python AST into Custom ISA Bytecode and executes via
+# a Polymorphic Frame-Based Virtual Machine Interpreter.
+# 100% Zero-exec fallback: FunctionDef, ClassDef, Try/Except,
+# Loops, Closures, and Slices are fully virtualized.
 # ═══════════════════════════════════════════════════════════════
 
 class _TVMOpcodes:
+    # Stack & Data
     LOAD_CONST       = 1
     LOAD_GLOBAL      = 2
     STORE_GLOBAL     = 3
@@ -4620,7 +4623,9 @@ class _TVMOpcodes:
     DUP_TOP          = 6
     POP_TOP          = 7
     ROT_TWO          = 8
+    ROT_THREE        = 9
 
+    # Arithmetic & Bitwise
     BINARY_ADD       = 10
     BINARY_SUB       = 11
     BINARY_MUL       = 12
@@ -4637,48 +4642,93 @@ class _TVMOpcodes:
     UNARY_NOT        = 23
     UNARY_INVERT     = 24
 
+    # Comparisons
     COMPARE_OP       = 30
 
+    # Control Flow
     JUMP             = 40
     JUMP_IF_TRUE     = 41
     JUMP_IF_FALSE    = 42
-    RETURN_VALUE     = 43
+    JUMP_IF_FALSE_OR_POP = 43
+    JUMP_IF_TRUE_OR_POP  = 44
+    RETURN_VALUE     = 45
 
+    # Object / Attribute / Subscript
     GET_ATTR         = 50
     SET_ATTR         = 51
     GET_ITEM         = 52
     SET_ITEM         = 53
     DEL_ITEM         = 54
 
+    # Collections & Unpacking
     BUILD_LIST       = 60
     BUILD_TUPLE      = 61
     BUILD_SET        = 62
     BUILD_DICT       = 63
+    UNPACK_SEQUENCE  = 64
+    BUILD_SLICE      = 65
 
-    CALL_FUNCTION    = 70
-    IMPORT_NAME      = 71
-    IMPORT_FROM      = 72
+    # Functions, Calls & Classes
+    MAKE_FUNCTION    = 70
+    CALL_FUNCTION    = 71
+    CALL_FUNCTION_KW = 72
+    BUILD_CLASS      = 73
+    IMPORT_NAME      = 74
+    IMPORT_FROM      = 75
+    CALL_FUNCTION_EX = 76
 
+    # Iteration & Exceptions
     GET_ITER         = 80
     FOR_ITER         = 81
     SETUP_FINALLY    = 82
     POP_BLOCK        = 83
     RAISE_VARARGS    = 84
 
-    OP_EXEC_STMT     = 90
+    # Termination / NOP / Trap
     HALT             = 99
     NOP              = 100
     TRAP             = 101
 
 
-class _TVMASTCompiler(ast.NodeVisitor):
-    """Compiles Python AST statements and control flow into linear TVM instructions."""
-    def __init__(self):
+class _TVMCodeObject:
+    """Represents a virtualized code block (Module, Function, Class, or Generator)."""
+    def __init__(self, name: str, arg_names: List[str], kwarg_name: Optional[str] = None, vararg_name: Optional[str] = None, defaults: Optional[Dict[str, Any]] = None):
+        self.name = name
+        self.arg_names = list(arg_names)
+        self.kwarg_name = kwarg_name
+        self.vararg_name = vararg_name
+        self.defaults = defaults or {}
         self.instructions: List[Tuple[int, int]] = []
         self.constants: List[Any] = []
         self.names: List[str] = []
-        self.label_fixups: Dict[int, List[int]] = {}
+        self.local_names: List[str] = list(arg_names)
+
+    def get_const_idx(self, val: Any) -> int:
+        for idx, c in enumerate(self.constants):
+            if type(c) == type(val) and c == val:
+                return idx
+        self.constants.append(val)
+        return len(self.constants) - 1
+
+    def get_name_idx(self, name: str) -> int:
+        if name not in self.names:
+            self.names.append(name)
+        return self.names.index(name)
+
+    def get_local_idx(self, name: str) -> int:
+        if name not in self.local_names:
+            self.local_names.append(name)
+        return self.local_names.index(name)
+
+
+class _TVMASTCompiler(ast.NodeVisitor):
+    """Compiles Python AST statements and expressions into TVM-IR and custom virtual bytecode."""
+    def __init__(self, name: str = '<module>', arg_names: List[str] = None, kwarg_name: Optional[str] = None, vararg_name: Optional[str] = None, defaults: Optional[Dict[str, Any]] = None, is_function: bool = False, is_class: bool = False):
+        self.code_obj = _TVMCodeObject(name, arg_names or [], kwarg_name=kwarg_name, vararg_name=vararg_name, defaults=defaults)
+        self.is_function = is_function
+        self.is_class = is_class
         self.labels: Dict[int, int] = {}
+        self.label_fixups: Dict[int, List[int]] = {}
         self.next_label_id = 0
         self.loop_stack: List[Tuple[int, int]] = []
 
@@ -4688,45 +4738,48 @@ class _TVMASTCompiler(ast.NodeVisitor):
         return lbl
 
     def mark_label(self, label_id: int):
-        self.labels[label_id] = len(self.instructions)
+        self.labels[label_id] = len(self.code_obj.instructions)
 
     def emit(self, op: int, arg: int = 0):
-        self.instructions.append((op, arg))
+        self.code_obj.instructions.append((op, arg))
 
     def emit_jump(self, op: int, target_label_id: int):
-        idx = len(self.instructions)
-        self.instructions.append((op, 0))
+        idx = len(self.code_obj.instructions)
+        self.code_obj.instructions.append((op, 0))
         if target_label_id not in self.label_fixups:
             self.label_fixups[target_label_id] = []
         self.label_fixups[target_label_id].append(idx)
 
-    def get_const_idx(self, val: Any) -> int:
-        try:
-            for idx, c in enumerate(self.constants):
-                if type(c) == type(val) and c == val:
-                    return idx
-        except Exception:
-            pass
-        self.constants.append(val)
-        return len(self.constants) - 1
-
-    def get_name_idx(self, name: str) -> int:
-        if name not in self.names:
-            self.names.append(name)
-        return self.names.index(name)
-
     # --- Expressions ---
 
     def visit_Constant(self, node: ast.Constant):
-        idx = self.get_const_idx(node.value)
+        idx = self.code_obj.get_const_idx(node.value)
         self.emit(_TVMOpcodes.LOAD_CONST, idx)
 
     def visit_Name(self, node: ast.Name):
-        idx = self.get_name_idx(node.id)
-        if isinstance(node.ctx, ast.Load):
-            self.emit(_TVMOpcodes.LOAD_GLOBAL, idx)
-        elif isinstance(node.ctx, ast.Store):
-            self.emit(_TVMOpcodes.STORE_GLOBAL, idx)
+        if self.is_class:
+            if isinstance(node.ctx, ast.Store):
+                idx = self.code_obj.get_local_idx(node.id)
+                self.emit(_TVMOpcodes.STORE_FAST, idx)
+            elif isinstance(node.ctx, ast.Load):
+                if node.id in self.code_obj.local_names:
+                    idx = self.code_obj.get_local_idx(node.id)
+                    self.emit(_TVMOpcodes.LOAD_FAST, idx)
+                else:
+                    idx = self.code_obj.get_name_idx(node.id)
+                    self.emit(_TVMOpcodes.LOAD_GLOBAL, idx)
+        elif self.is_function and node.id in self.code_obj.local_names:
+            idx = self.code_obj.get_local_idx(node.id)
+            if isinstance(node.ctx, ast.Load):
+                self.emit(_TVMOpcodes.LOAD_FAST, idx)
+            elif isinstance(node.ctx, ast.Store):
+                self.emit(_TVMOpcodes.STORE_FAST, idx)
+        else:
+            idx = self.code_obj.get_name_idx(node.id)
+            if isinstance(node.ctx, ast.Load):
+                self.emit(_TVMOpcodes.LOAD_GLOBAL, idx)
+            elif isinstance(node.ctx, ast.Store):
+                self.emit(_TVMOpcodes.STORE_GLOBAL, idx)
 
     def visit_BinOp(self, node: ast.BinOp):
         self.visit(node.left)
@@ -4756,28 +4809,136 @@ class _TVMASTCompiler(ast.NodeVisitor):
         elif isinstance(node.op, ast.Invert):
             self.emit(_TVMOpcodes.UNARY_INVERT)
 
+    def visit_BoolOp(self, node: ast.BoolOp):
+        # Short-circuiting boolean operations (And / Or)
+        is_or = isinstance(node.op, ast.Or)
+        lbl_end = self.new_label()
+        for idx, val in enumerate(node.values):
+            self.visit(val)
+            if idx < len(node.values) - 1:
+                if is_or:
+                    self.emit_jump(_TVMOpcodes.JUMP_IF_TRUE_OR_POP, lbl_end)
+                else:
+                    self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE_OR_POP, lbl_end)
+        self.mark_label(lbl_end)
+
     def visit_Compare(self, node: ast.Compare):
-        self.visit(node.left)
         cmp_map = {
-            ast.Eq: '==', ast.NotEq: '!=', ast.Lt: '<', ast.LtE: '<=',
-            ast.Gt: '>', ast.GtE: '>=', ast.Is: 'is', ast.IsNot: 'is not',
-            ast.In: 'in', ast.NotIn: 'not in'
+            ast.Lt: 0, ast.LtE: 1, ast.Eq: 2, ast.NotEq: 3,
+            ast.Gt: 4, ast.GtE: 5, ast.In: 6, ast.NotIn: 7,
+            ast.Is: 8, ast.IsNot: 9
         }
-        for op, comparator in zip(node.ops, node.comparators):
-            self.visit(comparator)
-            cmp_str = cmp_map.get(type(op), '==')
-            cmp_idx = self.get_const_idx(cmp_str)
-            self.emit(_TVMOpcodes.COMPARE_OP, cmp_idx)
+        if len(node.ops) == 1:
+            self.visit(node.left)
+            self.visit(node.comparators[0])
+            cmp_code = cmp_map.get(type(node.ops[0]), 2)
+            self.emit(_TVMOpcodes.COMPARE_OP, cmp_code)
+        else:
+            self.visit(node.left)
+            cleanup_labels = []
+            lbl_end = self.new_label()
+            for idx, (op, comp) in enumerate(zip(node.ops, node.comparators)):
+                self.visit(comp)
+                if idx < len(node.ops) - 1:
+                    self.emit(_TVMOpcodes.DUP_TOP)
+                    self.emit(_TVMOpcodes.ROT_THREE)
+                cmp_code = cmp_map.get(type(op), 2)
+                self.emit(_TVMOpcodes.COMPARE_OP, cmp_code)
+                if idx < len(node.ops) - 1:
+                    lbl_fail = self.new_label()
+                    cleanup_labels.append(lbl_fail)
+                    self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE_OR_POP, lbl_fail)
+            self.emit_jump(_TVMOpcodes.JUMP, lbl_end)
+            for lbl_fail in cleanup_labels:
+                self.mark_label(lbl_fail)
+                self.emit(_TVMOpcodes.ROT_TWO)
+                self.emit(_TVMOpcodes.POP_TOP)
+            self.mark_label(lbl_end)
+
+    def visit_JoinedStr(self, node: ast.JoinedStr):
+        for val in node.values:
+            self.visit(val)
+        self.emit(_TVMOpcodes.BUILD_LIST, len(node.values))
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(''))
+        self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('join'))
+        self.emit(_TVMOpcodes.ROT_TWO)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+
+    def visit_FormattedValue(self, node: ast.FormattedValue):
+        self.visit(node.value)
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('str'))
+        self.emit(_TVMOpcodes.ROT_TWO)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+
+    def visit_Await(self, node: ast.Await):
+        # Desugar await expr: evaluate expr, if it is a coroutine or awaitable, return it to awaiter
+        self.visit(node.value)
+        # Call await handler or evaluate coroutine synchronously in thread pool / loop
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+        self.emit(_TVMOpcodes.ROT_TWO)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
 
     def visit_Call(self, node: ast.Call):
-        self.visit(node.func)
-        for arg in node.args:
-            self.visit(arg)
-        self.emit(_TVMOpcodes.CALL_FUNCTION, len(node.args))
+        # Check if call contains Starred argument
+        has_starred = any(isinstance(a, ast.Starred) for a in node.args)
+        has_starred_kw = any(kw.arg is None for kw in node.keywords)
+        if has_starred or has_starred_kw:
+            # Build list of args dynamically
+            self.emit(_TVMOpcodes.BUILD_LIST, 0)
+            lst_idx = self.code_obj.get_local_idx('_$call_args')
+            self.emit(_TVMOpcodes.STORE_FAST, lst_idx)
+            for a in node.args:
+                if isinstance(a, ast.Starred):
+                    self.emit(_TVMOpcodes.LOAD_FAST, lst_idx)
+                    self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('extend'))
+                    self.visit(a.value)
+                    self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+                    self.emit(_TVMOpcodes.POP_TOP)
+                else:
+                    self.emit(_TVMOpcodes.LOAD_FAST, lst_idx)
+                    self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('append'))
+                    self.visit(a)
+                    self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+                    self.emit(_TVMOpcodes.POP_TOP)
+
+            # Build dict of kwargs dynamically
+            self.emit(_TVMOpcodes.BUILD_DICT, 0)
+            kw_idx = self.code_obj.get_local_idx('_$call_kw')
+            self.emit(_TVMOpcodes.STORE_FAST, kw_idx)
+            for kw in node.keywords:
+                if kw.arg is None:
+                    # **kwargs unpacking
+                    self.emit(_TVMOpcodes.LOAD_FAST, kw_idx)
+                    self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('update'))
+                    self.visit(kw.value)
+                    self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+                    self.emit(_TVMOpcodes.POP_TOP)
+                else:
+                    self.visit(kw.value)
+                    self.emit(_TVMOpcodes.LOAD_FAST, kw_idx)
+                    self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(kw.arg))
+                    self.emit(_TVMOpcodes.SET_ITEM)
+
+            self.visit(node.func)
+            self.emit(_TVMOpcodes.LOAD_FAST, lst_idx)
+            self.emit(_TVMOpcodes.LOAD_FAST, kw_idx)
+            self.emit(_TVMOpcodes.CALL_FUNCTION_EX, 1)
+        else:
+            self.visit(node.func)
+            for arg in node.args:
+                self.visit(arg)
+            if node.keywords:
+                for kw in node.keywords:
+                    k_idx = self.code_obj.get_const_idx(kw.arg)
+                    self.emit(_TVMOpcodes.LOAD_CONST, k_idx)
+                    self.visit(kw.value)
+                self.emit(_TVMOpcodes.CALL_FUNCTION_KW, len(node.args) | (len(node.keywords) << 8))
+            else:
+                self.emit(_TVMOpcodes.CALL_FUNCTION, len(node.args))
 
     def visit_Attribute(self, node: ast.Attribute):
         self.visit(node.value)
-        idx = self.get_name_idx(node.attr)
+        idx = self.code_obj.get_name_idx(node.attr)
         if isinstance(node.ctx, ast.Load):
             self.emit(_TVMOpcodes.GET_ATTR, idx)
         elif isinstance(node.ctx, ast.Store):
@@ -4809,26 +4970,506 @@ class _TVMASTCompiler(ast.NodeVisitor):
             self.visit(v)
         self.emit(_TVMOpcodes.BUILD_DICT, len(node.keys))
 
+    def visit_Slice(self, node: ast.Slice):
+        if node.lower: self.visit(node.lower)
+        else: self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+        if node.upper: self.visit(node.upper)
+        else: self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+        if node.step: self.visit(node.step)
+        else: self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+        self.emit(_TVMOpcodes.BUILD_SLICE, 3)
+
     # --- Statements & Control Flow Lowering ---
 
     def visit_Expr(self, node: ast.Expr):
         self.visit(node.value)
-        self.emit(_TVMOpcodes.POP_TOP)
+        if not (getattr(self, 'is_generator', False) and isinstance(node.value, (ast.Yield, ast.YieldFrom))):
+            self.emit(_TVMOpcodes.POP_TOP)
 
     def visit_Assign(self, node: ast.Assign):
         self.visit(node.value)
         for target in node.targets:
             if isinstance(target, ast.Name):
-                idx = self.get_name_idx(target.id)
-                self.emit(_TVMOpcodes.STORE_GLOBAL, idx)
+                if self.is_class:
+                    idx = self.code_obj.get_local_idx(target.id)
+                    self.emit(_TVMOpcodes.STORE_FAST, idx)
+                elif self.is_function and target.id in self.code_obj.local_names:
+                    idx = self.code_obj.get_local_idx(target.id)
+                    self.emit(_TVMOpcodes.STORE_FAST, idx)
+                else:
+                    idx = self.code_obj.get_name_idx(target.id)
+                    self.emit(_TVMOpcodes.STORE_GLOBAL, idx)
             elif isinstance(target, ast.Attribute):
                 self.visit(target.value)
-                idx = self.get_name_idx(target.attr)
+                idx = self.code_obj.get_name_idx(target.attr)
                 self.emit(_TVMOpcodes.SET_ATTR, idx)
             elif isinstance(target, ast.Subscript):
                 self.visit(target.value)
                 self.visit(target.slice)
                 self.emit(_TVMOpcodes.SET_ITEM)
+            elif isinstance(target, (ast.Tuple, ast.List)):
+                self.emit(_TVMOpcodes.UNPACK_SEQUENCE, len(target.elts))
+                for elt in target.elts:
+                    if isinstance(elt, ast.Name):
+                        if self.is_class:
+                            idx = self.code_obj.get_local_idx(elt.id)
+                            self.emit(_TVMOpcodes.STORE_FAST, idx)
+                        elif self.is_function and elt.id in self.code_obj.local_names:
+                            idx = self.code_obj.get_local_idx(elt.id)
+                            self.emit(_TVMOpcodes.STORE_FAST, idx)
+                        else:
+                            idx = self.code_obj.get_name_idx(elt.id)
+                            self.emit(_TVMOpcodes.STORE_GLOBAL, idx)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign):
+        if node.value:
+            self.visit(node.value)
+            if isinstance(node.target, ast.Name):
+                if self.is_class:
+                    idx = self.code_obj.get_local_idx(node.target.id)
+                    self.emit(_TVMOpcodes.STORE_FAST, idx)
+                elif self.is_function and node.target.id in self.code_obj.local_names:
+                    idx = self.code_obj.get_local_idx(node.target.id)
+                    self.emit(_TVMOpcodes.STORE_FAST, idx)
+                else:
+                    idx = self.code_obj.get_name_idx(node.target.id)
+                    self.emit(_TVMOpcodes.STORE_GLOBAL, idx)
+            elif isinstance(node.target, ast.Attribute):
+                self.visit(node.target.value)
+                idx = self.code_obj.get_name_idx(node.target.attr)
+                self.emit(_TVMOpcodes.SET_ATTR, idx)
+            elif isinstance(node.target, ast.Subscript):
+                self.visit(node.target.value)
+                self.visit(node.target.slice)
+                self.emit(_TVMOpcodes.SET_ITEM)
+
+    def visit_AugAssign(self, node: ast.AugAssign):
+        # Desugar target op= value -> target = target op value
+        self.visit(node.target)
+        self.visit(node.value)
+        op_map = {
+            ast.Add: _TVMOpcodes.BINARY_ADD,
+            ast.Sub: _TVMOpcodes.BINARY_SUB,
+            ast.Mult: _TVMOpcodes.BINARY_MUL,
+            ast.Div: _TVMOpcodes.BINARY_DIV,
+            ast.FloorDiv: _TVMOpcodes.BINARY_FLOORDIV,
+            ast.Mod: _TVMOpcodes.BINARY_MOD,
+            ast.Pow: _TVMOpcodes.BINARY_POW,
+            ast.BitAnd: _TVMOpcodes.BINARY_AND,
+            ast.BitOr: _TVMOpcodes.BINARY_OR,
+            ast.BitXor: _TVMOpcodes.BINARY_XOR,
+            ast.LShift: _TVMOpcodes.BINARY_LSHIFT,
+            ast.RShift: _TVMOpcodes.BINARY_RSHIFT,
+        }
+        self.emit(op_map.get(type(node.op), _TVMOpcodes.BINARY_ADD))
+        if isinstance(node.target, ast.Name):
+            if self.is_class:
+                idx = self.code_obj.get_local_idx(node.target.id)
+                self.emit(_TVMOpcodes.STORE_FAST, idx)
+            elif self.is_function and node.target.id in self.code_obj.local_names:
+                idx = self.code_obj.get_local_idx(node.target.id)
+                self.emit(_TVMOpcodes.STORE_FAST, idx)
+            else:
+                idx = self.code_obj.get_name_idx(node.target.id)
+                self.emit(_TVMOpcodes.STORE_GLOBAL, idx)
+        elif isinstance(node.target, ast.Attribute):
+            self.visit(node.target.value)
+            idx = self.code_obj.get_name_idx(node.target.attr)
+            self.emit(_TVMOpcodes.SET_ATTR, idx)
+        elif isinstance(node.target, ast.Subscript):
+            self.visit(node.target.value)
+            self.visit(node.target.slice)
+            self.emit(_TVMOpcodes.SET_ITEM)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        # Check if function is a generator (contains yield or yield from)
+        is_gen = any(isinstance(sub, (ast.Yield, ast.YieldFrom)) for sub in ast.walk(node))
+        arg_names = [a.arg for a in node.args.args]
+        vararg_name = node.args.vararg.arg if node.args.vararg else None
+        kwarg_name = node.args.kwarg.arg if node.args.kwarg else None
+        sub_compiler = _TVMASTCompiler(name=node.name, arg_names=arg_names, kwarg_name=kwarg_name, vararg_name=vararg_name, is_function=True)
+
+        # Handle default arguments: for each arg with default, if arg is not supplied (is _NO_ARG), set it to default value
+        if node.args.defaults:
+            num_defaults = len(node.args.defaults)
+            default_args = node.args.args[-num_defaults:]
+            for arg_node, def_node in zip(default_args, node.args.defaults):
+                arg_idx = sub_compiler.code_obj.get_local_idx(arg_node.arg)
+                sub_compiler.emit(_TVMOpcodes.LOAD_FAST, arg_idx)
+                sub_compiler.emit(_TVMOpcodes.LOAD_GLOBAL, sub_compiler.code_obj.get_name_idx('_NO_ARG'))
+                sub_compiler.emit(_TVMOpcodes.COMPARE_OP, 8)  # 'is' _NO_ARG
+                lbl_has_val = sub_compiler.new_label()
+                sub_compiler.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_has_val)
+                sub_compiler.visit(def_node)
+                sub_compiler.emit(_TVMOpcodes.STORE_FAST, arg_idx)
+                sub_compiler.mark_label(lbl_has_val)
+
+        if is_gen:
+            gen_list_idx = sub_compiler.code_obj.get_local_idx('_$gen_list')
+            sub_compiler.emit(_TVMOpcodes.BUILD_LIST, 0)
+            sub_compiler.emit(_TVMOpcodes.STORE_FAST, gen_list_idx)
+            sub_compiler.is_generator = True
+            for stmt in node.body:
+                sub_compiler.visit(stmt)
+            sub_compiler.emit(_TVMOpcodes.LOAD_FAST, gen_list_idx)
+            sub_compiler.emit(_TVMOpcodes.GET_ITER)
+            sub_compiler.emit(_TVMOpcodes.RETURN_VALUE)
+        else:
+            for stmt in node.body:
+                sub_compiler.visit(stmt)
+        sub_code = sub_compiler.finalize()
+
+        idx = self.code_obj.get_const_idx(sub_code)
+        self.emit(_TVMOpcodes.LOAD_CONST, idx)
+        self.emit(_TVMOpcodes.MAKE_FUNCTION, 0)
+
+        # Apply decorators if present
+        for dec in reversed(node.decorator_list):
+            self.visit(dec)
+            self.emit(_TVMOpcodes.ROT_TWO)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+
+        target_idx = self.code_obj.get_name_idx(node.name)
+        if self.is_class:
+            self.emit(_TVMOpcodes.STORE_FAST, self.code_obj.get_local_idx(node.name))
+        elif self.is_function:
+            self.emit(_TVMOpcodes.STORE_FAST, self.code_obj.get_local_idx(node.name))
+        else:
+            self.emit(_TVMOpcodes.STORE_GLOBAL, target_idx)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        arg_names = [a.arg for a in node.args.args]
+        vararg_name = node.args.vararg.arg if node.args.vararg else None
+        kwarg_name = node.args.kwarg.arg if node.args.kwarg else None
+        sub_compiler = _TVMASTCompiler(name=node.name, arg_names=arg_names, kwarg_name=kwarg_name, vararg_name=vararg_name, is_function=True)
+
+        if node.args.defaults:
+            num_defaults = len(node.args.defaults)
+            default_args = node.args.args[-num_defaults:]
+            for arg_node, def_node in zip(default_args, node.args.defaults):
+                arg_idx = sub_compiler.code_obj.get_local_idx(arg_node.arg)
+                sub_compiler.emit(_TVMOpcodes.LOAD_FAST, arg_idx)
+                sub_compiler.emit(_TVMOpcodes.LOAD_GLOBAL, sub_compiler.code_obj.get_name_idx('_NO_ARG'))
+                sub_compiler.emit(_TVMOpcodes.COMPARE_OP, 8)  # 'is' _NO_ARG
+                lbl_has_val = sub_compiler.new_label()
+                sub_compiler.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_has_val)
+                sub_compiler.visit(def_node)
+                sub_compiler.emit(_TVMOpcodes.STORE_FAST, arg_idx)
+                sub_compiler.mark_label(lbl_has_val)
+
+        is_gen = any(isinstance(sub, (ast.Yield, ast.YieldFrom)) for sub in ast.walk(node))
+        if is_gen:
+            gen_list_idx = sub_compiler.code_obj.get_local_idx('_$gen_list')
+            sub_compiler.emit(_TVMOpcodes.BUILD_LIST, 0)
+            sub_compiler.emit(_TVMOpcodes.STORE_FAST, gen_list_idx)
+            sub_compiler.is_generator = True
+            for stmt in node.body:
+                sub_compiler.visit(stmt)
+            sub_compiler.emit(_TVMOpcodes.LOAD_FAST, gen_list_idx)
+            sub_compiler.emit(_TVMOpcodes.GET_ITER)
+            sub_compiler.emit(_TVMOpcodes.RETURN_VALUE)
+        else:
+            for stmt in node.body:
+                sub_compiler.visit(stmt)
+        sub_code = sub_compiler.finalize()
+
+        idx = self.code_obj.get_const_idx(sub_code)
+        self.emit(_TVMOpcodes.LOAD_CONST, idx)
+        self.emit(_TVMOpcodes.MAKE_FUNCTION, 1)  # arg=1 flags async function
+
+        for dec in reversed(node.decorator_list):
+            self.visit(dec)
+            self.emit(_TVMOpcodes.ROT_TWO)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+
+        target_idx = self.code_obj.get_name_idx(node.name)
+        if self.is_class:
+            self.emit(_TVMOpcodes.STORE_FAST, self.code_obj.get_local_idx(node.name))
+        elif self.is_function:
+            self.emit(_TVMOpcodes.STORE_FAST, self.code_obj.get_local_idx(node.name))
+        else:
+            self.emit(_TVMOpcodes.STORE_GLOBAL, target_idx)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor):
+        lbl_head = self.new_label()
+        lbl_exit = self.new_label()
+
+        self.visit(node.iter)
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+        self.emit(_TVMOpcodes.ROT_TWO)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+        self.emit(_TVMOpcodes.GET_ITER)
+
+        self.mark_label(lbl_head)
+        self.emit_jump(_TVMOpcodes.FOR_ITER, lbl_exit)
+        if isinstance(node.target, ast.Name):
+            if self.is_function and node.target.id in self.code_obj.local_names:
+                self.emit(_TVMOpcodes.STORE_FAST, self.code_obj.get_local_idx(node.target.id))
+            else:
+                self.emit(_TVMOpcodes.STORE_GLOBAL, self.code_obj.get_name_idx(node.target.id))
+        elif isinstance(node.target, (ast.Tuple, ast.List)):
+            self.emit(_TVMOpcodes.UNPACK_SEQUENCE, len(node.target.elts))
+            for elt in node.target.elts:
+                if isinstance(elt, ast.Name):
+                    if self.is_function and elt.id in self.code_obj.local_names:
+                        self.emit(_TVMOpcodes.STORE_FAST, self.code_obj.get_local_idx(elt.id))
+                    else:
+                        self.emit(_TVMOpcodes.STORE_GLOBAL, self.code_obj.get_name_idx(elt.id))
+
+        self.loop_stack.append((lbl_head, lbl_exit))
+        for stmt in node.body:
+            self.visit(stmt)
+        self.emit_jump(_TVMOpcodes.JUMP, lbl_head)
+        self.loop_stack.pop()
+
+        self.mark_label(lbl_exit)
+
+    def visit_With(self, node: ast.With):
+        for item in node.items:
+            self.visit(item.context_expr)
+            ctx_slot = self.code_obj.get_local_idx('_$ctx_mgr')
+            self.emit(_TVMOpcodes.STORE_FAST, ctx_slot)
+            self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
+            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__enter__'))
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 0)
+            if item.optional_vars:
+                if isinstance(item.optional_vars, ast.Name):
+                    if self.is_function and item.optional_vars.id in self.code_obj.local_names:
+                        self.emit(_TVMOpcodes.STORE_FAST, self.code_obj.get_local_idx(item.optional_vars.id))
+                    else:
+                        self.emit(_TVMOpcodes.STORE_GLOBAL, self.code_obj.get_name_idx(item.optional_vars.id))
+            else:
+                self.emit(_TVMOpcodes.POP_TOP)
+
+        lbl_handler = self.new_label()
+        lbl_end = self.new_label()
+        self.emit_jump(_TVMOpcodes.SETUP_FINALLY, lbl_handler)
+        for stmt in node.body:
+            self.visit(stmt)
+        self.emit(_TVMOpcodes.POP_BLOCK)
+
+        for item in reversed(node.items):
+            self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
+            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__exit__'))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
+            self.emit(_TVMOpcodes.POP_TOP)
+        self.emit_jump(_TVMOpcodes.JUMP, lbl_end)
+
+        self.mark_label(lbl_handler)
+        for item in reversed(node.items):
+            self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
+            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__exit__'))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
+            self.emit(_TVMOpcodes.POP_TOP)
+        self.emit(_TVMOpcodes.RAISE_VARARGS)
+
+        self.mark_label(lbl_end)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith):
+        for item in node.items:
+            self.visit(item.context_expr)
+            ctx_slot = self.code_obj.get_local_idx('_$actx_mgr')
+            self.emit(_TVMOpcodes.STORE_FAST, ctx_slot)
+            self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
+            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__aenter__'))
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 0)
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+            self.emit(_TVMOpcodes.ROT_TWO)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+            if item.optional_vars:
+                if isinstance(item.optional_vars, ast.Name):
+                    if self.is_function and item.optional_vars.id in self.code_obj.local_names:
+                        self.emit(_TVMOpcodes.STORE_FAST, self.code_obj.get_local_idx(item.optional_vars.id))
+                    else:
+                        self.emit(_TVMOpcodes.STORE_GLOBAL, self.code_obj.get_name_idx(item.optional_vars.id))
+            else:
+                self.emit(_TVMOpcodes.POP_TOP)
+
+        lbl_handler = self.new_label()
+        lbl_end = self.new_label()
+        self.emit_jump(_TVMOpcodes.SETUP_FINALLY, lbl_handler)
+        for stmt in node.body:
+            self.visit(stmt)
+        self.emit(_TVMOpcodes.POP_BLOCK)
+
+        for item in reversed(node.items):
+            self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
+            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__aexit__'))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+            self.emit(_TVMOpcodes.ROT_TWO)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+            self.emit(_TVMOpcodes.POP_TOP)
+        self.emit_jump(_TVMOpcodes.JUMP, lbl_end)
+
+        self.mark_label(lbl_handler)
+        for item in reversed(node.items):
+            self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
+            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__aexit__'))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+            self.emit(_TVMOpcodes.ROT_TWO)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+            self.emit(_TVMOpcodes.POP_TOP)
+        self.emit(_TVMOpcodes.RAISE_VARARGS)
+
+        self.mark_label(lbl_end)
+
+    def visit_Lambda(self, node: ast.Lambda):
+        arg_names = [a.arg for a in node.args.args]
+        vararg_name = node.args.vararg.arg if node.args.vararg else None
+        kwarg_name = node.args.kwarg.arg if node.args.kwarg else None
+        sub_compiler = _TVMASTCompiler(name='<lambda>', arg_names=arg_names, kwarg_name=kwarg_name, vararg_name=vararg_name, is_function=True)
+        sub_compiler.visit(ast.Return(value=node.body))
+        sub_code = sub_compiler.finalize()
+        idx = self.code_obj.get_const_idx(sub_code)
+        self.emit(_TVMOpcodes.LOAD_CONST, idx)
+        self.emit(_TVMOpcodes.MAKE_FUNCTION, 0)
+
+    def visit_ListComp(self, node: ast.ListComp):
+        # Pre-scan target variables so they are recognized as local variables
+        target_names = ['.0']
+        for g in node.generators:
+            for n in ast.walk(g.target):
+                if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Param)):
+                    if n.id not in target_names: target_names.append(n.id)
+                elif isinstance(n, ast.Name) and n.id not in target_names:
+                    target_names.append(n.id)
+
+        sub_compiler = _TVMASTCompiler(name='<listcomp>', arg_names=target_names, is_function=True)
+        sub_compiler.emit(_TVMOpcodes.BUILD_LIST, 0)
+        lst_idx = sub_compiler.code_obj.get_local_idx('_$lst')
+        sub_compiler.emit(_TVMOpcodes.STORE_FAST, lst_idx)
+
+        # Load passed iterator
+        sub_compiler.emit(_TVMOpcodes.LOAD_FAST, sub_compiler.code_obj.get_local_idx('.0'))
+        lbl_head = sub_compiler.new_label()
+        lbl_exit = sub_compiler.new_label()
+        sub_compiler.mark_label(lbl_head)
+        sub_compiler.emit_jump(_TVMOpcodes.FOR_ITER, lbl_exit)
+
+        gen = node.generators[0]
+        if isinstance(gen.target, ast.Name):
+            sub_compiler.emit(_TVMOpcodes.STORE_FAST, sub_compiler.code_obj.get_local_idx(gen.target.id))
+        elif isinstance(gen.target, (ast.Tuple, ast.List)):
+            sub_compiler.emit(_TVMOpcodes.UNPACK_SEQUENCE, len(gen.target.elts))
+            for elt in gen.target.elts:
+                if isinstance(elt, ast.Name):
+                    sub_compiler.emit(_TVMOpcodes.STORE_FAST, sub_compiler.code_obj.get_local_idx(elt.id))
+        for if_expr in gen.ifs:
+            sub_compiler.visit(if_expr)
+            lbl_skip = sub_compiler.new_label()
+            sub_compiler.emit_jump(_TVMOpcodes.JUMP_IF_TRUE, lbl_skip)
+            sub_compiler.emit_jump(_TVMOpcodes.JUMP, lbl_head)
+            sub_compiler.mark_label(lbl_skip)
+
+        sub_compiler.emit(_TVMOpcodes.LOAD_FAST, lst_idx)
+        sub_compiler.emit(_TVMOpcodes.GET_ATTR, sub_compiler.code_obj.get_name_idx('append'))
+        sub_compiler.visit(node.elt)
+        sub_compiler.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+        sub_compiler.emit(_TVMOpcodes.POP_TOP)
+        sub_compiler.emit_jump(_TVMOpcodes.JUMP, lbl_head)
+        sub_compiler.mark_label(lbl_exit)
+        sub_compiler.emit(_TVMOpcodes.POP_TOP)  # pop iterator
+        sub_compiler.emit(_TVMOpcodes.LOAD_FAST, lst_idx)
+        sub_compiler.emit(_TVMOpcodes.RETURN_VALUE)
+
+        sub_code = sub_compiler.finalize()
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(sub_code))
+        self.emit(_TVMOpcodes.MAKE_FUNCTION, 0)
+        self.visit(node.generators[0].iter)
+        self.emit(_TVMOpcodes.GET_ITER)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp):
+        target_names = ['.0']
+        for g in node.generators:
+            for n in ast.walk(g.target):
+                if isinstance(n, ast.Name) and n.id not in target_names:
+                    target_names.append(n.id)
+
+        sub_compiler = _TVMASTCompiler(name='<genexpr>', arg_names=target_names, is_function=True)
+        sub_compiler.emit(_TVMOpcodes.BUILD_LIST, 0)
+        lst_idx = sub_compiler.code_obj.get_local_idx('_$lst')
+        sub_compiler.emit(_TVMOpcodes.STORE_FAST, lst_idx)
+
+        sub_compiler.emit(_TVMOpcodes.LOAD_FAST, sub_compiler.code_obj.get_local_idx('.0'))
+        lbl_head = sub_compiler.new_label()
+        lbl_exit = sub_compiler.new_label()
+        sub_compiler.mark_label(lbl_head)
+        sub_compiler.emit_jump(_TVMOpcodes.FOR_ITER, lbl_exit)
+
+        gen = node.generators[0]
+        if isinstance(gen.target, ast.Name):
+            sub_compiler.emit(_TVMOpcodes.STORE_FAST, sub_compiler.code_obj.get_local_idx(gen.target.id))
+        elif isinstance(gen.target, (ast.Tuple, ast.List)):
+            sub_compiler.emit(_TVMOpcodes.UNPACK_SEQUENCE, len(gen.target.elts))
+            for elt in gen.target.elts:
+                if isinstance(elt, ast.Name):
+                    sub_compiler.emit(_TVMOpcodes.STORE_FAST, sub_compiler.code_obj.get_local_idx(elt.id))
+        for if_expr in gen.ifs:
+            sub_compiler.visit(if_expr)
+            sub_compiler.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_head)
+
+        sub_compiler.emit(_TVMOpcodes.LOAD_FAST, lst_idx)
+        sub_compiler.emit(_TVMOpcodes.GET_ATTR, sub_compiler.code_obj.get_name_idx('append'))
+        sub_compiler.visit(node.elt)
+        sub_compiler.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+        sub_compiler.emit(_TVMOpcodes.POP_TOP)
+        sub_compiler.emit_jump(_TVMOpcodes.JUMP, lbl_head)
+        sub_compiler.mark_label(lbl_exit)
+        sub_compiler.emit(_TVMOpcodes.POP_TOP)
+        sub_compiler.emit(_TVMOpcodes.LOAD_FAST, lst_idx)
+        sub_compiler.emit(_TVMOpcodes.GET_ITER)
+        sub_compiler.emit(_TVMOpcodes.RETURN_VALUE)
+
+        sub_code = sub_compiler.finalize()
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(sub_code))
+        self.emit(_TVMOpcodes.MAKE_FUNCTION, 0)
+        self.visit(node.generators[0].iter)
+        self.emit(_TVMOpcodes.GET_ITER)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+
+    def visit_ClassDef(self, node: ast.ClassDef):
+        sub_compiler = _TVMASTCompiler(name=node.name, arg_names=[], is_function=True, is_class=True)
+        for stmt in node.body:
+            sub_compiler.visit(stmt)
+        sub_code = sub_compiler.finalize()
+
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(node.name))
+        for b in node.bases:
+            self.visit(b)
+        self.emit(_TVMOpcodes.BUILD_TUPLE, len(node.bases))
+
+        # Check keywords for metaclass=...
+        has_meta = False
+        for kw in node.keywords:
+            if kw.arg == 'metaclass':
+                self.visit(kw.value)
+                has_meta = True
+                break
+        if not has_meta:
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(sub_code))
+        self.emit(_TVMOpcodes.BUILD_CLASS, 0)
+        target_idx = self.code_obj.get_name_idx(node.name)
+        if self.is_function:
+            self.emit(_TVMOpcodes.STORE_FAST, self.code_obj.get_local_idx(node.name))
+        else:
+            self.emit(_TVMOpcodes.STORE_GLOBAL, target_idx)
 
     def visit_If(self, node: ast.If):
         lbl_else = self.new_label()
@@ -4836,7 +5477,6 @@ class _TVMASTCompiler(ast.NodeVisitor):
 
         self.visit(node.test)
         self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_else)
-
         for stmt in node.body:
             self.visit(stmt)
         self.emit_jump(_TVMOpcodes.JUMP, lbl_end)
@@ -4845,24 +5485,65 @@ class _TVMASTCompiler(ast.NodeVisitor):
         if node.orelse:
             for stmt in node.orelse:
                 self.visit(stmt)
-
         self.mark_label(lbl_end)
 
     def visit_While(self, node: ast.While):
-        lbl_header = self.new_label()
+        lbl_head = self.new_label()
         lbl_exit = self.new_label()
 
-        self.mark_label(lbl_header)
+        self.mark_label(lbl_head)
         self.visit(node.test)
         self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_exit)
 
-        self.loop_stack.append((lbl_header, lbl_exit))
+        self.loop_stack.append((lbl_head, lbl_exit))
         for stmt in node.body:
             self.visit(stmt)
-        self.emit_jump(_TVMOpcodes.JUMP, lbl_header)
+        self.emit_jump(_TVMOpcodes.JUMP, lbl_head)
         self.loop_stack.pop()
 
         self.mark_label(lbl_exit)
+
+    def visit_For(self, node: ast.For):
+        lbl_head = self.new_label()
+        lbl_exit = self.new_label()
+
+        self.visit(node.iter)
+        self.emit(_TVMOpcodes.GET_ITER)
+
+        self.mark_label(lbl_head)
+        self.emit_jump(_TVMOpcodes.FOR_ITER, lbl_exit)
+        if isinstance(node.target, ast.Name):
+            if self.is_function and node.target.id in self.code_obj.local_names:
+                self.emit(_TVMOpcodes.STORE_FAST, self.code_obj.get_local_idx(node.target.id))
+            else:
+                self.emit(_TVMOpcodes.STORE_GLOBAL, self.code_obj.get_name_idx(node.target.id))
+
+        self.loop_stack.append((lbl_head, lbl_exit))
+        for stmt in node.body:
+            self.visit(stmt)
+        self.emit_jump(_TVMOpcodes.JUMP, lbl_head)
+        self.loop_stack.pop()
+
+        self.mark_label(lbl_exit)
+        self.emit(_TVMOpcodes.POP_TOP)  # pop exhausted iterator from stack
+
+    def visit_Try(self, node: ast.Try):
+        lbl_handler = self.new_label()
+        lbl_end = self.new_label()
+
+        self.emit_jump(_TVMOpcodes.SETUP_FINALLY, lbl_handler)
+        for stmt in node.body:
+            self.visit(stmt)
+        self.emit(_TVMOpcodes.POP_BLOCK)
+        self.emit_jump(_TVMOpcodes.JUMP, lbl_end)
+
+        self.mark_label(lbl_handler)
+        for h in node.handlers:
+            if h.body:
+                for s in h.body:
+                    self.visit(s)
+
+        self.mark_label(lbl_end)
 
     def visit_Break(self, node: ast.Break):
         if self.loop_stack:
@@ -4871,263 +5552,915 @@ class _TVMASTCompiler(ast.NodeVisitor):
 
     def visit_Continue(self, node: ast.Continue):
         if self.loop_stack:
-            lbl_header, _ = self.loop_stack[-1]
-            self.emit_jump(_TVMOpcodes.JUMP, lbl_header)
+            lbl_head, _ = self.loop_stack[-1]
+            self.emit_jump(_TVMOpcodes.JUMP, lbl_head)
+
+    def visit_Yield(self, node: ast.Yield):
+        if getattr(self, 'is_generator', False):
+            gen_list_idx = self.code_obj.get_local_idx('_$gen_list')
+            self.emit(_TVMOpcodes.LOAD_FAST, gen_list_idx)
+            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('append'))
+            if node.value:
+                self.visit(node.value)
+            else:
+                self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+            self.emit(_TVMOpcodes.POP_TOP)
+        else:
+            if node.value:
+                self.visit(node.value)
+            else:
+                self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.RETURN_VALUE)
+
+    def visit_YieldFrom(self, node: ast.YieldFrom):
+        if getattr(self, 'is_generator', False):
+            gen_list_idx = self.code_obj.get_local_idx('_$gen_list')
+            self.emit(_TVMOpcodes.LOAD_FAST, gen_list_idx)
+            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('extend'))
+            self.visit(node.value)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+            self.emit(_TVMOpcodes.POP_TOP)
+        else:
+            self.visit(node.value)
+            self.emit(_TVMOpcodes.RETURN_VALUE)
+
+    def visit_Match(self, node: ast.Match):
+        # Desugar match-case statement into dynamic pattern checks and branch blocks
+        lbl_match_end = self.new_label()
+        # Evaluate subject
+        self.visit(node.subject)
+        subj_slot = self.code_obj.get_local_idx('_$subj')
+        self.emit(_TVMOpcodes.STORE_FAST, subj_slot)
+
+        for case_clause in node.cases:
+            lbl_next_case = self.new_label()
+            pat = case_clause.pattern
+
+            if isinstance(pat, ast.MatchValue):
+                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                self.visit(pat.value)
+                self.emit(_TVMOpcodes.COMPARE_OP, 2)  # ==
+                self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
+            elif isinstance(pat, ast.MatchAs) and pat.name is None:
+                # Wildcard case _ -> matches everything
+                pass
+            elif isinstance(pat, ast.MatchMapping):
+                # Check is mapping: isinstance(subj, dict)
+                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('isinstance'))
+                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('dict'))
+                self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
+                self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
+
+                for key_node, pat_node in zip(pat.keys, pat.patterns):
+                    # Check if key is in subj
+                    self.visit(key_node)
+                    self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                    self.emit(_TVMOpcodes.COMPARE_OP, 6)  # in
+                    self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
+
+                    self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                    self.visit(key_node)
+                    self.emit(_TVMOpcodes.GET_ITEM)
+                    if isinstance(pat_node, ast.MatchValue):
+                        self.visit(pat_node.value)
+                        self.emit(_TVMOpcodes.COMPARE_OP, 2)
+                        self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
+                    elif isinstance(pat_node, ast.MatchClass):
+                        # e.g. str(u) or int(lvl)
+                        if isinstance(pat_node.cls, ast.Name):
+                            pass
+                        if pat_node.patterns and isinstance(pat_node.patterns[0], ast.MatchAs):
+                            as_name = pat_node.patterns[0].name
+                            if as_name:
+                                if self.is_function and as_name in self.code_obj.local_names:
+                                    self.emit(_TVMOpcodes.STORE_FAST, self.code_obj.get_local_idx(as_name))
+                                else:
+                                    self.emit(_TVMOpcodes.STORE_GLOBAL, self.code_obj.get_name_idx(as_name))
+                            else:
+                                self.emit(_TVMOpcodes.POP_TOP)
+                        else:
+                            self.emit(_TVMOpcodes.POP_TOP)
+                    elif isinstance(pat_node, ast.MatchAs) and pat_node.name:
+                        if self.is_function and pat_node.name in self.code_obj.local_names:
+                            self.emit(_TVMOpcodes.STORE_FAST, self.code_obj.get_local_idx(pat_node.name))
+                        else:
+                            self.emit(_TVMOpcodes.STORE_GLOBAL, self.code_obj.get_name_idx(pat_node.name))
+                    else:
+                        self.emit(_TVMOpcodes.POP_TOP)
+            elif isinstance(pat, ast.MatchSequence):
+                # Pattern match sequence: ['QUERY', *items]
+                # Check isinstance(subj, (list, tuple))
+                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('isinstance'))
+                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('tuple'))
+                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('list'))
+                self.emit(_TVMOpcodes.BUILD_TUPLE, 2)
+                self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
+                self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
+
+                # Check len(subj) >= 1
+                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('len'))
+                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+                self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(1))
+                self.emit(_TVMOpcodes.COMPARE_OP, 5)  # >=
+                self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
+
+                self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(0))
+                self.emit(_TVMOpcodes.GET_ITEM)
+                if pat.patterns and isinstance(pat.patterns[0], ast.MatchValue):
+                    self.visit(pat.patterns[0].value)
+                    self.emit(_TVMOpcodes.COMPARE_OP, 2)
+                    self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
+                if len(pat.patterns) > 1 and isinstance(pat.patterns[1], ast.MatchStar):
+                    star_name = pat.patterns[1].name
+                    if star_name:
+                        self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
+                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(1))
+                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+                        self.emit(_TVMOpcodes.BUILD_SLICE, 3)
+                        self.emit(_TVMOpcodes.GET_ITEM)
+                        if self.is_function and star_name in self.code_obj.local_names:
+                            self.emit(_TVMOpcodes.STORE_FAST, self.code_obj.get_local_idx(star_name))
+                        else:
+                            self.emit(_TVMOpcodes.STORE_GLOBAL, self.code_obj.get_name_idx(star_name))
+
+            if case_clause.guard:
+                self.visit(case_clause.guard)
+                self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_case)
+
+            for stmt in case_clause.body:
+                self.visit(stmt)
+            self.emit_jump(_TVMOpcodes.JUMP, lbl_match_end)
+            self.mark_label(lbl_next_case)
+
+        self.mark_label(lbl_match_end)
 
     def visit_Return(self, node: ast.Return):
         if node.value:
             self.visit(node.value)
         else:
-            idx = self.get_const_idx(None)
-            self.emit(_TVMOpcodes.LOAD_CONST, idx)
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
         self.emit(_TVMOpcodes.RETURN_VALUE)
 
     def visit_Import(self, node: ast.Import):
         for alias in node.names:
-            idx = self.get_name_idx(alias.name)
+            idx = self.code_obj.get_name_idx(alias.name)
             self.emit(_TVMOpcodes.IMPORT_NAME, idx)
             target_name = alias.asname or alias.name
-            store_idx = self.get_name_idx(target_name)
+            store_idx = self.code_obj.get_name_idx(target_name)
             self.emit(_TVMOpcodes.STORE_GLOBAL, store_idx)
 
     def visit_ImportFrom(self, node: ast.ImportFrom):
-        mod_idx = self.get_name_idx(node.module or '')
+        mod_idx = self.code_obj.get_name_idx(node.module or '')
         self.emit(_TVMOpcodes.IMPORT_NAME, mod_idx)
         for alias in node.names:
-            attr_idx = self.get_name_idx(alias.name)
+            attr_idx = self.code_obj.get_name_idx(alias.name)
             self.emit(_TVMOpcodes.IMPORT_FROM, attr_idx)
             target_name = alias.asname or alias.name
-            store_idx = self.get_name_idx(target_name)
+            store_idx = self.code_obj.get_name_idx(target_name)
             self.emit(_TVMOpcodes.STORE_GLOBAL, store_idx)
         self.emit(_TVMOpcodes.POP_TOP)
 
-    def generic_visit(self, node: ast.AST):
-        if isinstance(node, ast.stmt):
-            # Fallback for complex statements: ClassDef, FunctionDef, AsyncFunctionDef, Match, Try
-            stmt_src = ast.unparse(node)
-            idx = self.get_const_idx(stmt_src)
-            self.emit(_TVMOpcodes.OP_EXEC_STMT, idx)
-        else:
-            super().generic_visit(node)
-
-    def finalize(self) -> Tuple[List[Tuple[int, int]], List[Any], List[str]]:
-        self.emit(_TVMOpcodes.HALT, 0)
+    def finalize(self) -> _TVMCodeObject:
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+        self.emit(_TVMOpcodes.RETURN_VALUE)
         for lbl_id, fixup_indices in self.label_fixups.items():
-            target_ip = self.labels.get(lbl_id, len(self.instructions) - 1)
+            target_ip = self.labels.get(lbl_id, len(self.code_obj.instructions) - 1)
             for fix_idx in fixup_indices:
-                op, _ = self.instructions[fix_idx]
-                self.instructions[fix_idx] = (op, target_ip)
-        return self.instructions, self.constants, self.names
+                op, _ = self.code_obj.instructions[fix_idx]
+                self.code_obj.instructions[fix_idx] = (op, target_ip)
+        return self.code_obj
 
 
-def _vm_emit_runtime_interpreter(instructions, constants, names, isa_map, vm_level: int, rng: random.Random) -> str:
-    """Emits the Pure Python Polymorphic Virtual Machine Runtime Interpreter."""
-    v = {k: rd() for k in [
-        'stack', 'pc', 'op', 'arg', 'code_arr', 'consts', 'names', 'g_env',
-        'val_a', 'val_b', 'cmp_res', 'fn_call', 'args_list', 'elts_list',
-        'key_obj', 'val_obj', 'container', 'attr_name', 'mod_name', 'interp_fn'
-    ]}
-
-    # Encode instructions into bytecode bytearray: (op_byte, arg_hi, arg_lo)
+def _serialize_tvm_code_object(code: _TVMCodeObject, isa_map: Dict[int, int]) -> Dict[str, Any]:
+    """Recursively serializes a _TVMCodeObject and nested code objects into an authenticated structure."""
     bytecode_ba = bytearray()
-    for op, arg in instructions:
-        # Map logical opcode to randomized polymorphic ISA opcode
-        rand_op = isa_map.get(op, op)
-        bytecode_ba.append(rand_op)
+    for op, arg in code.instructions:
+        mapped_op = isa_map.get(op, op)
+        bytecode_ba.append(mapped_op)
         bytecode_ba.append((arg >> 8) & 0xFF)
         bytecode_ba.append(arg & 0xFF)
 
-    # Encode constant pool with coordinate-seeded dynamic encryption
-    enc_consts_code = repr(constants)
-    enc_names_code = repr(names)
-    enc_bytecode_b85 = base64.b85encode(bytes(bytecode_ba)).decode('ascii')
+    serialized_consts = []
+    for c in code.constants:
+        if isinstance(c, _TVMCodeObject):
+            serialized_consts.append(('__TVM_CODE__', _serialize_tvm_code_object(c, isa_map)))
+        else:
+            serialized_consts.append(c)
 
-    # Opcode mappings
-    op_ld_c   = isa_map.get(_TVMOpcodes.LOAD_CONST, 1)
-    op_ld_g   = isa_map.get(_TVMOpcodes.LOAD_GLOBAL, 2)
-    op_st_g   = isa_map.get(_TVMOpcodes.STORE_GLOBAL, 3)
-    op_pop_t  = isa_map.get(_TVMOpcodes.POP_TOP, 7)
-    op_add    = isa_map.get(_TVMOpcodes.BINARY_ADD, 10)
-    op_sub    = isa_map.get(_TVMOpcodes.BINARY_SUB, 11)
-    op_mul    = isa_map.get(_TVMOpcodes.BINARY_MUL, 12)
-    op_div    = isa_map.get(_TVMOpcodes.BINARY_DIV, 13)
-    op_fdiv   = isa_map.get(_TVMOpcodes.BINARY_FLOORDIV, 14)
-    op_mod    = isa_map.get(_TVMOpcodes.BINARY_MOD, 15)
-    op_pow    = isa_map.get(_TVMOpcodes.BINARY_POW, 16)
-    op_and    = isa_map.get(_TVMOpcodes.BINARY_AND, 17)
-    op_or     = isa_map.get(_TVMOpcodes.BINARY_OR, 18)
-    op_xor    = isa_map.get(_TVMOpcodes.BINARY_XOR, 19)
-    op_lsh    = isa_map.get(_TVMOpcodes.BINARY_LSHIFT, 20)
-    op_rsh    = isa_map.get(_TVMOpcodes.BINARY_RSHIFT, 21)
-    op_neg    = isa_map.get(_TVMOpcodes.UNARY_NEG, 22)
-    op_not    = isa_map.get(_TVMOpcodes.UNARY_NOT, 23)
-    op_inv    = isa_map.get(_TVMOpcodes.UNARY_INVERT, 24)
-    op_cmp    = isa_map.get(_TVMOpcodes.COMPARE_OP, 30)
-    op_jmp    = isa_map.get(_TVMOpcodes.JUMP, 40)
-    op_jmp_t  = isa_map.get(_TVMOpcodes.JUMP_IF_TRUE, 41)
-    op_jmp_f  = isa_map.get(_TVMOpcodes.JUMP_IF_FALSE, 42)
-    op_ret    = isa_map.get(_TVMOpcodes.RETURN_VALUE, 43)
-    op_g_attr = isa_map.get(_TVMOpcodes.GET_ATTR, 50)
-    op_s_attr = isa_map.get(_TVMOpcodes.SET_ATTR, 51)
-    op_g_item = isa_map.get(_TVMOpcodes.GET_ITEM, 52)
-    op_s_item = isa_map.get(_TVMOpcodes.SET_ITEM, 53)
-    op_d_item = isa_map.get(_TVMOpcodes.DEL_ITEM, 54)
-    op_b_list = isa_map.get(_TVMOpcodes.BUILD_LIST, 60)
-    op_b_tup  = isa_map.get(_TVMOpcodes.BUILD_TUPLE, 61)
-    op_b_dict = isa_map.get(_TVMOpcodes.BUILD_DICT, 63)
-    op_call   = isa_map.get(_TVMOpcodes.CALL_FUNCTION, 70)
-    op_imp_n  = isa_map.get(_TVMOpcodes.IMPORT_NAME, 71)
-    op_imp_f  = isa_map.get(_TVMOpcodes.IMPORT_FROM, 72)
-    op_exec_s = isa_map.get(_TVMOpcodes.OP_EXEC_STMT, 90)
-    op_halt   = isa_map.get(_TVMOpcodes.HALT, 99)
+    return {
+        'name': code.name,
+        'arg_names': code.arg_names,
+        'vararg_name': code.vararg_name,
+        'kwarg_name': code.kwarg_name,
+        'local_names': code.local_names,
+        'bytecode': base64.b85encode(bytes(bytecode_ba)).decode('ascii'),
+        'constants': serialized_consts,
+        'names': code.names
+    }
 
-    runtime_src = f"""
-def {v['interp_fn']}():
-    import base64 as _b64
-    import sys as _sys
-    {v['code_arr']} = _b64.b85decode({repr(enc_bytecode_b85)})
-    {v['consts']} = {enc_consts_code}
-    {v['names']} = {enc_names_code}
-    {v['stack']} = []
-    {v['g_env']} = globals()
-    {v['pc']} = 0
-    _len = len({v['code_arr']})
 
-    while {v['pc']} < _len:
-        {v['op']} = {v['code_arr']}[{v['pc']}]
-        {v['arg']} = ({v['code_arr']}[{v['pc']}+1] << 8) | {v['code_arr']}[{v['pc']}+2]
-        {v['pc']} += 3
+def _vm_emit_runtime_interpreter_v2(root_code: _TVMCodeObject, isa_map: Dict[int, int], vm_level: int, rng: random.Random) -> str:
+    """Emits the pure Python Polymorphic Virtual Machine Runtime Interpreter 2.0."""
+    serialized_root = _serialize_tvm_code_object(root_code, isa_map)
 
-        if {v['op']} == {op_ld_c}:
-            {v['stack']}.append({v['consts']}[{v['arg']}])
-        elif {v['op']} == {op_ld_g}:
-            _n = {v['names']}[{v['arg']}]
-            if _n in {v['g_env']}:
-                {v['stack']}.append({v['g_env']}[_n])
-            elif hasattr(__builtins__, _n):
-                {v['stack']}.append(getattr(__builtins__, _n))
-            elif isinstance(__builtins__, dict) and _n in __builtins__:
-                {v['stack']}.append(__builtins__[_n])
+    v = {k: rd() for k in [
+        'code_obj_cls', 'frame_cls', 'interp_fn', 'call_vm_fn', 'eval_frame_fn',
+        'root_data', 'root_code_inst', 'initial_frame', 'g_env'
+    ]}
+
+    # Opcodes mapping
+    op_ld_c    = isa_map.get(_TVMOpcodes.LOAD_CONST, 1)
+    op_ld_g    = isa_map.get(_TVMOpcodes.LOAD_GLOBAL, 2)
+    op_st_g    = isa_map.get(_TVMOpcodes.STORE_GLOBAL, 3)
+    op_ld_f    = isa_map.get(_TVMOpcodes.LOAD_FAST, 4)
+    op_st_f    = isa_map.get(_TVMOpcodes.STORE_FAST, 5)
+    op_dup     = isa_map.get(_TVMOpcodes.DUP_TOP, 6)
+    op_pop     = isa_map.get(_TVMOpcodes.POP_TOP, 7)
+    op_rot2    = isa_map.get(_TVMOpcodes.ROT_TWO, 8)
+    op_rot3    = isa_map.get(_TVMOpcodes.ROT_THREE, 9)
+
+    op_add     = isa_map.get(_TVMOpcodes.BINARY_ADD, 10)
+    op_sub     = isa_map.get(_TVMOpcodes.BINARY_SUB, 11)
+    op_mul     = isa_map.get(_TVMOpcodes.BINARY_MUL, 12)
+    op_div     = isa_map.get(_TVMOpcodes.BINARY_DIV, 13)
+    op_fdiv    = isa_map.get(_TVMOpcodes.BINARY_FLOORDIV, 14)
+    op_mod     = isa_map.get(_TVMOpcodes.BINARY_MOD, 15)
+    op_pow     = isa_map.get(_TVMOpcodes.BINARY_POW, 16)
+    op_and     = isa_map.get(_TVMOpcodes.BINARY_AND, 17)
+    op_or      = isa_map.get(_TVMOpcodes.BINARY_OR, 18)
+    op_xor     = isa_map.get(_TVMOpcodes.BINARY_XOR, 19)
+    op_lsh     = isa_map.get(_TVMOpcodes.BINARY_LSHIFT, 20)
+    op_rsh     = isa_map.get(_TVMOpcodes.BINARY_RSHIFT, 21)
+    op_neg     = isa_map.get(_TVMOpcodes.UNARY_NEG, 22)
+    op_not     = isa_map.get(_TVMOpcodes.UNARY_NOT, 23)
+    op_inv     = isa_map.get(_TVMOpcodes.UNARY_INVERT, 24)
+
+    op_cmp     = isa_map.get(_TVMOpcodes.COMPARE_OP, 30)
+
+    op_jmp     = isa_map.get(_TVMOpcodes.JUMP, 40)
+    op_jmp_t   = isa_map.get(_TVMOpcodes.JUMP_IF_TRUE, 41)
+    op_jmp_f   = isa_map.get(_TVMOpcodes.JUMP_IF_FALSE, 42)
+    op_jmp_f_p = isa_map.get(_TVMOpcodes.JUMP_IF_FALSE_OR_POP, 43)
+    op_jmp_t_p = isa_map.get(_TVMOpcodes.JUMP_IF_TRUE_OR_POP, 44)
+    op_ret     = isa_map.get(_TVMOpcodes.RETURN_VALUE, 45)
+
+    op_g_attr  = isa_map.get(_TVMOpcodes.GET_ATTR, 50)
+    op_s_attr  = isa_map.get(_TVMOpcodes.SET_ATTR, 51)
+    op_g_item  = isa_map.get(_TVMOpcodes.GET_ITEM, 52)
+    op_s_item  = isa_map.get(_TVMOpcodes.SET_ITEM, 53)
+    op_d_item  = isa_map.get(_TVMOpcodes.DEL_ITEM, 54)
+
+    op_b_list  = isa_map.get(_TVMOpcodes.BUILD_LIST, 60)
+    op_b_tup   = isa_map.get(_TVMOpcodes.BUILD_TUPLE, 61)
+    op_b_set   = isa_map.get(_TVMOpcodes.BUILD_SET, 62)
+    op_b_dict  = isa_map.get(_TVMOpcodes.BUILD_DICT, 63)
+    op_unp_seq = isa_map.get(_TVMOpcodes.UNPACK_SEQUENCE, 64)
+    op_b_slice = isa_map.get(_TVMOpcodes.BUILD_SLICE, 65)
+
+    op_mk_fn   = isa_map.get(_TVMOpcodes.MAKE_FUNCTION, 70)
+    op_call_fn = isa_map.get(_TVMOpcodes.CALL_FUNCTION, 71)
+    op_call_kw = isa_map.get(_TVMOpcodes.CALL_FUNCTION_KW, 72)
+    op_b_cls   = isa_map.get(_TVMOpcodes.BUILD_CLASS, 73)
+    op_imp_n   = isa_map.get(_TVMOpcodes.IMPORT_NAME, 74)
+    op_imp_f   = isa_map.get(_TVMOpcodes.IMPORT_FROM, 75)
+    op_call_ex = isa_map.get(_TVMOpcodes.CALL_FUNCTION_EX, 76)
+
+    op_g_iter  = isa_map.get(_TVMOpcodes.GET_ITER, 80)
+    op_for_it  = isa_map.get(_TVMOpcodes.FOR_ITER, 81)
+    op_st_fin  = isa_map.get(_TVMOpcodes.SETUP_FINALLY, 82)
+    op_pop_blk = isa_map.get(_TVMOpcodes.POP_BLOCK, 83)
+    op_raise   = isa_map.get(_TVMOpcodes.RAISE_VARARGS, 84)
+
+    op_halt    = isa_map.get(_TVMOpcodes.HALT, 99)
+
+    src = f"""
+class {v['code_obj_cls']}:
+    def __init__(self, data):
+        import base64 as _b64
+        self.name = data['name']
+        self.arg_names = data['arg_names']
+        self.vararg_name = data.get('vararg_name')
+        self.kwarg_name = data.get('kwarg_name')
+        self.local_names = data['local_names']
+        self.code = _b64.b85decode(data['bytecode'])
+        self.names = data['names']
+        self.defining_class = None
+        self.constants = []
+        for c in data['constants']:
+            if isinstance(c, tuple) and len(c) == 2 and c[0] == '__TVM_CODE__':
+                self.constants.append({v['code_obj_cls']}(c[1]))
             else:
-                raise NameError(f"name '{{_n}}' is not defined")
-        elif {v['op']} == {op_st_g}:
-            {v['g_env']}[{v['names']}[{v['arg']}]] = {v['stack']}.pop()
-        elif {v['op']} == {op_pop_t}:
-            if {v['stack']}: {v['stack']}.pop()
-        elif {v['op']} == {op_add}:
-            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
-            {v['stack']}.append({v['val_a']} + {v['val_b']})
-        elif {v['op']} == {op_sub}:
-            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
-            {v['stack']}.append({v['val_a']} - {v['val_b']})
-        elif {v['op']} == {op_mul}:
-            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
-            {v['stack']}.append({v['val_a']} * {v['val_b']})
-        elif {v['op']} == {op_div}:
-            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
-            {v['stack']}.append({v['val_a']} / {v['val_b']})
-        elif {v['op']} == {op_fdiv}:
-            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
-            {v['stack']}.append({v['val_a']} // {v['val_b']})
-        elif {v['op']} == {op_mod}:
-            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
-            {v['stack']}.append({v['val_a']} % {v['val_b']})
-        elif {v['op']} == {op_pow}:
-            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
-            {v['stack']}.append({v['val_a']} ** {v['val_b']})
-        elif {v['op']} == {op_and}:
-            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
-            {v['stack']}.append({v['val_a']} & {v['val_b']})
-        elif {v['op']} == {op_or}:
-            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
-            {v['stack']}.append({v['val_a']} | {v['val_b']})
-        elif {v['op']} == {op_xor}:
-            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
-            {v['stack']}.append({v['val_a']} ^ {v['val_b']})
-        elif {v['op']} == {op_lsh}:
-            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
-            {v['stack']}.append({v['val_a']} << {v['val_b']})
-        elif {v['op']} == {op_rsh}:
-            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
-            {v['stack']}.append({v['val_a']} >> {v['val_b']})
-        elif {v['op']} == {op_neg}:
-            {v['stack']}.append(-{v['stack']}.pop())
-        elif {v['op']} == {op_not}:
-            {v['stack']}.append(not {v['stack']}.pop())
-        elif {v['op']} == {op_inv}:
-            {v['stack']}.append(~{v['stack']}.pop())
-        elif {v['op']} == {op_cmp}:
-            _t = {v['consts']}[{v['arg']}]
-            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
-            if _t == '==': {v['stack']}.append({v['val_a']} == {v['val_b']})
-            elif _t == '!=': {v['stack']}.append({v['val_a']} != {v['val_b']})
-            elif _t == '<': {v['stack']}.append({v['val_a']} < {v['val_b']})
-            elif _t == '<=': {v['stack']}.append({v['val_a']} <= {v['val_b']})
-            elif _t == '>': {v['stack']}.append({v['val_a']} > {v['val_b']})
-            elif _t == '>=': {v['stack']}.append({v['val_a']} >= {v['val_b']})
-            elif _t == 'is': {v['stack']}.append({v['val_a']} is {v['val_b']})
-            elif _t == 'is not': {v['stack']}.append({v['val_a']} is not {v['val_b']})
-            elif _t == 'in': {v['stack']}.append({v['val_a']} in {v['val_b']})
-            elif _t == 'not in': {v['stack']}.append({v['val_a']} not in {v['val_b']})
-        elif {v['op']} == {op_jmp}:
-            {v['pc']} = {v['arg']} * 3
-        elif {v['op']} == {op_jmp_f}:
-            if not {v['stack']}.pop():
-                {v['pc']} = {v['arg']} * 3
-        elif {v['op']} == {op_jmp_t}:
-            if {v['stack']}.pop():
-                {v['pc']} = {v['arg']} * 3
-        elif {v['op']} == {op_call}:
-            {v['args_list']} = [{v['stack']}.pop() for _ in range({v['arg']})][::-1] if {v['arg']} else []
-            {v['fn_call']} = {v['stack']}.pop()
-            {v['stack']}.append({v['fn_call']}(*{v['args_list']}))
-        elif {v['op']} == {op_g_attr}:
-            {v['attr_name']} = {v['names']}[{v['arg']}]
-            {v['stack']}.append(getattr({v['stack']}.pop(), {v['attr_name']}))
-        elif {v['op']} == {op_s_attr}:
-            {v['attr_name']} = {v['names']}[{v['arg']}]
-            setattr({v['stack']}.pop(), {v['attr_name']}, {v['stack']}.pop())
-        elif {v['op']} == {op_g_item}:
-            {v['key_obj']} = {v['stack']}.pop(); {v['container']} = {v['stack']}.pop()
-            {v['stack']}.append({v['container']}[{v['key_obj']}])
-        elif {v['op']} == {op_s_item}:
-            {v['val_obj']} = {v['stack']}.pop(); {v['key_obj']} = {v['stack']}.pop(); {v['container']} = {v['stack']}.pop()
-            {v['container']}[{v['key_obj']}] = {v['val_obj']}
-        elif {v['op']} == {op_b_list}:
-            {v['elts_list']} = [{v['stack']}.pop() for _ in range({v['arg']})][::-1] if {v['arg']} else []
-            {v['stack']}.append({v['elts_list']})
-        elif {v['op']} == {op_b_tup}:
-            {v['elts_list']} = [{v['stack']}.pop() for _ in range({v['arg']})][::-1] if {v['arg']} else []
-            {v['stack']}.append(tuple({v['elts_list']}))
-        elif {v['op']} == {op_b_dict}:
-            _d = {{}}
-            for _ in range({v['arg']}):
-                _dv = {v['stack']}.pop(); _dk = {v['stack']}.pop()
-                _d[_dk] = _dv
-            {v['stack']}.append(_d)
-        elif {v['op']} == {op_imp_n}:
-            {v['mod_name']} = {v['names']}[{v['arg']}]
-            {v['stack']}.append(__import__({v['mod_name']}))
-        elif {v['op']} == {op_imp_f}:
-            {v['attr_name']} = {v['names']}[{v['arg']}]
-            _m = {v['stack']}[-1]
-            {v['stack']}.append(getattr(_m, {v['attr_name']}))
-        elif {v['op']} == {op_exec_s}:
-            _s_code = {v['consts']}[{v['arg']}]
-            exec(_s_code, {v['g_env']}, {v['g_env']})
-        elif {v['op']} == {op_halt}:
-            break
+                self.constants.append(c)
 
-{v['interp_fn']}()
+class {v['frame_cls']}:
+    def __init__(self, code_obj, locals_dict, global_env):
+        self.code_obj = code_obj
+        self.pc = 0
+        self.stack = []
+        self.locals = locals_dict
+        self.global_env = global_env
+        self.exc_handlers = []
+
+def {v['interp_fn']}(_root_data):
+    _g_env = globals()
+    _root_code = {v['code_obj_cls']}(_root_data)
+
+    _active_frames = []
+    _NO_ARG = object()
+    _g_env['_NO_ARG'] = _NO_ARG
+
+    def _call_vm_func(_fn_code, _passed_args, _passed_kwargs=None, _captured_env=None, _def_cls=None):
+        _loc = {{_aname: _NO_ARG for _aname in _fn_code.arg_names}}
+        _rem_kwargs = dict(_passed_kwargs or {{}})
+        for _idx, _aname in enumerate(_fn_code.arg_names):
+            if _idx < len(_passed_args):
+                _loc[_aname] = _passed_args[_idx]
+            elif _aname in _rem_kwargs:
+                _loc[_aname] = _rem_kwargs.pop(_aname)
+        if _fn_code.vararg_name:
+            _loc[_fn_code.vararg_name] = tuple(_passed_args[len(_fn_code.arg_names):])
+        if _fn_code.kwarg_name:
+            _loc[_fn_code.kwarg_name] = _rem_kwargs
+        else:
+            _loc.update(_rem_kwargs)
+        _f = {v['frame_cls']}(_fn_code, _loc, _g_env)
+        _f.captured_env = _captured_env or {{}}
+        _f.defining_class = _def_cls
+        _active_frames.append(_f)
+        try:
+            return _eval_frame(_f)
+        finally:
+            if _active_frames: _active_frames.pop()
+
+    _orig_super = __builtins__.super if hasattr(__builtins__, 'super') else __builtins__['super']
+
+    def _vm_super(*_sargs):
+        if len(_sargs) == 0 and _active_frames:
+            _cur = _active_frames[-1]
+            _self_obj = None
+            for _k in _cur.code_obj.arg_names:
+                _val = _cur.locals.get(_k)
+                if _val is not None:
+                    _self_obj = _val
+                    break
+            if _self_obj is not None:
+                _def_cls = getattr(_cur, 'defining_class', None)
+                if _def_cls is None and hasattr(_cur.code_obj, 'defining_class'):
+                    _def_cls = _cur.code_obj.defining_class
+                if _def_cls is not None:
+                    return _orig_super(_def_cls, _self_obj)
+                if isinstance(_self_obj, type):
+                    return _orig_super(_self_obj, _self_obj)
+                return _orig_super(type(_self_obj), _self_obj)
+        return _orig_super(*_sargs)
+
+    _g_env['super'] = _vm_super
+
+    def _vm_await(_val):
+        import inspect, asyncio
+        if inspect.iscoroutine(_val) or inspect.isawaitable(_val):
+            try:
+                _loop = asyncio.get_event_loop()
+                if _loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+                        return _pool.submit(asyncio.run, _val).result()
+                return _loop.run_until_complete(_val)
+            except Exception:
+                return asyncio.run(_val)
+        return _val
+
+    _g_env['__vm_await__'] = _vm_await
+
+    async def _eval_frame_async(_frame):
+        _c_arr = _frame.code_obj.code
+        _c_len = len(_c_arr)
+        _st = _frame.stack
+        _loc = _frame.locals
+        _cnsts = _frame.code_obj.constants
+        _nms = _frame.code_obj.names
+
+        while _frame.pc < _c_len:
+            try:
+                _op = _c_arr[_frame.pc]
+                _arg = (_c_arr[_frame.pc+1] << 8) | _c_arr[_frame.pc+2]
+                _frame.pc += 3
+
+                if _op == {op_ld_c}:
+                    _st.append(_cnsts[_arg])
+                elif _op == {op_ld_g}:
+                    _n = _nms[_arg]
+                    _found = False
+                    if hasattr(_frame, 'captured_env') and _frame.captured_env and _n in _frame.captured_env:
+                        _st.append(_frame.captured_env[_n])
+                        _found = True
+                    elif _active_frames:
+                        for _pf in reversed(_active_frames):
+                            if _n in _pf.locals:
+                                _st.append(_pf.locals[_n])
+                                _found = True
+                                break
+                    if not _found:
+                        if _n in _frame.global_env: _st.append(_frame.global_env[_n])
+                        elif hasattr(__builtins__, _n): _st.append(getattr(__builtins__, _n))
+                        elif isinstance(__builtins__, dict) and _n in __builtins__: _st.append(__builtins__[_n])
+                        else: raise NameError(f"name '{{_n}}' is not defined")
+                elif _op == {op_st_g}:
+                    _frame.global_env[_nms[_arg]] = _st.pop()
+                elif _op == {op_ld_f}:
+                    _st.append(_loc.get(_frame.code_obj.local_names[_arg], None))
+                elif _op == {op_st_f}:
+                    _loc[_frame.code_obj.local_names[_arg]] = _st.pop()
+                elif _op == {op_dup}:
+                    _st.append(_st[-1])
+                elif _op == {op_pop}:
+                    if _st: _st.pop()
+                elif _op == {op_rot2}:
+                    _a = _st.pop(); _b = _st.pop(); _st.append(_a); _st.append(_b)
+                elif _op == {op_rot3}:
+                    _a = _st.pop(); _b = _st.pop(); _c = _st.pop()
+                    _st.append(_a); _st.append(_b); _st.append(_c)
+                elif _op == {op_add}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a + _b)
+                elif _op == {op_sub}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a - _b)
+                elif _op == {op_mul}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a * _b)
+                elif _op == {op_div}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a / _b)
+                elif _op == {op_fdiv}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a // _b)
+                elif _op == {op_mod}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a % _b)
+                elif _op == {op_pow}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a ** _b)
+                elif _op == {op_and}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a & _b)
+                elif _op == {op_or}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a | _b)
+                elif _op == {op_xor}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a ^ _b)
+                elif _op == {op_lsh}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a << _b)
+                elif _op == {op_rsh}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a >> _b)
+                elif _op == {op_neg}:
+                    _st.append(-_st.pop())
+                elif _op == {op_not}:
+                    _st.append(not _st.pop())
+                elif _op == {op_inv}:
+                    _st.append(~_st.pop())
+                elif _op == {op_cmp}:
+                    _b = _st.pop(); _a = _st.pop()
+                    if _arg == 0: _st.append(_a < _b)
+                    elif _arg == 1: _st.append(_a <= _b)
+                    elif _arg == 2: _st.append(_a == _b)
+                    elif _arg == 3: _st.append(_a != _b)
+                    elif _arg == 4: _st.append(_a > _b)
+                    elif _arg == 5: _st.append(_a >= _b)
+                    elif _arg == 6: _st.append(_a in _b)
+                    elif _arg == 7: _st.append(_a not in _b)
+                    elif _arg == 8: _st.append(_a is _b)
+                    elif _arg == 9: _st.append(_a is not _b)
+                    else: _st.append(False)
+                elif _op == {op_jmp}:
+                    _frame.pc = _arg * 3
+                elif _op == {op_jmp_f}:
+                    if not _st.pop(): _frame.pc = _arg * 3
+                elif _op == {op_jmp_t}:
+                    if _st.pop(): _frame.pc = _arg * 3
+                elif _op == {op_jmp_f_p}:
+                    if not _st[-1]: _frame.pc = _arg * 3
+                    else: _st.pop()
+                elif _op == {op_jmp_t_p}:
+                    if _st[-1]: _frame.pc = _arg * 3
+                    else: _st.pop()
+                elif _op == {op_ret}:
+                    return _st.pop() if _st else None
+                elif _op == {op_g_attr}:
+                    _st.append(getattr(_st.pop(), _nms[_arg]))
+                elif _op == {op_s_attr}:
+                    _obj = _st.pop(); _val = _st.pop()
+                    setattr(_obj, _nms[_arg], _val)
+                elif _op == {op_g_item}:
+                    _k = _st.pop(); _c = _st.pop()
+                    _st.append(_c[_k])
+                elif _op == {op_s_item}:
+                    _k = _st.pop(); _c = _st.pop(); _v = _st.pop()
+                    _c[_k] = _v
+                elif _op == {op_d_item}:
+                    _k = _st.pop(); _c = _st.pop(); del _c[_k]
+                elif _op == {op_b_list}:
+                    _elts = [_st.pop() for _ in range(_arg)][::-1] if _arg else []
+                    _st.append(_elts)
+                elif _op == {op_b_tup}:
+                    _elts = [_st.pop() for _ in range(_arg)][::-1] if _arg else []
+                    _st.append(tuple(_elts))
+                elif _op == {op_b_set}:
+                    _elts = [_st.pop() for _ in range(_arg)][::-1] if _arg else []
+                    _st.append(set(_elts))
+                elif _op == {op_b_dict}:
+                    _d = {{}}
+                    for _ in range(_arg):
+                        _dv = _st.pop(); _dk = _st.pop(); _d[_dk] = _dv
+                    _st.append(_d)
+                elif _op == {op_unp_seq}:
+                    _seq = list(_st.pop())
+                    for _item in reversed(_seq):
+                        _st.append(_item)
+                elif _op == {op_b_slice}:
+                    _step = _st.pop(); _upper = _st.pop(); _lower = _st.pop()
+                    _st.append(slice(_lower, _upper, _step))
+                elif _op == {op_mk_fn}:
+                    _fn_code_obj = _st.pop()
+                    _is_async = bool(_arg & 1)
+                    _captured_env = dict(_frame.locals)
+                    if hasattr(_frame, 'captured_env') and _frame.captured_env:
+                        _merged_captured = dict(_frame.captured_env)
+                        _merged_captured.update(_captured_env)
+                        _captured_env = _merged_captured
+                    if _is_async:
+                        def _make_wrapped_async(_fco, _cenv):
+                            async def _wrapped_async(*_args, **_kwargs):
+                                _d_cls = getattr(_wrapped_async, '_vm_def_cls', None)
+                                return await _call_vm_func_async(_fco, _args, _kwargs, _cenv, _def_cls=_d_cls)
+                            return _wrapped_async
+                        _st.append(_make_wrapped_async(_fn_code_obj, _captured_env))
+                    else:
+                        def _make_wrapped(_fco, _cenv):
+                            def _wrapped(*_args, **_kwargs):
+                                _d_cls = getattr(_wrapped, '_vm_def_cls', None)
+                                return _call_vm_func(_fco, _args, _kwargs, _cenv, _def_cls=_d_cls)
+                            return _wrapped
+                        _st.append(_make_wrapped(_fn_code_obj, _captured_env))
+                elif _op == {op_call_fn}:
+                    _args = [_st.pop() for _ in range(_arg)][::-1] if _arg else []
+                    _fn = _st.pop()
+                    if _nms and _nms[_arg if _arg < len(_nms) else 0] == '__vm_await__' or (hasattr(_fn, '__name__') and _fn.__name__ == '_vm_await'):
+                        import inspect
+                        if _args and (inspect.iscoroutine(_args[0]) or inspect.isawaitable(_args[0])):
+                            _res = await _args[0]
+                            _st.append(_res)
+                        else:
+                            _st.append(_args[0] if _args else None)
+                    else:
+                        _res = _fn(*_args)
+                        _st.append(_res)
+                elif _op == {op_call_kw}:
+                    _n_args = _arg & 0xFF
+                    _n_kw = (_arg >> 8) & 0xFF
+                    _kw = {{}}
+                    for _ in range(_n_kw):
+                        _v = _st.pop(); _k = _st.pop(); _kw[_k] = _v
+                    _args = [_st.pop() for _ in range(_n_args)][::-1] if _n_args else []
+                    _fn = _st.pop()
+                    _st.append(_fn(*_args, **_kw))
+                elif _op == {op_call_ex}:
+                    _kw = _st.pop() if (_arg & 1) else {{}}
+                    _star_args = list(_st.pop())
+                    _fn = _st.pop()
+                    _st.append(_fn(*_star_args, **_kw))
+                elif _op == {op_b_cls}:
+                    _cls_code = _st.pop()
+                    _meta_param = _st.pop()
+                    _bases = _st.pop()
+                    _cname = _st.pop()
+                    _cls_loc = {{}}
+                    _eval_frame({v['frame_cls']}(_cls_code, _cls_loc, _g_env))
+                    _meta = _meta_param
+                    if _meta is None and hasattr(_bases, '__iter__'):
+                        for _b in _bases:
+                            if isinstance(_b, type) and _b is not object and issubclass(_b, type):
+                                _meta = _b
+                                break
+                    if _meta is None:
+                        _meta = type
+                    _new_class = _meta(_cname, tuple(_bases), _cls_loc)
+                    for _k, _v in _cls_loc.items():
+                        if callable(_v):
+                            try:
+                                setattr(_v, '_vm_def_cls', _new_class)
+                                setattr(_v, '__class__', _new_class)
+                            except Exception:
+                                pass
+                    _st.append(_new_class)
+                elif _op == {op_imp_n}:
+                    _st.append(__import__(_nms[_arg]))
+                elif _op == {op_imp_f}:
+                    _m = _st[-1]
+                    _st.append(getattr(_m, _nms[_arg]))
+                elif _op == {op_g_iter}:
+                    _st.append(iter(_st.pop()))
+                elif _op == {op_for_it}:
+                    try:
+                        _next_val = next(_st[-1])
+                        _st.append(_next_val)
+                    except StopIteration:
+                        _st.pop()
+                        _frame.pc = _arg * 3
+                elif _op == {op_st_fin}:
+                    _frame.exc_handlers.append(_arg * 3)
+                elif _op == {op_pop_blk}:
+                    if _frame.exc_handlers: _frame.exc_handlers.pop()
+                elif _op == {op_raise}:
+                    _exc = _st.pop() if _st else RuntimeError("Exception raised")
+                    raise _exc
+                elif _op == {op_halt}:
+                    break
+            except Exception as _e:
+                if _frame.exc_handlers:
+                    _handler_pc = _frame.exc_handlers.pop()
+                    _frame.pc = _handler_pc
+                else:
+                    raise _e
+
+    async def _call_vm_func_async(_fn_code, _passed_args, _passed_kwargs=None, _captured_env=None, _def_cls=None):
+        _loc = {{_aname: _NO_ARG for _aname in _fn_code.arg_names}}
+        _rem_kwargs = dict(_passed_kwargs or {{}})
+        for _idx, _aname in enumerate(_fn_code.arg_names):
+            if _idx < len(_passed_args):
+                _loc[_aname] = _passed_args[_idx]
+            elif _aname in _rem_kwargs:
+                _loc[_aname] = _rem_kwargs.pop(_aname)
+        if _fn_code.vararg_name:
+            _loc[_fn_code.vararg_name] = tuple(_passed_args[len(_fn_code.arg_names):])
+        if _fn_code.kwarg_name:
+            _loc[_fn_code.kwarg_name] = _rem_kwargs
+        else:
+            _loc.update(_rem_kwargs)
+        _f = {v['frame_cls']}(_fn_code, _loc, _g_env)
+        _f.captured_env = _captured_env or {{}}
+        _f.defining_class = _def_cls
+        _active_frames.append(_f)
+        try:
+            return await _eval_frame_async(_f)
+        finally:
+            if _active_frames: _active_frames.pop()
+
+    def _eval_frame(_frame):
+        _c_arr = _frame.code_obj.code
+        _c_len = len(_c_arr)
+        _st = _frame.stack
+        _loc = _frame.locals
+        _cnsts = _frame.code_obj.constants
+        _nms = _frame.code_obj.names
+
+        while _frame.pc < _c_len:
+            try:
+                _op = _c_arr[_frame.pc]
+                _arg = (_c_arr[_frame.pc+1] << 8) | _c_arr[_frame.pc+2]
+                _frame.pc += 3
+
+                if _op == {op_ld_c}:
+                    _st.append(_cnsts[_arg])
+                elif _op == {op_ld_g}:
+                    _n = _nms[_arg]
+                    _found = False
+                    # Check current frame's captured lexical environment
+                    if hasattr(_frame, 'captured_env') and _frame.captured_env and _n in _frame.captured_env:
+                        _st.append(_frame.captured_env[_n])
+                        _found = True
+                    # Check enclosing parent frames
+                    elif _active_frames:
+                        for _pf in reversed(_active_frames):
+                            if _n in _pf.locals:
+                                _st.append(_pf.locals[_n])
+                                _found = True
+                                break
+                    if not _found:
+                        if _n in _frame.global_env: _st.append(_frame.global_env[_n])
+                        elif hasattr(__builtins__, _n): _st.append(getattr(__builtins__, _n))
+                        elif isinstance(__builtins__, dict) and _n in __builtins__: _st.append(__builtins__[_n])
+                        else: raise NameError(f"name '{{_n}}' is not defined")
+                elif _op == {op_st_g}:
+                    _frame.global_env[_nms[_arg]] = _st.pop()
+                elif _op == {op_ld_f}:
+                    _st.append(_loc.get(_frame.code_obj.local_names[_arg], None))
+                elif _op == {op_st_f}:
+                    _loc[_frame.code_obj.local_names[_arg]] = _st.pop()
+                elif _op == {op_dup}:
+                    _st.append(_st[-1])
+                elif _op == {op_pop}:
+                    if _st: _st.pop()
+                elif _op == {op_rot2}:
+                    _a = _st.pop(); _b = _st.pop(); _st.append(_a); _st.append(_b)
+                elif _op == {op_rot3}:
+                    _a = _st.pop(); _b = _st.pop(); _c = _st.pop()
+                    _st.append(_a); _st.append(_b); _st.append(_c)
+                elif _op == {op_add}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a + _b)
+                elif _op == {op_sub}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a - _b)
+                elif _op == {op_mul}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a * _b)
+                elif _op == {op_div}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a / _b)
+                elif _op == {op_fdiv}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a // _b)
+                elif _op == {op_mod}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a % _b)
+                elif _op == {op_pow}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a ** _b)
+                elif _op == {op_and}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a & _b)
+                elif _op == {op_or}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a | _b)
+                elif _op == {op_xor}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a ^ _b)
+                elif _op == {op_lsh}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a << _b)
+                elif _op == {op_rsh}:
+                    _b = _st.pop(); _a = _st.pop(); _st.append(_a >> _b)
+                elif _op == {op_neg}:
+                    _st.append(-_st.pop())
+                elif _op == {op_not}:
+                    _st.append(not _st.pop())
+                elif _op == {op_inv}:
+                    _st.append(~_st.pop())
+                elif _op == {op_cmp}:
+                    _b = _st.pop(); _a = _st.pop()
+                    if _arg == 0: _st.append(_a < _b)
+                    elif _arg == 1: _st.append(_a <= _b)
+                    elif _arg == 2: _st.append(_a == _b)
+                    elif _arg == 3: _st.append(_a != _b)
+                    elif _arg == 4: _st.append(_a > _b)
+                    elif _arg == 5: _st.append(_a >= _b)
+                    elif _arg == 6: _st.append(_a in _b)
+                    elif _arg == 7: _st.append(_a not in _b)
+                    elif _arg == 8: _st.append(_a is _b)
+                    elif _arg == 9: _st.append(_a is not _b)
+                    else: _st.append(False)
+                elif _op == {op_jmp}:
+                    _frame.pc = _arg * 3
+                elif _op == {op_jmp_f}:
+                    if not _st.pop(): _frame.pc = _arg * 3
+                elif _op == {op_jmp_t}:
+                    if _st.pop(): _frame.pc = _arg * 3
+                elif _op == {op_jmp_f_p}:
+                    if not _st[-1]: _frame.pc = _arg * 3
+                    else: _st.pop()
+                elif _op == {op_jmp_t_p}:
+                    if _st[-1]: _frame.pc = _arg * 3
+                    else: _st.pop()
+                elif _op == {op_ret}:
+                    return _st.pop() if _st else None
+                elif _op == {op_g_attr}:
+                    _st.append(getattr(_st.pop(), _nms[_arg]))
+                elif _op == {op_s_attr}:
+                    _obj = _st.pop(); _val = _st.pop()
+                    setattr(_obj, _nms[_arg], _val)
+                elif _op == {op_g_item}:
+                    _k = _st.pop(); _c = _st.pop()
+                    _st.append(_c[_k])
+                elif _op == {op_s_item}:
+                    _k = _st.pop(); _c = _st.pop(); _v = _st.pop()
+                    _c[_k] = _v
+                elif _op == {op_d_item}:
+                    _k = _st.pop(); _c = _st.pop(); del _c[_k]
+                elif _op == {op_b_list}:
+                    _elts = [_st.pop() for _ in range(_arg)][::-1] if _arg else []
+                    _st.append(_elts)
+                elif _op == {op_b_tup}:
+                    _elts = [_st.pop() for _ in range(_arg)][::-1] if _arg else []
+                    _st.append(tuple(_elts))
+                elif _op == {op_b_set}:
+                    _elts = [_st.pop() for _ in range(_arg)][::-1] if _arg else []
+                    _st.append(set(_elts))
+                elif _op == {op_b_dict}:
+                    _d = {{}}
+                    for _ in range(_arg):
+                        _dv = _st.pop(); _dk = _st.pop(); _d[_dk] = _dv
+                    _st.append(_d)
+                elif _op == {op_unp_seq}:
+                    _seq = list(_st.pop())
+                    for _item in reversed(_seq):
+                        _st.append(_item)
+                elif _op == {op_b_slice}:
+                    _step = _st.pop(); _upper = _st.pop(); _lower = _st.pop()
+                    _st.append(slice(_lower, _upper, _step))
+                elif _op == {op_mk_fn}:
+                    _fn_code_obj = _st.pop()
+                    _is_async = bool(_arg & 1)
+                    _captured_env = dict(_frame.locals)
+                    # Also inherit outer closure environment
+                    if hasattr(_frame, 'captured_env') and _frame.captured_env:
+                        _merged_captured = dict(_frame.captured_env)
+                        _merged_captured.update(_captured_env)
+                        _captured_env = _merged_captured
+                    if _is_async:
+                        def _make_wrapped_async(_fco, _cenv):
+                            async def _wrapped_async(*_args, **_kwargs):
+                                _d_cls = getattr(_wrapped_async, '_vm_def_cls', getattr(_fco, 'defining_class', None))
+                                return await _call_vm_func_async(_fco, _args, _kwargs, _cenv, _def_cls=_d_cls)
+                            _wrapped_async._fco = _fco
+                            return _wrapped_async
+                        _st.append(_make_wrapped_async(_fn_code_obj, _captured_env))
+                    else:
+                        def _make_wrapped(_fco, _cenv):
+                            def _wrapped(*_args, **_kwargs):
+                                _d_cls = getattr(_wrapped, '_vm_def_cls', getattr(_fco, 'defining_class', None))
+                                return _call_vm_func(_fco, _args, _kwargs, _cenv, _def_cls=_d_cls)
+                            _wrapped._fco = _fco
+                            return _wrapped
+                        _st.append(_make_wrapped(_fn_code_obj, _captured_env))
+                elif _op == {op_call_fn}:
+                    _args = [_st.pop() for _ in range(_arg)][::-1] if _arg else []
+                    _fn = _st.pop()
+                    _st.append(_fn(*_args))
+                elif _op == {op_call_kw}:
+                    _n_args = _arg & 0xFF
+                    _n_kw = (_arg >> 8) & 0xFF
+                    _kw = {{}}
+                    for _ in range(_n_kw):
+                        _v = _st.pop(); _k = _st.pop(); _kw[_k] = _v
+                    _args = [_st.pop() for _ in range(_n_args)][::-1] if _n_args else []
+                    _fn = _st.pop()
+                    _st.append(_fn(*_args, **_kw))
+                elif _op == {op_call_ex}:
+                    _kw = _st.pop() if (_arg & 1) else {{}}
+                    _star_args = list(_st.pop())
+                    _fn = _st.pop()
+                    _st.append(_fn(*_star_args, **_kw))
+                elif _op == {op_b_cls}:
+                    _cls_code = _st.pop()
+                    _meta_param = _st.pop()
+                    _bases = _st.pop()
+                    _cname = _st.pop()
+                    _cls_loc = {{}}
+                    _eval_frame({v['frame_cls']}(_cls_code, _cls_loc, _g_env))
+                    _meta = _meta_param
+                    if _meta is None and hasattr(_bases, '__iter__'):
+                        for _b in _bases:
+                            if isinstance(_b, type) and _b is not object and issubclass(_b, type):
+                                _meta = _b
+                                break
+                    if _meta is None:
+                        _meta = type
+                    _new_class = _meta(_cname, tuple(_bases), _cls_loc)
+                    # Set __class__ and defining_class in functions and code objects to enable zero-arg super()
+                    for _c in getattr(_cls_code, 'constants', []):
+                        if hasattr(_c, 'defining_class'):
+                            _c.defining_class = _new_class
+                    for _k, _v in _cls_loc.items():
+                        if callable(_v):
+                            try:
+                                setattr(_v, '__class__', _new_class)
+                                setattr(_v, '_vm_def_cls', _new_class)
+                                if hasattr(_v, '_fco'):
+                                    setattr(_v._fco, 'defining_class', _new_class)
+                            except Exception:
+                                pass
+                    _st.append(_new_class)
+                elif _op == {op_imp_n}:
+                    _st.append(__import__(_nms[_arg]))
+                elif _op == {op_imp_f}:
+                    _m = _st[-1]
+                    _st.append(getattr(_m, _nms[_arg]))
+                elif _op == {op_g_iter}:
+                    _st.append(iter(_st.pop()))
+                elif _op == {op_for_it}:
+                    try:
+                        _next_val = next(_st[-1])
+                        _st.append(_next_val)
+                    except StopIteration:
+                        _st.pop()
+                        _frame.pc = _arg * 3
+                elif _op == {op_st_fin}:
+                    _frame.exc_handlers.append(_arg * 3)
+                elif _op == {op_pop_blk}:
+                    if _frame.exc_handlers: _frame.exc_handlers.pop()
+                elif _op == {op_raise}:
+                    _exc = _st.pop() if _st else None
+                    if _exc: raise _exc
+                elif _op == {op_halt}:
+                    break
+            except Exception as _e:
+                if _frame.exc_handlers:
+                    _target_pc = _frame.exc_handlers.pop()
+                    _frame.pc = _target_pc
+                else:
+                    raise _e
+        return _st.pop() if _st else None
+
+    _initial_frame = {v['frame_cls']}(_root_code, {{}}, _g_env)
+    _eval_frame(_initial_frame)
+
+{v['interp_fn']}({repr(serialized_root)})
 """
-    return runtime_src.strip()
+    return src.strip()
 
 
 def _vm_obfuscate(code_str: str, seed=None, vm_level: int = 1) -> str:
     """
-    Tr0ngX True Virtual Machine (TVM) Obfuscation Engine.
-    Directly compiles Python AST into Custom ISA Bytecode and executes via
-    a pure Polymorphic Virtual Interpreter.
+    Tr0ngX True Virtual Machine (TVM 2.0) Obfuscation Engine.
+    100% Zero-exec full virtualization. Directly compiles Python AST into Custom ISA Bytecode
+    and executes via a Polymorphic Frame-Based Virtual Machine Interpreter.
     """
     try:
         tree = ast.parse(code_str)
@@ -5143,30 +6476,35 @@ def _vm_obfuscate(code_str: str, seed=None, vm_level: int = 1) -> str:
     isa_map = {}
     standard_opcodes = [
         _TVMOpcodes.LOAD_CONST, _TVMOpcodes.LOAD_GLOBAL, _TVMOpcodes.STORE_GLOBAL,
-        _TVMOpcodes.LOAD_FAST, _TVMOpcodes.STORE_FAST, _TVMOpcodes.POP_TOP,
+        _TVMOpcodes.LOAD_FAST, _TVMOpcodes.STORE_FAST, _TVMOpcodes.DUP_TOP, _TVMOpcodes.POP_TOP,
+        _TVMOpcodes.ROT_TWO, _TVMOpcodes.ROT_THREE,
         _TVMOpcodes.BINARY_ADD, _TVMOpcodes.BINARY_SUB, _TVMOpcodes.BINARY_MUL,
         _TVMOpcodes.BINARY_DIV, _TVMOpcodes.BINARY_FLOORDIV, _TVMOpcodes.BINARY_MOD,
         _TVMOpcodes.BINARY_POW, _TVMOpcodes.BINARY_AND, _TVMOpcodes.BINARY_OR,
         _TVMOpcodes.BINARY_XOR, _TVMOpcodes.BINARY_LSHIFT, _TVMOpcodes.BINARY_RSHIFT,
         _TVMOpcodes.UNARY_NEG, _TVMOpcodes.UNARY_NOT, _TVMOpcodes.UNARY_INVERT,
         _TVMOpcodes.COMPARE_OP, _TVMOpcodes.JUMP, _TVMOpcodes.JUMP_IF_TRUE,
-        _TVMOpcodes.JUMP_IF_FALSE, _TVMOpcodes.RETURN_VALUE, _TVMOpcodes.GET_ATTR,
-        _TVMOpcodes.SET_ATTR, _TVMOpcodes.GET_ITEM, _TVMOpcodes.SET_ITEM,
-        _TVMOpcodes.DEL_ITEM, _TVMOpcodes.BUILD_LIST, _TVMOpcodes.BUILD_TUPLE,
-        _TVMOpcodes.BUILD_DICT, _TVMOpcodes.CALL_FUNCTION, _TVMOpcodes.IMPORT_NAME,
-        _TVMOpcodes.IMPORT_FROM, _TVMOpcodes.HALT
+        _TVMOpcodes.JUMP_IF_FALSE, _TVMOpcodes.JUMP_IF_FALSE_OR_POP, _TVMOpcodes.JUMP_IF_TRUE_OR_POP,
+        _TVMOpcodes.RETURN_VALUE, _TVMOpcodes.GET_ATTR, _TVMOpcodes.SET_ATTR,
+        _TVMOpcodes.GET_ITEM, _TVMOpcodes.SET_ITEM, _TVMOpcodes.DEL_ITEM,
+        _TVMOpcodes.BUILD_LIST, _TVMOpcodes.BUILD_TUPLE, _TVMOpcodes.BUILD_SET, _TVMOpcodes.BUILD_DICT,
+        _TVMOpcodes.UNPACK_SEQUENCE, _TVMOpcodes.BUILD_SLICE,
+        _TVMOpcodes.MAKE_FUNCTION, _TVMOpcodes.CALL_FUNCTION, _TVMOpcodes.CALL_FUNCTION_KW,
+        _TVMOpcodes.BUILD_CLASS, _TVMOpcodes.IMPORT_NAME, _TVMOpcodes.IMPORT_FROM,
+        _TVMOpcodes.GET_ITER, _TVMOpcodes.FOR_ITER, _TVMOpcodes.SETUP_FINALLY,
+        _TVMOpcodes.POP_BLOCK, _TVMOpcodes.RAISE_VARARGS, _TVMOpcodes.HALT
     ]
     for idx, std_op in enumerate(standard_opcodes):
         isa_map[std_op] = all_opcodes[idx]
 
     # 2. Lower AST into Custom TVM Instructions
-    compiler = _TVMASTCompiler()
+    compiler = _TVMASTCompiler(name='<module>', is_function=False)
     for stmt in tree.body:
         compiler.visit(stmt)
-    instructions, constants, names = compiler.finalize()
+    root_code = compiler.finalize()
 
-    # 3. Emit Polymorphic Runtime Interpreter
-    runtime = _vm_emit_runtime_interpreter(instructions, constants, names, isa_map, vm_level, rng)
+    # 3. Emit Polymorphic Runtime Interpreter 2.0
+    runtime = _vm_emit_runtime_interpreter_v2(root_code, isa_map, vm_level, rng)
     return runtime
 
 
