@@ -53,8 +53,11 @@ graph TD
 
 | Flag | Category | Description | Choices / Format |
 | :--- | :--- | :--- | :--- |
-| `-i`, `--input` | IO | Target Python script to obfuscate | `<filepath>` |
-| `-o`, `--output` | IO | Custom output destination path | `<filepath>` |
+| `-i`, `--input` | IO | Target Python script(s) or glob patterns to obfuscate | `<filepath(s) / glob>` |
+| `-D`, `--dir`, `--directory` | IO | Target directory containing Python files to batch obfuscate | `<dirpath>` |
+| `-r`, `--recursive` | IO | Recursively scan all subdirectories when batch obfuscating | Flag |
+| `-w`, `--workers`, `-j` | Resource | Number of parallel worker threads for concurrent batch obfuscation | e.g. `4`, `8` |
+| `-o`, `--output` | IO | Custom output file destination (or output directory for batch) | `<filepath / dirpath>` |
 | `-m`, `--mode` | Core AST | AST obfuscation complexity level | `1`, `2`, `3` |
 | `--moreobf` | Core AST | Inject extra AST dead code and try-except decoy blocks | `y` / `n` |
 | `--antidebug` | Protection | Inject anti-debugging watchdog daemon, Win32 PEB/remote debug checks, and hook blockers | `y` / `n` |

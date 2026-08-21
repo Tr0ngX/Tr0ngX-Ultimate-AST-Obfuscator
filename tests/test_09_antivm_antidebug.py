@@ -79,8 +79,48 @@ print(f"SQUARES:{x}")
         assert "SQUARES:[0, 1, 4, 9, 16]" in run_res.stdout, f"Output mismatch: {run_res.stdout}"
         print("  [PASS] Anti-VM + Double Compile verified")
 
+def test_advanced_antidebug_matrix_vectors():
+    """Verify that the 100+ process, window title, and named pipe detection matrix runs cleanly."""
+    sample_code = """
+import sys
+data = {"status": "ACTIVE_PROTECTION", "val": 42 * 2}
+print(f"MATRIX_VERIFIED:{data['status']}_{data['val']}")
+"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        src_path = os.path.join(tmpdir, "matrix_source.py")
+        out_path = os.path.join(tmpdir, "obf_matrix.py")
+        with open(src_path, "w", encoding="utf-8") as f:
+            f.write(sample_code)
+
+        cmd = [
+            sys.executable, "tr0ngx_obfuscator.py",
+            "-i", src_path,
+            "-o", out_path,
+            "-m", "3",
+            "--antidebug", "y",
+            "--antivm", "y",
+            "--selfmod", "y",
+            "--math-opaque", "y",
+            "--dyn-strings", "y",
+            "--anti-dump", "y",
+            "--compile", "y",
+            "--velimatix", "y",
+            "--veli-level", "3",
+            "--force-py", "off",
+            "--no-art"
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        assert res.returncode == 0, f"Obfuscation failed: {res.stderr}"
+
+        run_res = subprocess.run([sys.executable, out_path], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        assert run_res.returncode == 0, f"Execution failed: {run_res.stderr}"
+        assert "MATRIX_VERIFIED:ACTIVE_PROTECTION_84" in run_res.stdout, f"Output mismatch: {run_res.stdout}"
+        print("  [PASS] 100+ Process & Window Detection Matrix Verification passed")
+
 if __name__ == "__main__":
     print("[TEST 09] Running Anti-VM & Anti-Debug Test Suite...")
     test_antivm_generation_and_execution()
     test_antivm_with_double_compile()
+    test_advanced_antidebug_matrix_vectors()
     print("[TEST 09] ALL ANTI-VM & ANTI-DEBUG TESTS PASSED!")
+

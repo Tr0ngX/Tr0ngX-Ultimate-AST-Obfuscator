@@ -111,10 +111,17 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 2 --compile y --kramer y
 # Mode 3 + Velimatix Engine + Double Compilation
 python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 --compile y --velimatix y --veli-level 3 --double-compile y
 
+# Multi-File Batch Obfuscation (Multiple target scripts)
+python tr0ngx_obfuscator.py -i file1.py file2.py file3.py -o dist/ -m 2 --compile y -w 4
+
+# Entire Directory Recursive Obfuscation
+python tr0ngx_obfuscator.py -D src/ -o dist/ -r -m 2 --compile y --matrix y
+
 # MAXIMUM POWER MODE (All transformations, Anti-Debug, SelfMod, Fused Matrix Shield & Rare Unicode)
 python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
   --moreobf y \
   --antidebug y \
+  --antivm y \
   --selfmod y \
   --compile y \
   --velimatix y \
@@ -135,8 +142,11 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 
 | Flag | Description | Options |
 | :--- | :--- | :--- |
-| `-i`, `--input` | Path to target Python file to obfuscate | `<filepath>` |
-| `-o`, `--output` | Custom destination output path | `<filepath>` |
+| `-i`, `--input` | Path to target Python file(s) or glob patterns to obfuscate | `<filepath(s) / glob>` |
+| `-D`, `--dir`, `--directory` | Target directory containing Python files to batch obfuscate | `<dirpath>` |
+| `-r`, `--recursive` | Recursively scan all subdirectories when batch obfuscating | Flag |
+| `-w`, `--workers`, `-j` | Number of parallel worker threads for concurrent batch obfuscation | e.g. `4`, `8` |
+| `-o`, `--output` | Custom destination output path (or destination folder for batch) | `<filepath / dirpath>` |
 | `-m`, `--mode` | Obfuscation complexity level | `1`, `2`, `3` |
 | `--moreobf` | Extra string & integer mutation pass | `y` / `n` |
 | `--antidebug` | Inject multi-vector Anti-Debug watchdog shield | `y` / `n` |

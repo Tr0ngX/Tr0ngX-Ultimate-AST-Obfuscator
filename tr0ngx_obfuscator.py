@@ -2898,25 +2898,187 @@ def _anti_debugger():
     except Exception:
         pass
 
-    # Vector 11: Reversing & Disassembler window title inspection
+    # Vector 11: Comprehensive GUI Window Title & Window Class Matrix (100+ patterns)
     try:
         import ctypes
         if hasattr(ctypes, 'windll') and hasattr(ctypes.windll, 'user32'):
             _u32 = ctypes.windll.user32
-            _buf = ctypes.create_unicode_buffer(512)
-            _bad_titles = ('x64dbg', 'x32dbg', 'ida -', 'ida64', 'ghidra', 'dnspy', 'cheat engine', 'wireshark', 'process hacker', 'process explorer', 'http debugger', 'fiddler')
+            _buf_title = ctypes.create_unicode_buffer(1024)
+            _buf_class = ctypes.create_unicode_buffer(256)
+            
+            _BAD_TITLES = (
+                'extremedumper', 'extremedumper-x86', 'dnspy', 'dnspy-x86', 'dnspy.console',
+                'ilspy', 'ilspy.b35', 'ilspycmd', 'dotdumper', 'dotnetdatacollector',
+                'cheat engine', 'cheatengine', 'cheatengine-x86_64', 'cheatengine-x86_64-sse4-avx2',
+                'cheatengine-i386', 'cheatengine-x86_64-sse4', 'x64dbg', 'x32dbg', 'x96dbg', 'x64_dbg', 'x32_dbg',
+                'ollydbg', 'immunity debugger', 'process hacker', 'system informer', 'processhacker',
+                'httpdebugger', 'http debugger', 'httpdebuggerui', 'httpdebuggersvc', 'http debugger pro',
+                'fiddler', 'fiddler classic', 'fiddler everywhere', 'wireshark', 'charles proxy', 'charles debug',
+                'ida pro', 'ida free', 'ida v', 'ida:', 'ida64', 'idaw', 'idag',
+                'ghidra', 'binary ninja', 'radare2', 'cutter -', 'scylla', 'scyllahide', 'megadumper',
+                'process monitor', 'procmon', 'process explorer', 'procexp', 'everything',
+                'pe-bear', 'pe-sieve', 'hollowshunter', 'lordpe', 'resource hacker', 'reshacker',
+                'hxd hex editor', 'hxd', '010 editor', 'frida', 'api monitor', 'reclass.net', 'reclass',
+                'ksdumper', 'ksdumper 11', 'ksdumperclient', 'blackbone', 'xenos injector', 'xenos',
+                'simple assembly explorer', 'de4dot', 'unpyc', 'pycdc', 'decompyle++', 'justdecompile',
+                'detect it easy', 'exeinfo pe', 'peid', 'titanengine', 'tcpview', 'dbgview', 'debugview',
+                'hookshark', 'pestudio', 'cff explorer', 'windbg', 'syser', 'softice', 'dumpert', 'userdump'
+            )
+
+            _BAD_CLASSES = (
+                'ollydbg', 'zeta debugger', 'rock debugger', 'id', 'x64dbg', 'x32dbg',
+                'procmon_window_class', 'cheatengine', 'processhacker', 'httpdebugger',
+                'dbgviewclass', 'tformcheatengine', 'tformmain', 'tformaddresschanger'
+            )
+
             def _enum_wnd_cb(hwnd, lparam):
                 if _u32.IsWindowVisible(hwnd):
-                    l = _u32.GetWindowTextW(hwnd, _buf, 512)
-                    if l > 0:
-                        t = _buf.value.lower()
-                        if any(b in t for b in _bad_titles):
-                            _obliterate()
+                    len_t = _u32.GetWindowTextW(hwnd, _buf_title, 1024)
+                    len_c = _u32.GetClassNameW(hwnd, _buf_class, 256)
+                    t_lower = _buf_title.value.lower() if len_t > 0 else ""
+                    c_lower = _buf_class.value.lower() if len_c > 0 else ""
+                    
+                    if t_lower:
+                        for b in _BAD_TITLES:
+                            if b in t_lower:
+                                # Special filter for Everything search utility: only trigger if searching memory/dump/debug
+                                if b == 'everything':
+                                    if any(k in t_lower for k in ('.dmp', '.dump', 'debug', 'memory', 'ida', 'dnspy', 'cheat')):
+                                        _obliterate()
+                                else:
+                                    _obliterate()
+                    if c_lower:
+                        for cl in _BAD_CLASSES:
+                            if cl in c_lower:
+                                _obliterate()
                 return True
+
             _WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
             _u32.EnumWindows(_WNDPROC(_enum_wnd_cb), 0)
     except Exception:
         pass
+
+    # Vector 12: Process Image & Toolhelp32/EnumProcesses Inspection (100+ process names)
+    try:
+        import ctypes
+        if hasattr(ctypes, 'windll') and hasattr(ctypes.windll, 'kernel32'):
+            _k32 = ctypes.windll.kernel32
+            
+            _BAD_PROCS = frozenset({
+                'extremedumper.exe', 'extremedumper-x86.exe', 'extremedumper',
+                'dnspy.exe', 'dnspy-x86.exe', 'dnspy.console.exe', 'dnspy',
+                'ilspy.exe', 'ilspy.b35.exe', 'ilspycmd.exe', 'ilspy',
+                'dotdumper.exe', 'dotdumper', 'de4dot.exe', 'de4dot-x64.exe', 'de4dot',
+                'megadumper.exe', 'megadumper', 'simpleassemblyexplorer.exe',
+                'justdecompile.exe', 'dotnetspy.exe', 'dnspy.runtime.exe',
+                'cheatengine-x86_64.exe', 'cheatengine-x86_64-sse4-avx2.exe',
+                'cheatengine-i386.exe', 'cheatengine.exe', 'cheatengine-x86_64-sse4.exe',
+                'cheatengine', 'cheat engine.exe',
+                'ksdumper.exe', 'ksdumper11.exe', 'ksdumperclient.exe', 'ksdumper',
+                'scylla.exe', 'scylla_x64.exe', 'scylla_x86.exe', 'scylla',
+                'procdump.exe', 'procdump64.exe', 'procdump', 'dumpert.exe', 'userdump.exe',
+                'reclass.net.exe', 'reclass64.exe', 'reclass.exe', 'reclass',
+                'xenos.exe', 'xenos64.exe', 'blackbone.exe', 'blackbone',
+                'x64dbg.exe', 'x32dbg.exe', 'x96dbg.exe', 'x64dbg', 'x32dbg',
+                'ollydbg.exe', 'ollydbg', 'immunitydebugger.exe', 'immunity debugger.exe',
+                'windbg.exe', 'windbg', 'devenv.exe', 'vsjitdebugger.exe',
+                'gdb.exe', 'gdb', 'lldb.exe', 'lldb',
+                'ida.exe', 'ida64.exe', 'idag.exe', 'idag64.exe', 'idaw.exe', 'idaw64.exe', 'ida', 'ida64',
+                'ghidra.exe', 'ghidrarun.bat', 'ghidra', 'binaryninja.exe', 'binaryninja',
+                'radare2.exe', 'radare2', 'r2.exe', 'r2', 'cutter.exe', 'cutter',
+                'wdbg.exe', 'cdb.exe', 'ntsd.exe', 'kd.exe', 'drwatson.exe', 'drwtsn32.exe',
+                'processhacker.exe', 'processhacker', 'systeminformer.exe', 'systeminformer',
+                'procmon.exe', 'procmon64.exe', 'procmon', 'procexp.exe', 'procexp64.exe', 'procexp',
+                'apimonitor-x64.exe', 'apimonitor-x86.exe', 'apimonitor.exe', 'apimonitor',
+                'hookshark.exe', 'tcpview.exe', 'tcpview64.exe', 'tcpview',
+                'autoruns.exe', 'autorunsc.exe', 'autoruns',
+                'dbgview.exe', 'dbgview64.exe', 'dbgview',
+                'httpdebuggerui.exe', 'httpdebuggersvc.exe', 'httpdebugger.exe', 'httpdebugger',
+                'fiddler.exe', 'fiddlerclassic.exe', 'fiddlereverywhere.exe', 'fiddler',
+                'wireshark.exe', 'wireshark', 'tshark.exe', 'tshark',
+                'charles.exe', 'charles64.exe', 'charles',
+                'mitmproxy.exe', 'mitmdump.exe', 'mitmweb.exe',
+                'burpsuite.exe', 'burpsuite_free.exe', 'burpsuite_pro.exe', 'burpsuite',
+                'netmon.exe', 'netmon64.exe', 'networkminer.exe', 'smartsniffer.exe', 'capsa.exe',
+                'pe-bear.exe', 'pe-bear', 'pe-sieve.exe', 'pe-sieve', 'hollowshunter.exe',
+                'lordpe.exe', 'lordpe', 'reshacker.exe', 'resourcehacker.exe',
+                'hxd.exe', 'hxd64.exe', 'hxd', '010editor.exe', '010editor',
+                'die.exe', 'die_x64.exe', 'exeinfope.exe', 'peid.exe', 'pestudio.exe',
+                'petools.exe', 'cff explorer.exe', 'cffexplorer.exe', 'protection_id.exe',
+                'unpyc.exe', 'pycdc.exe', 'pycdc', 'uncompyle6.exe', 'decompyle++.exe',
+                'frida.exe', 'frida-server.exe', 'frida-helper.exe', 'frida-agent.exe', 'frida',
+                'regshot.exe', 'regshot64.exe', 'syser.exe', 'softice.exe'
+            })
+
+            # Snapshot iteration
+            class PROCESSENTRY32W(ctypes.Structure):
+                _fields_ = [
+                    ('dwSize', ctypes.c_uint32),
+                    ('cntUsage', ctypes.c_uint32),
+                    ('th32ProcessID', ctypes.c_uint32),
+                    ('th32DefaultHeapID', ctypes.c_size_t),
+                    ('th32ModuleID', ctypes.c_uint32),
+                    ('cntThreads', ctypes.c_uint32),
+                    ('th32ParentProcessID', ctypes.c_uint32),
+                    ('pcPriClassBase', ctypes.c_long),
+                    ('dwFlags', ctypes.c_uint32),
+                    ('szExeFile', ctypes.c_wchar * 260)
+                ]
+
+            TH32CS_SNAPPROCESS = 0x00000002
+            h_snap = _k32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+            if h_snap and h_snap != -1:
+                pe = PROCESSENTRY32W()
+                pe.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+                if _k32.Process32FirstW(h_snap, ctypes.byref(pe)):
+                    while True:
+                        exe_name = pe.szExeFile.lower()
+                        if exe_name in _BAD_PROCS:
+                            _k32.CloseHandle(h_snap)
+                            _obliterate()
+                        if not _k32.Process32NextW(h_snap, ctypes.byref(pe)):
+                            break
+                _k32.CloseHandle(h_snap)
+    except Exception:
+        pass
+
+    # Vector 13: Kernel Driver Device, Named Pipe & Mutex Inspection
+    try:
+        import ctypes
+        if hasattr(ctypes, 'windll') and hasattr(ctypes.windll, 'kernel32'):
+            _k32 = ctypes.windll.kernel32
+            _GENERIC_READ = 0x80000000
+            _OPEN_EXISTING = 3
+            
+            _BAD_OBJECTS = (
+                r"\\.\pipe\x64dbg", r"\\.\pipe\x32dbg", r"\\.\pipe\CheatEngine",
+                r"\\.\pipe\HTTPDebugger", r"\\.\pipe\Frida", r"\\.\pipe\ExtremeDumper",
+                r"\\.\pipe\ProcessHacker",
+                r"\\.\CEDRIVER73", r"\\.\CEDRIVER74", r"\\.\DBK64", r"\\.\DBK32",
+                r"\\.\KProcessHacker2", r"\\.\KProcessHacker3", r"\\.\PROCEXP152",
+                r"\\.\HTTPDebuggerSdk", r"\\.\ScyllaHide", r"\\.\TitanHide", r"\\.\BlackBone"
+            )
+            for obj_path in _BAD_OBJECTS:
+                h_file = _k32.CreateFileW(obj_path, _GENERIC_READ, 0, None, _OPEN_EXISTING, 0, None)
+                if h_file and h_file != -1:
+                    _k32.CloseHandle(h_file)
+                    _obliterate()
+    except Exception:
+        pass
+
+    # Vector 14: POSIX / Linux /proc cmdline inspection fallback
+    if os.name == 'posix' and os.path.exists('/proc'):
+        try:
+            for pid_dir in os.listdir('/proc'):
+                if pid_dir.isdigit():
+                    cmd_path = os.path.join('/proc', pid_dir, 'cmdline')
+                    if os.path.isfile(cmd_path):
+                        with open(cmd_path, 'rb') as f:
+                            cmd_raw = f.read().replace(b'\x00', b' ').lower()
+                            if any(d in cmd_raw for d in (b'gdb', b'lldb', b'radare2', b'strace', b'ltrace', b'frida', b'pycdc', b'uncompyle6')):
+                                _obliterate()
+        except Exception:
+            pass
 
 # ═══ ANTI-IMPORT HOOK ═══
 class _ImportBlocker:
@@ -5486,6 +5648,144 @@ def _parse_size_str(val):
         return int(val)
     return None
 
+def _resolve_input_files(inputs=None, directory=None, recursive=False):
+    """
+    Discovers all target python files from list of inputs, glob patterns, or directory path.
+    Returns list of dicts: [{'src': absolute_source_path, 'rel': relative_output_path}, ...]
+    """
+    found = []
+    seen = set()
+
+    if directory:
+        d_abs = os.path.abspath(directory.strip().strip('"').strip("'"))
+        if not os.path.isdir(d_abs):
+            raise FileNotFoundError(f"Directory not found: {directory}")
+        if recursive:
+            for root, _, files in os.walk(d_abs):
+                for f in files:
+                    if f.endswith(".py"):
+                        f_abs = os.path.abspath(os.path.join(root, f))
+                        rel = os.path.relpath(f_abs, d_abs)
+                        if f_abs not in seen:
+                            seen.add(f_abs)
+                            found.append({"src": f_abs, "rel": rel})
+        else:
+            for f in os.listdir(d_abs):
+                if f.endswith(".py"):
+                    f_abs = os.path.abspath(os.path.join(d_abs, f))
+                    if os.path.isfile(f_abs) and f_abs not in seen:
+                        seen.add(f_abs)
+                        found.append({"src": f_abs, "rel": f})
+
+    if inputs:
+        raw_items = []
+        if isinstance(inputs, str):
+            if "," in inputs:
+                raw_items = [p.strip() for p in inputs.split(",") if p.strip()]
+            else:
+                raw_items = inputs.split()
+        elif isinstance(inputs, (list, tuple)):
+            for it in inputs:
+                if isinstance(it, str) and "," in it:
+                    raw_items.extend([p.strip() for p in it.split(",") if p.strip()])
+                else:
+                    raw_items.append(str(it).strip())
+
+        for item in raw_items:
+            item_str = str(item).strip().strip('"').strip("'")
+            if not item_str:
+                continue
+            if any(c in item_str for c in ("*", "?", "[", "]")):
+                globbed = glob.glob(item_str, recursive=recursive)
+                for g in globbed:
+                    if g.endswith(".py") and os.path.isfile(g):
+                        g_abs = os.path.abspath(g)
+                        if g_abs not in seen:
+                            seen.add(g_abs)
+                            found.append({"src": g_abs, "rel": os.path.basename(g_abs)})
+            elif os.path.isdir(item_str):
+                d_found = _resolve_input_files(directory=item_str, recursive=recursive)
+                for df in d_found:
+                    if df["src"] not in seen:
+                        seen.add(df["src"])
+                        found.append(df)
+            elif os.path.isfile(item_str):
+                f_abs = os.path.abspath(item_str)
+                if f_abs not in seen:
+                    seen.add(f_abs)
+                    found.append({"src": f_abs, "rel": os.path.basename(f_abs)})
+
+    return found
+
+def _resolve_input_files(inputs=None, directory=None, recursive=False):
+    """
+    Discovers all target python files from list of inputs, glob patterns, or directory path.
+    Returns list of dicts: [{'src': absolute_source_path, 'rel': relative_output_path}, ...]
+    """
+    found = []
+    seen = set()
+
+    if directory:
+        d_abs = os.path.abspath(directory.strip().strip('"').strip("'"))
+        if not os.path.isdir(d_abs):
+            raise FileNotFoundError(f"Directory not found: {directory}")
+        if recursive:
+            for root, _, files in os.walk(d_abs):
+                for f in files:
+                    if f.endswith(".py"):
+                        f_abs = os.path.abspath(os.path.join(root, f))
+                        rel = os.path.relpath(f_abs, d_abs)
+                        if f_abs not in seen:
+                            seen.add(f_abs)
+                            found.append({"src": f_abs, "rel": rel})
+        else:
+            for f in os.listdir(d_abs):
+                if f.endswith(".py"):
+                    f_abs = os.path.abspath(os.path.join(d_abs, f))
+                    if os.path.isfile(f_abs) and f_abs not in seen:
+                        seen.add(f_abs)
+                        found.append({"src": f_abs, "rel": f})
+
+    if inputs:
+        raw_items = []
+        if isinstance(inputs, str):
+            if "," in inputs:
+                raw_items = [p.strip() for p in inputs.split(",") if p.strip()]
+            else:
+                raw_items = inputs.split()
+        elif isinstance(inputs, (list, tuple)):
+            for it in inputs:
+                if isinstance(it, str) and "," in it:
+                    raw_items.extend([p.strip() for p in it.split(",") if p.strip()])
+                else:
+                    raw_items.append(str(it).strip())
+
+        for item in raw_items:
+            item_str = str(item).strip().strip('"').strip("'")
+            if not item_str:
+                continue
+            if any(c in item_str for c in ("*", "?", "[", "]")):
+                globbed = glob.glob(item_str, recursive=recursive)
+                for g in globbed:
+                    if g.endswith(".py") and os.path.isfile(g):
+                        g_abs = os.path.abspath(g)
+                        if g_abs not in seen:
+                            seen.add(g_abs)
+                            found.append({"src": g_abs, "rel": os.path.basename(g_abs)})
+            elif os.path.isdir(item_str):
+                d_found = _resolve_input_files(directory=item_str, recursive=recursive)
+                for df in d_found:
+                    if df["src"] not in seen:
+                        seen.add(df["src"])
+                        found.append(df)
+            elif os.path.isfile(item_str):
+                f_abs = os.path.abspath(item_str)
+                if f_abs not in seen:
+                    seen.add(f_abs)
+                    found.append({"src": f_abs, "rel": os.path.basename(f_abs)})
+
+    return found
+
 def get_args_or_prompt():
     parser = argparse.ArgumentParser(
         prog="procheck.py",
@@ -5513,28 +5813,25 @@ CÔNG CỤ LÀM RỐI MÃ NGUỒN PYTHON ĐA TẦNG CỰC MẠNH:
         """,
         epilog="""
 VÍ DỤ SỬ DỤNG:
-  1. Chạy CLI đầy đủ tính năng:
-     python tr0ngx_obfuscator.py -i script.py -o obf_script.py -m 3 --moreobf y --antidebug y --antivm y --selfmod y --compile y --velimatix y --veli-level 3 --double-compile y --kramer y --hyperion y --camouflage y --matrix y --zalgo y
+  1. Chạy CLI đơn file:
+     python tr0ngx_obfuscator.py -i script.py -o obf_script.py -m 3 --compile y --velimatix y --kramer y
 
-  2. Chạy nhanh chế độ im lặng (không lag, không banner màu):
-     python tr0ngx_obfuscator.py -i script.py -o obf_script.py -m 2 --compile y --kramer y --no-art
+  2. Chạy CLI nhiều file / Batch Obfuscation:
+     python tr0ngx_obfuscator.py -i file1.py file2.py file3.py -o dist/ -m 2 --compile y -w 4
 
-  3. Chạy giao diện tương tác TUI:
+  3. Chạy CLI toàn bộ thư mục (đệ quy):
+     python tr0ngx_obfuscator.py -d src/ -o dist/ -r -m 2 --compile y --matrix y
+
+  4. Chạy giao diện tương tác TUI (hỗ trợ chọn 1 file hoặc hàng loạt):
      python tr0ngx_obfuscator.py
-
-  4. Bật Symbiotic Fused Matrix Shield:
-     python tr0ngx_obfuscator.py -i script.py -m 2 --compile y --matrix y --no-art
-
-  5. Bật Extreme Zalgo Diacritics + Homoglyph:
-     python tr0ngx_obfuscator.py -i script.py -m 3 --compile y --zalgo y --homoglyph y --no-art
-
-  6. ALL-IN MAXIMUM POWER (toàn bộ ma trận bảo vệ):
-     python tr0ngx_obfuscator.py -i script.py -o max.py -m 3 --moreobf y --antidebug y --antivm y --selfmod y --compile y --velimatix y --veli-level 3 --double-compile y --kramer y --cjk-vars y --hyperion y --camouflage y --matrix y --zalgo y --no-art
         """
     )
-    # File options
-    parser.add_argument("-i", "--input", help="Đường dẫn file Python cần obfuscate", default=None)
-    parser.add_argument("-o", "--output", help="Đường dẫn file kết quả xuất ra (mặc định: tr0ngx-<filename>)", default=None)
+    # File & Batch options
+    parser.add_argument("-i", "--input", nargs="*", help="Đường dẫn một hoặc nhiều file Python / pattern glob cần obfuscate", default=None)
+    parser.add_argument("-D", "--dir", "--directory", help="Đường dẫn thư mục chứa các file Python cần obfuscate hàng loạt", default=None)
+    parser.add_argument("-r", "--recursive", action="store_true", help="Quét đệ quy tất cả thư mục con khi obfuscate thư mục")
+    parser.add_argument("-o", "--output", help="Đường dẫn file kết quả (nếu 1 file) hoặc thư mục kết quả (nếu nhiều file)", default=None)
+    parser.add_argument("-w", "--workers", "--jobs", "-j", type=int, default=None, help="Số luồng CPU xử lý song song khi obfuscate nhiều file")
     
     # Engine modes
     parser.add_argument("-m", "--mode", type=int, choices=[1, 2, 3], help="Cấp độ làm rối Trongdepzai AST (1: Cơ bản, 2: Nâng cao, 3: Cực đại)", default=None)
@@ -5587,7 +5884,7 @@ VÍ DỤ SỬ DỤNG:
     parser.add_argument("--anti-dump", choices=["y", "n", "Y", "N"], help="Kích hoạt khiên chống memory dump & lọc đối tượng GC (In-Memory Anti-Dump & GC Object Scrubber) (y/n)", default=None)
 
     cli_args, unknown = parser.parse_known_args()
-    is_cli_mode = bool(cli_args.input is not None)
+    is_cli_mode = bool(cli_args.input is not None or cli_args.dir is not None)
 
     if getattr(cli_args, 'debug', False):
         _EngineState.verbose_debug = True
@@ -5601,9 +5898,63 @@ VÍ DỤ SỬ DỤNG:
     if cli_args.no_art or is_cli_mode:
         _EngineState.cli_quiet_mode = True
 
+    targets = []
+    is_batch = False
+    custom_out = cli_args.output
+
+    if is_cli_mode:
+        targets = _resolve_input_files(inputs=cli_args.input, directory=cli_args.dir, recursive=cli_args.recursive)
+        if not targets:
+            _v(" [ERROR] CLI: Không tìm thấy bất kỳ file Python (.py) hợp lệ nào.")
+            sys.exit(1)
+        if len(targets) > 1 or cli_args.dir is not None:
+            is_batch = True
+    else:
+        _v(" [!] TR0NGX FILE SELECTION / CHỌN CHẾ ĐỘ NHẬP:")
+        _v("  1. SINGLE FILE (Mã hóa 1 file .py đơn lẻ)")
+        _v("  2. BATCH FILES / DIRECTORY (Mã hóa hàng loạt nhiều file / thư mục / pattern)")
+        file_mode_choice = _prompt_input(" Choose (1/2, default 1): ").strip()
+        if file_mode_choice == "2":
+            is_batch = True
+            while True:
+                batch_inp = _prompt_input(" ENTER DIRECTORY, GLOB PATTERN OR FILES (vd: src/, *.py, a.py, b.py): ").strip().strip('"').strip("'")
+                rec_inp = _prompt_input(" RECURSIVE SUBDIRECTORIES? (y/n, default n): ").strip().upper()
+                is_rec = (rec_inp == "Y")
+                try:
+                    targets = _resolve_input_files(inputs=batch_inp, directory=batch_inp if os.path.isdir(batch_inp) else None, recursive=is_rec)
+                    if targets:
+                        _v(_gradient_text(f" [i] Đã tìm thấy {len(targets)} file Python để obfuscate hàng loạt.", (0, 240, 255), (140, 80, 255)))
+                        for t_idx, t in enumerate(targets[:10], 1):
+                            _v(f"     {t_idx}. {t['rel']}")
+                        if len(targets) > 10:
+                            _v(f"     ... và {len(targets) - 10} file khác.")
+                        break
+                    else:
+                        _v(" [!] Không tìm thấy file .py nào phù hợp. Vui lòng nhập lại.")
+                except Exception as e:
+                    _v(f" [!] Lỗi tìm file: {e}. Vui lòng nhập lại.")
+            
+            out_dir_inp = _prompt_input(" ENTER DESTINATION OUTPUT DIRECTORY (default: tr0ngx_dist/): ").strip().strip('"').strip("'")
+            custom_out = out_dir_inp if out_dir_inp else "tr0ngx_dist"
+        else:
+            _file = _prompt_input(" ENTER FILE: ").strip().strip('"').strip("'")
+            while True:
+                try:
+                    if not os.path.isfile(_file):
+                        raise FileNotFoundError(f"File not found: {_file}")
+                    with open(_file, "r", encoding="utf-8-sig", errors="replace") as file:
+                        raw_code = file.read().lstrip('\ufeff')
+                    _validate_input_source(raw_code)
+                    ast.parse(raw_code)
+                    targets = [{"src": os.path.abspath(_file), "rel": os.path.basename(_file)}]
+                    break
+                except Exception as e:
+                    _v(f" SYNTAX/SECURITY ERROR: {e}")
+                    _file = _prompt_input(" ENTER FILE AGAIN: ").strip().strip('"').strip("'")
+
     _setup = None
     if not is_cli_mode:
-        _v(" [!] TR0NGX INTERACTIVE SETUP")
+        _v(" [!] TR0NGX CONFIGURATION SETUP")
         _v("  1. QUICK MODE (Mode 2, Compile, Velimatix L2, Kramer, Anti-Debug)")
         _v("  2. CUSTOM MODE (Cấu hình chi tiết từng bước)")
         _setup = _prompt_input(" Choose mode (1/2): ").strip()
@@ -5633,40 +5984,10 @@ VÍ DỤ SỬ DỤNG:
             cli_args.anti_dump = "N"
             cli_args.force_py = "off"
 
-    # Resource capping and output destination
+    # Resource capping and workers
     max_ram = cli_args.max_ram
     max_cores = cli_args.cores
-    custom_out = cli_args.output
-
-    # 1. File input
-    if is_cli_mode:
-        _file = cli_args.input.strip().strip('"').strip("'")
-        if not os.path.isfile(_file):
-            _v(f" CLI ERROR: File not found: {_file}")
-            sys.exit(1)
-        with open(_file, "r", encoding="utf-8-sig", errors="replace") as file:
-            raw_code = file.read().lstrip('\ufeff').lstrip('\ufeff')
-        try:
-            _validate_input_source(raw_code)
-        except Exception as ve:
-            _v(f" [INPUT SECURITY ERROR] {ve}")
-            sys.exit(1)
-    else:
-        _file = _prompt_input(" ENTER FILE: ").strip().strip('"').strip("'")
-        while True:
-            try:
-                with open(_file, "r", encoding="utf-8-sig", errors="replace") as file:
-                    raw_code = file.read().lstrip('\ufeff').lstrip('\ufeff')
-                try:
-                    _validate_input_source(raw_code)
-                    ast.parse(raw_code)
-                except Exception as e:
-                    _v(f" SYNTAX/SECURITY ERROR: {e}")
-                    _file = _prompt_input(" ENTER FILE AGAIN: ").strip().strip('"').strip("'")
-                    continue
-                break
-            except FileNotFoundError:
-                _file = _prompt_input(" ENTER FILE AGAIN (not found): ").strip().strip('"').strip("'")
+    workers = cli_args.workers or max_cores or max(2, min(8, (os.cpu_count() or 4)))
 
     # In-memory scrubbing: overwrite sensitive password in sys.argv to prevent procfs inspection
     for idx, arg in enumerate(sys.argv):
@@ -5718,7 +6039,6 @@ VÍ DỤ SỬ DỤNG:
         double_compile = cli_args.double_compile or ("Y" if is_cli_mode else _prompt_input(" DOUBLE COMPILE (Veli wrap)? (y/n): "))
 
     kramer_wrap_choice = cli_args.kramer or ("N" if is_cli_mode else _prompt_input(" KRAMER OUTER SHIELD (Kyrie Eleison)? (y/n): "))
-
     cjk_choice = cli_args.cjk_vars or ("N" if is_cli_mode else _prompt_input(" CJK CHINESE IDENTIFIERS & PYCOOL DOCSTRINGS? (y/n): "))
 
     # New Obfuscation Modes
@@ -5773,8 +6093,8 @@ VÍ DỤ SỬ DỤNG:
         if core_inp.isdigit():
             max_cores = int(core_inp)
 
-    # Custom Output Path in interactive prompt if not passed
-    if not is_cli_mode and custom_out is None and _setup != "1":
+    # Custom Output Path in interactive prompt if not passed and single file
+    if not is_cli_mode and not is_batch and custom_out is None and _setup != "1":
         out_inp = _prompt_input(" CUSTOM OUTPUT PATH (press Enter for default): ").strip()
         if out_inp:
             custom_out = out_inp
@@ -5802,12 +6122,11 @@ VÍ DỤ SỬ DỤNG:
     max_output_size_bytes = _parse_size_str(cli_args.max_output_size)
     _EngineState.max_output_size = max_output_size_bytes
 
-    # Apply resource capping
     _apply_resource_limits(max_ram, max_cores)
 
     return {
-        "file": _file,
-        "code": raw_code,
+        "targets": targets,
+        "is_batch": is_batch,
         "mode": mode,
         "moreobf": moreobf,
         "antidebug": antidebug,
@@ -5839,13 +6158,15 @@ VÍ DỤ SỬ DỤNG:
         "debug_map": debug_map_arg,
         "max_ram": max_ram,
         "max_cores": max_cores,
+        "workers": workers,
         "custom_out": custom_out
     }
 
 def _reset_global_state():
-    """Reset all global state to prevent cross-contamination between multiple obfuscation runs."""
+    """Reset global state between runs."""
     global _used_names, _DEBUG_MAP, _LOG_ENTRIES, _STAGE_ERRORS
-    _used_names.clear()
+    with _used_names_lock:
+        _used_names.clear()
     _RareChars.pool = None
     BiOpaqueUtils.possible_args = []
     BiOpaqueUtils.possible_functions = []
@@ -5871,167 +6192,117 @@ def _reset_global_state():
     _DEBUG_MAP["renamed_builtins"].clear()
     _DEBUG_MAP["renamed_variables"].clear()
     _DEBUG_MAP["stages"].clear()
+    _DEBUG_MAP["errors"].clear()
 
-# ═══════════════════════════════════════════════════════════════
-def main():
-    # MAIN EXECUTION (CLI + TUI)
-    # ═══════════════════════════════════════════════════════════════
-    _reset_global_state()
-    _show_banner()
-    _cfg = get_args_or_prompt()
-    _file = _cfg["file"]
-    code = _cfg["code"]
-    mode = _cfg["mode"]
-    moreobf = _cfg["moreobf"]
-    antidebug = _cfg["antidebug"]
-    antivm = _cfg.get("antivm", "N")
-    selfmodify = _cfg["selfmodify"]
-    method = _cfg["method"]
-    encryption_password = _cfg.get("password")
-    custom_seed = _cfg.get("seed")
-    max_output_size = _cfg.get("max_output_size")
-    velimatix = _cfg["velimatix"]
-    veli_level = _cfg["veli_level"]
-    double_compile = _cfg["double_compile"]
-    kramer_wrap_choice = _cfg["kramer"]
-    cjk_choice = _cfg["cjk"]
-    matrix_choice = _cfg.get("matrix", "N")
-    emoji_obf_choice = _cfg.get("emoji_obf", "N")
-    homoglyph_choice = _cfg.get("homoglyph", "N")
-    rare_unicode_choice = _cfg.get("rare_unicode", "N")
-    zalgo_choice = _cfg.get("zalgo", "N")
-    whitespace_obf_choice = _cfg.get("whitespace_obf", "N")
-    blank_padding_choice = _cfg.get("blank_padding", "N")
-    hyperion_choice = _cfg.get("hyperion", "N")
-    camouflage_choice = _cfg.get("camouflage", "N")
-    math_opaque_choice = _cfg.get("math_opaque", "N")
-    dyn_strings_choice = _cfg.get("dyn_strings", "N")
-    antidump_choice = _cfg.get("anti_dump", "N")
-    force_py_choice = _cfg["force_py_choice"]
-    forced_py_ver = _cfg["forced_py_ver"]
-    custom_out = _cfg["custom_out"]
-
-    _debug_map_choice = _cfg.get("debug_map")
-
-    _DEBUG_MAP["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    _DEBUG_MAP["source_file"] = os.path.abspath(_file)
-    _DEBUG_MAP["options"] = {
-        "mode": mode,
-        "moreobf": moreobf,
-        "antidebug": antidebug,
-        "antivm": antivm,
-        "selfmodify": selfmodify,
-        "compile": method,
-        "password_protected": bool(encryption_password),
-        "seed": custom_seed,
-        "max_output_size": max_output_size,
-        "velimatix": velimatix,
-        "veli_level": veli_level,
-        "double_compile": double_compile,
-        "kramer": kramer_wrap_choice,
-        "cjk": cjk_choice,
-        "matrix": matrix_choice,
-        "emoji_obf": emoji_obf_choice,
-        "homoglyph": homoglyph_choice,
-        "rare_unicode": rare_unicode_choice,
-        "zalgo": zalgo_choice,
-        "whitespace_obf": whitespace_obf_choice,
-        "blank_padding": blank_padding_choice,
-        "hyperion": hyperion_choice,
-        "camouflage": camouflage_choice,
-        "force_py": forced_py_ver if force_py_choice.upper() == "Y" else "OFF"
-    }
-
-    # Set name generation mode flags & Matrix fusion
-
-    if matrix_choice.upper() == "Y" or (homoglyph_choice.upper() == "Y" and rare_unicode_choice.upper() == "Y"):
-        _EngineState.use_fused_names = True
-        _init_rare_chars()
-        _init_combining_marks()
-    if cjk_choice.upper() == "Y":
-        _EngineState.use_cjk_names = True
-    if homoglyph_choice.upper() == "Y":
-        _EngineState.use_homoglyph_names = True
-    if rare_unicode_choice.upper() == "Y":
-        _EngineState.use_rare_unicode_names = True
-        _init_rare_chars()  # Pre-init the rare char pool
-    if zalgo_choice.upper() == "Y":
-        _EngineState.use_zalgo_marks = True
-        _init_combining_marks()
-    if hyperion_choice.upper() == "Y":
-        _EngineState.use_hyperion = True
-    if camouflage_choice.upper() == "Y":
-        _EngineState.use_camouflage = True
-
-    # Regenerate all runtime AST variable symbols using chosen character set
-    _refresh_runtime_symbols()
-
-    _v(" ═══ STARTING OBFUSCATION ═══")
+def obfuscate_single_target(src_file: str, output_file: str, options: dict, quiet_progress: bool = False) -> dict:
+    """
+    Core transformation engine that executes the entire Tr0ngX pipeline on a single file.
+    Returns metrics dict with status, file sizes, ratio, and timing.
+    """
     start_time = time.time()
+    try:
+        with open(src_file, "r", encoding="utf-8-sig", errors="replace") as f:
+            code = f.read().lstrip('\ufeff')
+        _validate_input_source(code)
+        original_size = len(code.encode('utf-8'))
+    except Exception as e:
+        _log_stage_error("0_read_source_file", e)
+        return {
+            "success": False,
+            "src": src_file,
+            "out": output_file,
+            "original_size": 0,
+            "output_size": 0,
+            "ratio": 0.0,
+            "elapsed": round(time.time() - start_time, 4),
+            "error": str(e)
+        }
 
-    check = 0
+    mode = options["mode"]
+    moreobf = options.get("moreobf", "N")
+    antidebug = options.get("antidebug", "N")
+    antivm = options.get("antivm", "N")
+    selfmodify = options.get("selfmodify", "N")
+    method = options.get("method", "N")
+    encryption_password = options.get("password")
+    custom_seed = options.get("seed")
+    max_output_size = options.get("max_output_size")
+    velimatix = options.get("velimatix", "N")
+    veli_level = options.get("veli_level", 1)
+    double_compile = options.get("double_compile", "N")
+    kramer_wrap_choice = options.get("kramer", "N")
+    cjk_choice = options.get("cjk", "N")
+    matrix_choice = options.get("matrix", "N")
+    emoji_obf_choice = options.get("emoji_obf", "N")
+    homoglyph_choice = options.get("homoglyph", "N")
+    rare_unicode_choice = options.get("rare_unicode", "N")
+    zalgo_choice = options.get("zalgo", "N")
+    whitespace_obf_choice = options.get("whitespace_obf", "N")
+    blank_padding_choice = options.get("blank_padding", "N")
+    hyperion_choice = options.get("hyperion", "N")
+    camouflage_choice = options.get("camouflage", "N")
+    math_opaque_choice = options.get("math_opaque", "N")
+    dyn_strings_choice = options.get("dyn_strings", "N")
+    antidump_choice = options.get("anti_dump", "N")
+    force_py_choice = options.get("force_py_choice", "N")
+    forced_py_ver = options.get("forced_py_ver", "")
+    _debug_map_choice = options.get("debug_map")
 
-    # ═══ Step 0: Hyperion AST & Token Engine (if enabled) ═══
+    # Step 0: Hyperion AST & Token Engine
     if hyperion_choice.upper() == "Y":
         try:
             t0 = time.time()
             sz0 = len(code)
-            _v_step(0, 8, "Hyperion Token & AST Remapping Engine...")
+            if not quiet_progress: _v_step(0, 8, "Hyperion Token & AST Remapping Engine...")
             code = _hyperion_full_transform(code, camouflage=False, shell=False, randlines=False)
-            _v("        - Dynamic Builtin Imports")
-            _v("        - Variable & Import Scope Remapping")
-            _v("        - Math & String Identifier Splitting")
-            _v("        - Dynamic Globals/Locals Aliasing")
             _track_debug_stage("0_hyperion_engine", time.time() - t0, sz0, len(code))
         except Exception as e:
             _log_stage_error("0_hyperion_engine", e)
 
-    # ═══ Step 1: Syntax transform ═══
+    # Step 1: Syntax transform
     try:
         t0 = time.time()
         sz0 = len(code)
-        _v_step(1, 8, "Syntax transformation...")
+        if not quiet_progress: _v_step(1, 8, "Syntax transformation...")
         code = _syntax(code)
         _track_debug_stage("1_syntax_transform", time.time() - t0, sz0, len(code))
     except Exception as e:
         _log_stage_error("1_syntax_transform", e)
 
-    # ═══ Step 2: AST junk injection ═══
+    # Step 2: AST junk injection
     if moreobf.upper() == "Y":
-        _v_step(2, 8, "AST junk injection...")
         try:
             t0 = time.time()
             sz0 = len(code)
-            code = __moreobf(code)
-            check = 5
+            if not quiet_progress: _v_step(2, 8, "AST junk injection...")
+            code = _ast_junk(code)
             _track_debug_stage("2_ast_junk_injection", time.time() - t0, sz0, len(code))
         except Exception as e:
             _log_stage_error("2_ast_junk_injection", e)
-            check = 5
 
-    # ═══ Step 2.5: Mathematical Opaque Predicates (Module B) ═══
+    # Step 2.5: Mathematical Opaque Predicates
     if math_opaque_choice.upper() == "Y":
-        _v_step("2.5", 8, "Mathematical Opaque Predicates (Quadratic Non-Residue mod 7 & Euler invariants)...")
         try:
             t0 = time.time()
             sz0 = len(code)
+            if not quiet_progress: _v_step("2.5", 8, "Mathematical Opaque Predicates (Quadratic Non-Residue mod 7 & Euler invariants)...")
             code = _math_opaque_obf(code)
             _track_debug_stage("2.5_math_opaque_predicates", time.time() - t0, sz0, len(code))
         except Exception as e:
             _log_stage_error("2.5_math_opaque_predicates", e)
 
-    # ═══ Step 2.7: Dynamic Per-Callsite String XOR Encryption (Module C) ═══
+    # Step 2.7: Dynamic Per-Callsite String XOR
     if dyn_strings_choice.upper() == "Y":
-        _v_step("2.7", 8, "Dynamic Per-Callsite String XOR Encryption...")
         try:
             t0 = time.time()
             sz0 = len(code)
-            code = _dyn_strings_obf(code)
+            if not quiet_progress: _v_step("2.7", 8, "Dynamic Per-Callsite String XOR Encryption...")
+            code = _dyn_strings_obf(code, seed=custom_seed)
             _track_debug_stage("2.7_dyn_strings_encryption", time.time() - t0, sz0, len(code))
         except Exception as e:
             _log_stage_error("2.7_dyn_strings_encryption", e)
 
-    # ═══ Step 3: Version check (Forced or Current) ═══
+    # Step 3: Version check header
     target_ver_str = forced_py_ver if (force_py_choice.upper() == "Y" and forced_py_ver) else f"{sys.version_info.major}.{sys.version_info.minor}"
     checkver = f"""import sys
 _target_ver = '{target_ver_str}'
@@ -6074,31 +6345,19 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
 )
 """
 
-    # ═══ Step 4: VELIMATIX ENGINE ═══
+    # Step 4: Velimatix Engine
     if velimatix.upper() == "Y":
-        _v_step(3, 8, f"Velimatix engine (level {veli_level})...")
+        if not quiet_progress: _v_step(3, 8, f"Velimatix engine (level {veli_level})...")
         try:
             t0 = time.time()
             sz0 = len(code)
             code = _velimatix_obf(code, mode=veli_level)
-            _v("        - BiOpaque predicates")
-            _v("        - Call obfuscation")
-            _v("        - Dead code injection")
-            if veli_level >= 2:
-                _v("        - Exception jump flow")
-                _v("        - Import obfuscation")
-                _v("        - Builtin renaming")
-            if veli_level >= 3:
-                _v("        - Match-case control flow")
-                _v("        - Constant mutation (XOR chain)")
-                _v("        - Method cloning")
-                _v("        - String bytewise encoding")
             _track_debug_stage(f"3_velimatix_level_{veli_level}", time.time() - t0, sz0, len(code))
         except Exception as e:
             _log_stage_error(f"3_velimatix_level_{veli_level}", e)
 
-    # ═══ Step 5: Main obfuscation layers ═══
-    _v_step(4, 8, f"Applying {mode}-layer tr0ngx obfuscation...")
+    # Step 5: Main Obfuscation Layers
+    if not quiet_progress: _v_step(4, 8, f"Applying {mode}-layer tr0ngx obfuscation...")
     for i in range(mode):
         try:
             t0 = time.time()
@@ -6107,146 +6366,91 @@ if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
             compile(new_code, "<test_layer>", "exec")
             code = new_code
             _track_debug_stage(f"4_tr0ngx_layer_{i+1}_of_{mode}", time.time() - t0, sz0, len(code))
-            _v(f"        - Layer {i + 1}/{mode} complete")
+            if not quiet_progress: _v(f"        - Layer {i + 1}/{mode} complete")
         except Exception as e:
             _log_stage_error(f"4_tr0ngx_layer_{i+1}_of_{mode}", e)
             break
 
-    # ═══ Step 6: Anti-debug & Anti-Analysis Shield Matrix ═══
+    # Step 6: Anti-Debug, Anti-VM, Anti-Dump, Self-Mod
     if antidebug.upper() == "Y":
-        _v_step(5, 8, "Injecting anti-debug shield...")
+        if not quiet_progress: _v_step(5, 8, "Injecting anti-debug shield...")
         t0 = time.time()
         sz0 = len(code)
         if velimatix.upper() == "Y":
-            _v("        - Adding Velimatix anti-hook layer...")
             code = velimatix_anti_hook + code
         code = anti + code
         _track_debug_stage("5_anti_debug_injection", time.time() - t0, sz0, len(code))
 
-    # ═══ Step 6.2: Anti-VM & Sandbox Detection ═══
     if antivm.upper() == "Y":
-        _v_step("5.2", 8, "Injecting Anti-VM & Sandbox shield...")
+        if not quiet_progress: _v_step("5.2", 8, "Injecting Anti-VM & Sandbox shield...")
         t0 = time.time()
         sz0 = len(code)
         code = _generate_anti_vm_shield() + code
         _track_debug_stage("5.2_anti_vm_injection", time.time() - t0, sz0, len(code))
 
-    # ═══ Step 6.4: In-Memory Anti-Dump & GC Scrubber (Module D) ═══
     if antidump_choice.upper() == "Y":
-        _v_step("5.4", 8, "Injecting In-Memory Anti-Dump & GC Scrubber shield...")
+        if not quiet_progress: _v_step("5.4", 8, "Injecting In-Memory Anti-Dump & GC Scrubber shield...")
         t0 = time.time()
         sz0 = len(code)
         code = _generate_anti_dump_shield() + code
         _track_debug_stage("5.4_anti_dump_shield", time.time() - t0, sz0, len(code))
 
-    # ═══ Step 6.5: Self-modifying ═══
     if selfmodify.upper() == "Y":
-        _v_step("5.5", 8, "Adding self-modifying layer...")
+        if not quiet_progress: _v_step("5.5", 8, "Adding self-modifying layer...")
         t0 = time.time()
         sz0 = len(code)
         code = _generate_self_modify_wrapper() + code
         _track_debug_stage("5.5_self_modify_layer", time.time() - t0, sz0, len(code))
 
-    # ═══ Step 8: Compile or output ═══
+    # Step 8: Packaging & Compilation
     if method.upper() != "Y":
-        _v_step(6, 8, "Building non-compiled output...")
+        if not quiet_progress: _v_step(6, 8, "Building non-compiled output...")
         t0 = time.time()
         sz0 = len(code)
         code = author + var + code
-        if check == 5:
-            try:
-                code = __moreobf(code)
-            except Exception:
-                try:
-                    code = __moreobf(code)
-                except Exception:
-                    pass
-
+        if moreobf.upper() == "Y":
+            try: code = __moreobf(code)
+            except Exception: pass
         if velimatix.upper() == "Y" and veli_level >= 2:
-            _v_step(7, 8, "Velimatix final pass...")
-            try:
-                code = OBF_Spam(code, level=min(veli_level, 2))
-            except Exception:
-                pass
-
+            try: code = OBF_Spam(code, level=min(veli_level, 2))
+            except Exception: pass
         _track_debug_stage("6_non_compiled_packaging", time.time() - t0, sz0, len(code))
-        _v_step(8, 8, "Finalizing...")
     else:
-        _v_step(6, 8, "Multi-layer compilation...")
+        if not quiet_progress: _v_step(6, 8, "Multi-layer compilation...")
         t0 = time.time()
         sz0 = len(code)
-        if check == 5:
-            try:
-                code = __moreobf(code)
-            except Exception:
-                try:
-                    code = __moreobf(code)
-                except Exception:
-                    pass
-
+        if moreobf.upper() == "Y":
+            try: code = __moreobf(code)
+            except Exception: pass
         code = ANTI_PYCDC + code
 
-        # ═══ Double compile path ═══
         if double_compile.upper() == "Y":
-            _v_step(7, 8, "DOUBLE COMPILE (Tr0ngX + Velimatix)...")
+            if not quiet_progress: _v_step(7, 8, "DOUBLE COMPILE (Tr0ngX + Velimatix)...")
             try:
                 code = _double_compile(var + code, target_ver=target_ver_str, password=encryption_password)
-                _v("        - Inner: marshal+XOR×2+zlib×2+bz2+base85")
-                _v("        - Outer: Velimatix obfuscated loader")
-                _v_step(8, 8, "Double compilation complete!")
                 _track_debug_stage("7_double_compile_packaging", time.time() - t0, sz0, len(code))
             except Exception as e:
                 _log_stage_error("7_double_compile_packaging", e)
-                _v(" FALLBACK: Standard compilation...")
                 double_compile = "N"
 
-        # ═══ Standard compile path ═══
         if double_compile.upper() != "Y":
             try:
                 compiled_bytes = marshal.dumps(compile(code, "<tr0ngx>", "exec"))
             except SyntaxError as e:
-                _v(f" COMPILE ERROR: {e}")
-                _v(" FALLBACK: Non-compiled mode")
+                _log_stage_error("7_compile_syntax_error", e)
                 code = var + code
-                _dir_n, _base_n = os.path.split(_file)
-                output_file = os.path.join(_dir_n, "tr0ngx-" + _base_n) if _dir_n else ("tr0ngx-" + _base_n)
-                _safe_atomic_write(output_file, str(code), input_file=_file)
-                elapsed = time.time() - start_time
-                _v(f" [SAVED] {output_file} ({elapsed:.2f}s)")
-                sys.exit()
+                _safe_atomic_write(output_file, str(code), input_file=src_file)
+                return {"success": True, "src": src_file, "out": output_file, "original_size": original_size, "output_size": len(code.encode('utf-8')), "ratio": 1.0, "elapsed": round(time.time()-start_time, 4), "error": None}
 
-            if encryption_password:
-                _v(" [6.5/8] Encrypting with Argon2id / PBKDF2 authenticated AEAD...")
-            else:
-                _v(" [6.5/8] Encrypting with authenticated multi-layer AEAD (Obfuscation-Only)...")
             encrypted_data, _salt = _multi_layer_encrypt(compiled_bytes, password=encryption_password)
-
             l = len(encrypted_data)
-            parts = []
             num_parts = 8
-            for i in range(num_parts):
-                start = (l * i) // num_parts
-                end = (l * (i + 1)) // num_parts
-                parts.append(repr(encrypted_data[start:end]))
-
-            _f = "for"
-            _i = "in"
-            _t = rd()
-
+            parts = [repr(encrypted_data[(l*k)//num_parts : (l*(k+1))//num_parts]) for k in range(num_parts)]
             part_vars = [rd() for _ in range(num_parts)]
-            part_assignments = '\n'.join(
-                f"{part_vars[i]}  {'  ' * 500}={parts[i]}" for i in range(num_parts)
-            )
+            part_assignments = '\n'.join(f"{part_vars[k]}  {'  '*500}={parts[k]}" for k in range(num_parts))
             part_concat = '+'.join(part_vars)
 
-            _v_step(7, 8, "Building final authenticated payload...")
-
-            _en_var = rd()
-            _july_var = rd()
-            _birth_var = rd()
-            _b85_var = rd()
-            _exec_var = rd()
-
+            _en_var, _july_var, _birth_var, _b85_var = rd(), rd(), rd(), rd()
             if encryption_password:
                 _auth_dec_section = f"""
 def _auth_decrypt(raw_bytes, pwd_str):
@@ -6315,9 +6519,7 @@ def _auth_decrypt(raw_bytes):
                 _auth_dec_call = "_auth_decrypt(_step3)"
 
             code = author + var + f"""
-
 import hashlib, hmac, platform as _platform, sys, os
-
 sys.dont_write_bytecode = True
 _target_ver = '{target_ver_str}'
 _curr_ver = sys.version.split()[0]
@@ -6347,98 +6549,62 @@ try:
 except Exception as _e:
     raise _e
 """
-
             if velimatix.upper() == "Y" and veli_level >= 2:
-                _v_step(8, 8, "Velimatix final pass on loader...")
-                try:
-                    code = OBF_Spam(code, level=1)
-                except Exception:
-                    pass
-            else:
-                _v_step(8, 8, "Finalizing...")
+                try: code = OBF_Spam(code, level=1)
+                except Exception: pass
             _track_debug_stage("7_standard_compile_packaging", time.time() - t0, sz0, len(code))
 
-    # ═══════════════════════════════════════════════════════════════
-    # ═══════════════════════════════════════════════════════════════
-    # SAVE OUTPUT & OUTER SHIELD MATRIX FUSION
-    # ═══════════════════════════════════════════════════════════════
-
+    # Outer Shield Matrix & Camouflage
     multi_shield_count = sum(1 for c in [kramer_wrap_choice, emoji_obf_choice, whitespace_obf_choice] if c.upper() == "Y")
     is_fused_shield = (matrix_choice.upper() == "Y") or (multi_shield_count >= 2)
 
-    # ═══ Intermediate Camouflage Layer (if enabled) ═══
     if camouflage_choice.upper() == "Y":
-        _v(" [12] Applying Hyperion Scientific Class Camouflage...")
+        if not quiet_progress: _v(" [12] Applying Hyperion Scientific Class Camouflage...")
         try:
             t0 = time.time()
             sz0 = len(code)
             code = _hyperion_camouflage(code)
-            _v("        - Fake Simulation Class Generation")
-            _v("        - Polymorphic Property & Memory Emulation")
-            _v("        - Dynamic Payload Reconstructor")
             _track_debug_stage("12_hyperion_camouflage", time.time() - t0, sz0, len(code))
         except Exception as e:
             _log_stage_error("12_hyperion_camouflage", e)
 
-    # ═══ Outer Dynamic Shield Matrix ═══
     if is_fused_shield:
-        _v(" [9/9] Applying Fused Matrix Shield (Kyrie + Emoji + Whitespace Symbiotic)...")
+        if not quiet_progress: _v(" [9/9] Applying Fused Matrix Shield (Kyrie + Emoji + Whitespace Symbiotic)...")
         try:
             t0 = time.time()
             sz0 = len(code)
             code = _fused_matrix_wrap(code)
-            _v("        - 3-Track Interleaved Symbiotic Loader (Zero Bloat)")
-            _v("        - Kyrie Caesar + Emoji Stream + Whitespace Bitfield Matrix")
-            _v("        - Fast In-Memory Reconstruction Pipeline")
             _track_debug_stage("8_fused_matrix_shield", time.time() - t0, sz0, len(code))
         except Exception as e:
             _log_stage_error("8_fused_matrix_shield", e)
     else:
-        # Single outer shield path
         if kramer_wrap_choice.upper() == "Y":
-            _v(" [9/9] Applying Kramer Outer Shield (Kyrie Eleison)...")
+            if not quiet_progress: _v(" [9/9] Applying Kramer Outer Shield (Kyrie Eleison)...")
             try:
                 t0 = time.time()
                 sz0 = len(code)
                 code = _kramer_wrap(code)
-                _v("        - Kyrie Eleison Caesar Index Shift")
-                _v("        - Dynamic Obfuscated Kramer Class Wrapper")
-                _v("        - Anti-Tamper String Inspection")
                 _track_debug_stage("8_kramer_outer_shield", time.time() - t0, sz0, len(code))
             except Exception as e:
                 _log_stage_error("8_kramer_outer_shield", e)
 
-        # ═══ Emoji Obfuscation Layer ═══
         if emoji_obf_choice.upper() == "Y":
-            _v(" [10] Applying Emoji Obfuscation (U+1F400 Animal Block)...")
             try:
                 t0 = time.time()
                 sz0 = len(code)
-                if method.upper() == "Y":
-                    code = _emoji_encode_v2(code)
-                else:
-                    code = _emoji_encode(code)
-                _v("        - Code -> Emoji Sequence Encoder")
-                _v("        - Compact Self-Decoding Loader")
+                code = _emoji_encode_v2(code) if method.upper() == "Y" else _emoji_encode(code)
                 _track_debug_stage("9_emoji_obfuscation", time.time() - t0, sz0, len(code))
             except Exception as e:
-                _v(f" WARNING: Emoji encoding error: {e}")
+                _log_stage_error("9_emoji_obfuscation", e)
 
-        # ═══ Whitespace Obfuscation Layer ═══
         if whitespace_obf_choice.upper() == "Y":
-            _v(" [11] Applying Whitespace Obfuscation (invisible code)...")
             try:
                 t0 = time.time()
                 sz0 = len(code)
-                if method.upper() == "Y":
-                    code = _whitespace_encode_v2(code)
-                else:
-                    code = _whitespace_encode(code)
-                _v("        - Code -> Space/Tab Binary Encoding")
-                _v("        - Self-Decoding Whitespace Loader")
+                code = _whitespace_encode_v2(code) if method.upper() == "Y" else _whitespace_encode(code)
                 _track_debug_stage("10_whitespace_obfuscation", time.time() - t0, sz0, len(code))
             except Exception as e:
-                _v(f" WARNING: Whitespace encoding error: {e}")
+                _log_stage_error("10_whitespace_obfuscation", e)
 
     _blank_pad = ("\n" * 300) if blank_padding_choice.upper() == "Y" else ""
     if zalgo_choice.upper() == "Y":
@@ -6448,96 +6614,223 @@ except Exception as _e:
     else:
         code = _gen_tr0ngx_header() + "\n" + _blank_pad + code
 
+    # Write output atomically
+    _safe_atomic_write(output_file, str(code), input_file=src_file)
+    elapsed = time.time() - start_time
+    file_size = os.path.getsize(output_file)
+    ratio = file_size / original_size if original_size > 0 else 0
+
+    if max_output_size and file_size > max_output_size:
+        if os.path.isfile(output_file):
+            try: os.remove(output_file)
+            except Exception: pass
+        raise ValueError(f"Output size ({file_size:,} B) exceeded limit ({max_output_size:,} B)")
+
+    if _debug_map_choice is not None:
+        dbg_map_file = (os.path.splitext(output_file)[0] + ".debug.json") if _debug_map_choice == "AUTO" else _debug_map_choice
+        try:
+            import json
+            dbg_map_file = _validate_and_sanitize_output_path(dbg_map_file, input_file=src_file)
+            _safe_atomic_write(dbg_map_file, json.dumps(_DEBUG_MAP, indent=2, ensure_ascii=False), input_file=src_file)
+        except Exception as de:
+            _log_stage_error("debug_map_export", de)
+
+    return {
+        "success": True,
+        "src": src_file,
+        "out": output_file,
+        "original_size": original_size,
+        "output_size": file_size,
+        "ratio": ratio,
+        "elapsed": round(elapsed, 4),
+        "error": None
+    }
+
+def run_batch_obfuscation(targets: list, custom_out: str, options: dict):
+    """
+    Executes multi-threaded parallel batch obfuscation for multiple target files.
+    """
+    start_batch = time.time()
+    total_files = len(targets)
+    workers = options.get("workers") or max(2, min(8, os.cpu_count() or 4))
+    
+    # Destination directory resolution
     if custom_out:
-        output_file = custom_out.strip().strip('"').strip("'")
+        out_dir = custom_out.strip().strip('"').strip("'")
     else:
-        _dir_n, _base_n = os.path.split(_file)
-        output_file = os.path.join(_dir_n, "tr0ngx-" + _base_n) if _dir_n else ("tr0ngx-" + _base_n)
+        first_dir = os.path.dirname(targets[0]["src"]) or "."
+        out_dir = os.path.join(first_dir, "tr0ngx_dist")
+    
+    os.makedirs(out_dir, exist_ok=True)
+    
+    _v(_gradient_text(" ══════════════════════════════════════════════════════════════════════════════", (80, 180, 255), (200, 80, 255)))
+    _v(f"  [TR0NGX BATCH ENGINE] Starting parallel batch obfuscation ({total_files} files, {workers} workers)")
+    _v(f"  Destination Dir : {os.path.abspath(out_dir)}")
+    _v(_gradient_text(" ══════════════════════════════════════════════════════════════════════════════", (80, 180, 255), (200, 80, 255)))
 
-    try:
-        _safe_atomic_write(output_file, str(code), input_file=_file)
+    results = []
+    completed_lock = threading.Lock()
+    completed_count = 0
 
-        elapsed = time.time() - start_time
-        file_size = os.path.getsize(output_file)
-        original_size = os.path.getsize(_file)
-        ratio = file_size / original_size if original_size > 0 else 0
+    def _worker_task(t_info):
+        nonlocal completed_count
+        src = t_info["src"]
+        rel = t_info["rel"]
+        dest = os.path.join(out_dir, rel)
+        dest_dir = os.path.dirname(dest)
+        if dest_dir:
+            os.makedirs(dest_dir, exist_ok=True)
 
-        # Enforce maximum output size limit (DoS prevention)
-        if max_output_size and file_size > max_output_size:
-            err_msg = f" [ERROR] Output size ({file_size:,} bytes) exceeded maximum limit ({max_output_size:,} bytes). Aborting."
-            _v(_gradient_text(err_msg, (255, 40, 40), (255, 120, 40)))
-            if os.path.isfile(output_file):
-                try:
-                    os.remove(output_file)
-                except Exception:
-                    pass
-            sys.exit(1)
+        res = obfuscate_single_target(src, dest, options, quiet_progress=True)
+        with completed_lock:
+            completed_count += 1
+            cur = completed_count
+        
+        status_tag = "\033[92m[OK]\033[0m" if res["success"] else "\033[91m[FAIL]\033[0m"
+        rel_display = rel if len(rel) <= 35 else ("..." + rel[-32:])
+        if res["success"]:
+            _v(f"  [{cur:>{len(str(total_files))}}/{total_files}] {status_tag} {rel_display:<35} -> {res['output_size']:>10,} B ({res['ratio']:>5.1f}x | {res['elapsed']:>5.2f}s)")
+        else:
+            _v(f"  [{cur:>{len(str(total_files))}}/{total_files}] {status_tag} {rel_display:<35} -> ERROR: {res['error']}")
+        return res
 
-        # Warn if output is excessively large
-        _SIZE_WARN_MB = 50
-        if file_size > _SIZE_WARN_MB * 1024 * 1024:
-            warn_str = f" WARNING: Output is {file_size / (1024*1024):.1f} MB (>{_SIZE_WARN_MB}MB). Consider using lower mode or fewer layers."
-            tip_str = f"   Tip: Mode 2 + compile + kramer gives good protection with much smaller output."
-            _v(_gradient_text(warn_str, (255, 45, 45), (255, 195, 20)))
-            _v(_gradient_text(tip_str, (255, 95, 25), (255, 220, 45)))
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=min(workers, total_files)) as executor:
+        futures = [executor.submit(_worker_task, t) for t in targets]
+        for f in as_completed(futures):
+            results.append(f.result())
 
-        _DEBUG_MAP["output_file"] = os.path.abspath(output_file)
-        _DEBUG_MAP["original_size_bytes"] = original_size
-        _DEBUG_MAP["output_size_bytes"] = file_size
-        _DEBUG_MAP["expansion_ratio"] = round(ratio, 2)
-        _DEBUG_MAP["total_time_seconds"] = round(elapsed, 4)
+    total_batch_time = time.time() - start_batch
+    success_count = sum(1 for r in results if r["success"])
+    fail_count = total_files - success_count
+    total_in_bytes = sum(r["original_size"] for r in results)
+    total_out_bytes = sum(r["output_size"] for r in results if r["success"])
+    overall_ratio = (total_out_bytes / total_in_bytes) if total_in_bytes > 0 else 0
 
-        # ── Write Debug Map JSON if requested ──
-        if _debug_map_choice is not None:
-            if _debug_map_choice == "AUTO":
-                dbg_map_file = os.path.splitext(output_file)[0] + ".debug.json"
+    summary_lines = [
+        f"Total Files Processed : {total_files}",
+        f"Successful            : {success_count} / {total_files} ({success_count/total_files*100:.1f}%)",
+        f"Failed                : {fail_count}",
+        f"Total Original Size   : {total_in_bytes:,} bytes",
+        f"Total Obfuscated Size : {total_out_bytes:,} bytes ({overall_ratio:.1f}x expansion)",
+        f"Total Elapsed Time    : {total_batch_time:.2f}s (Avg: {total_batch_time/total_files:.2f}s/file)",
+        f"Output Destination    : {os.path.abspath(out_dir)}"
+    ]
+    summary_text = "\n".join(summary_lines)
+
+    _v(_gradient_text(" ══════════════════════ BATCH OBFUSCATION SUMMARY ══════════════════════", (85, 130, 255), (190, 85, 255)))
+    if _EngineState.cli_quiet_mode:
+        _v(summary_text)
+    else:
+        try:
+            _boxed = Box.DoubleCube(summary_text)
+            _raw_print(Colorate.Diagonal(Colors.StaticMIX((Col.cyan, Col.purple)), _boxed))
+        except Exception:
+            _v(summary_text)
+    _v(_gradient_text(" ═══════════════════════════════════════════════════════════════════════", (85, 130, 255), (190, 85, 255)))
+    _export_log_file()
+    _v(" BATCH OBFUSCATION COMPLETE!")
+    if fail_count > 0 and _EngineState.strict_mode:
+        sys.exit(1)
+    return results
+
+def main():
+    # ═══════════════════════════════════════════════════════════════
+    # MAIN EXECUTION (CLI + TUI DISPATCHER)
+    # ═══════════════════════════════════════════════════════════════
+    _reset_global_state()
+    _show_banner()
+    _cfg = get_args_or_prompt()
+    targets = _cfg["targets"]
+    is_batch = _cfg["is_batch"]
+    custom_out = _cfg["custom_out"]
+
+    matrix_choice = _cfg.get("matrix", "N")
+    homoglyph_choice = _cfg.get("homoglyph", "N")
+    rare_unicode_choice = _cfg.get("rare_unicode", "N")
+    cjk_choice = _cfg.get("cjk", "N")
+    zalgo_choice = _cfg.get("zalgo", "N")
+    hyperion_choice = _cfg.get("hyperion", "N")
+    camouflage_choice = _cfg.get("camouflage", "N")
+
+    # Set name generation mode flags & Matrix fusion
+    if matrix_choice.upper() == "Y" or (homoglyph_choice.upper() == "Y" and rare_unicode_choice.upper() == "Y"):
+        _EngineState.use_fused_names = True
+        _init_rare_chars()
+        _init_combining_marks()
+    if cjk_choice.upper() == "Y":
+        _EngineState.use_cjk_names = True
+    if homoglyph_choice.upper() == "Y":
+        _EngineState.use_homoglyph_names = True
+    if rare_unicode_choice.upper() == "Y":
+        _EngineState.use_rare_unicode_names = True
+        _init_rare_chars()
+    if zalgo_choice.upper() == "Y":
+        _EngineState.use_zalgo_marks = True
+        _init_combining_marks()
+    if hyperion_choice.upper() == "Y":
+        _EngineState.use_hyperion = True
+    if camouflage_choice.upper() == "Y":
+        _EngineState.use_camouflage = True
+
+    _refresh_runtime_symbols()
+
+    # Dispatch to batch runner if multiple files, or single file pipeline if 1 file
+    if is_batch or len(targets) > 1:
+        run_batch_obfuscation(targets, custom_out, _cfg)
+    else:
+        src_target = targets[0]["src"]
+        if custom_out:
+            if os.path.isdir(custom_out) or custom_out.endswith("/") or custom_out.endswith("\\"):
+                os.makedirs(custom_out, exist_ok=True)
+                out_target = os.path.join(custom_out, os.path.basename(src_target))
             else:
-                dbg_map_file = _debug_map_choice.strip().strip('"').strip("'")
-            try:
-                import json
-                dbg_map_file = _validate_and_sanitize_output_path(dbg_map_file, input_file=_file)
-                _safe_atomic_write(dbg_map_file, json.dumps(_DEBUG_MAP, indent=2, ensure_ascii=False), input_file=_file)
-                _v(f" [DEBUG MAP] {dbg_map_file}")
-            except Exception as de:
-                _v(f" WARNING: Debug map export failed: {de}")
+                out_target = custom_out.strip().strip('"').strip("'")
+        else:
+            _dir_n, _base_n = os.path.split(src_target)
+            out_target = os.path.join(_dir_n, "tr0ngx-" + _base_n) if _dir_n else ("tr0ngx-" + _base_n)
 
-        # New modes summary
+        _v(" ═══ STARTING OBFUSCATION ═══")
+        res = obfuscate_single_target(src_target, out_target, _cfg, quiet_progress=False)
+        if not res["success"]:
+            _v(f" [ERROR] Obfuscation failed: {res['error']}")
+            if _EngineState.strict_mode:
+                sys.exit(1)
+            return
+
+        original_size = res["original_size"]
+        file_size = res["output_size"]
+        ratio = res["ratio"]
+        elapsed = res["elapsed"]
+        output_file = res["out"]
+
         _new_modes = []
-        if is_fused_shield:
+        multi_shield_count = sum(1 for c in [_cfg.get("kramer","N"), _cfg.get("emoji_obf","N"), _cfg.get("whitespace_obf","N")] if c.upper() == "Y")
+        if (matrix_choice.upper() == "Y") or (multi_shield_count >= 2):
             _new_modes.append("MATRIX-FUSED (3-Track Symbiotic)")
         else:
-            if emoji_obf_choice.upper() == "Y":
-                _new_modes.append("EMOJI")
-            if whitespace_obf_choice.upper() == "Y":
-                _new_modes.append("WHITESPACE")
+            if _cfg.get("emoji_obf", "N").upper() == "Y": _new_modes.append("EMOJI")
+            if _cfg.get("whitespace_obf", "N").upper() == "Y": _new_modes.append("WHITESPACE")
         if _EngineState.use_fused_names:
             _new_modes.append("HYBRID-VARS")
         else:
-            if homoglyph_choice.upper() == "Y":
-                _new_modes.append("HOMOGLYPH")
-            if rare_unicode_choice.upper() == "Y":
-                _new_modes.append("RARE-UNI")
-            if zalgo_choice.upper() == "Y":
-                _new_modes.append("ZALGO-MARKS (Z͑͗͑͗... Diacritics)")
-        if hyperion_choice.upper() == "Y":
-            _new_modes.append("HYPERION-ENGINE")
-        if camouflage_choice.upper() == "Y":
-            _new_modes.append("HYPERION-CAMOUFLAGE")
-        if math_opaque_choice.upper() == "Y":
-            _new_modes.append("MATH-OPAQUE (Quadratic/Euler Invariants)")
-        if dyn_strings_choice.upper() == "Y":
-            _new_modes.append("DYN-STRINGS (Per-Callsite XOR)")
-        if antidump_choice.upper() == "Y":
-            _new_modes.append("ANTI-DUMP (GC Scrubber)")
+            if homoglyph_choice.upper() == "Y": _new_modes.append("HOMOGLYPH")
+            if rare_unicode_choice.upper() == "Y": _new_modes.append("RARE-UNI")
+            if zalgo_choice.upper() == "Y": _new_modes.append("ZALGO-MARKS (Z͑͗͑͗... Diacritics)")
+        if hyperion_choice.upper() == "Y": _new_modes.append("HYPERION-ENGINE")
+        if camouflage_choice.upper() == "Y": _new_modes.append("HYPERION-CAMOUFLAGE")
+        if _cfg.get("math_opaque", "N").upper() == "Y": _new_modes.append("MATH-OPAQUE (Quadratic/Euler Invariants)")
+        if _cfg.get("dyn_strings", "N").upper() == "Y": _new_modes.append("DYN-STRINGS (Per-Callsite XOR)")
+        if _cfg.get("anti_dump", "N").upper() == "Y": _new_modes.append("ANTI-DUMP (GC Scrubber)")
 
         _summary_lines = [
             f"File Saved   : {output_file}",
             f"Original Size: {original_size:,} bytes",
             f"Output Size  : {file_size:,} bytes ({ratio:.1f}x)",
             f"Time Taken   : {elapsed:.2f}s",
-            f"Mode         : {mode} | Veli: {velimatix.upper()}{f'(L{veli_level})' if velimatix.upper()=='Y' else ''}",
-            f"Compile      : {method.upper()} | Double: {double_compile.upper() if method.upper()=='Y' else 'N'}",
-            f"Protections  : Anti-Debug={antidebug.upper()} | Anti-VM={antivm.upper()} | Anti-Dump={antidump_choice.upper()} | Self-Mod={selfmodify.upper()} | Kramer={kramer_wrap_choice.upper()}"
+            f"Mode         : {_cfg['mode']} | Veli: {_cfg['velimatix'].upper()}{f'(L{_cfg.get("veli_level", 1)})' if _cfg['velimatix'].upper()=='Y' else ''}",
+            f"Compile      : {_cfg['method'].upper()} | Double: {_cfg['double_compile'].upper() if _cfg['method'].upper()=='Y' else 'N'}",
+            f"Protections  : Anti-Debug={_cfg['antidebug'].upper()} | Anti-VM={_cfg['antivm'].upper()} | Anti-Dump={_cfg['anti_dump'].upper()} | Self-Mod={_cfg['selfmodify'].upper()} | Kramer={_cfg['kramer'].upper()}"
         ]
         if _new_modes:
             _summary_lines.append(f"Layers       : {' + '.join(_new_modes)}")
@@ -6558,8 +6851,6 @@ except Exception as _e:
             _print_profile_waterfall(elapsed, original_size, file_size)
         _export_log_file()
         _v(" OBFUSCATION COMPLETE!")
-    except Exception as e:
-        _v(f" ERROR SAVING: {e}")
 
 if __name__ == "__main__":
     main()
