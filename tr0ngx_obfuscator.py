@@ -170,6 +170,7 @@ __import__('sys').setrecursionlimit(15000)
 
 _used_names = set()
 _used_names_lock = threading.Lock()
+_obf_execution_lock = threading.Lock()
 
 def _rd():
     alphabet = string.ascii_lowercase
@@ -270,10 +271,21 @@ def _gen_mixed_name():
             _used_names.add(name)
             return name
 
-_FORBIDDEN_SYSTEM_PREFIXES = [
-    '/etc', '/usr', '/bin', '/sbin', '/lib', '/lib64', '/boot', '/root', '/dev', '/proc', '/sys',
-    'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)', 'C:\\Windows\\System32'
-]
+def _get_forbidden_system_prefixes():
+    prefixes = ['/etc', '/usr', '/bin', '/sbin', '/lib', '/lib64', '/boot', '/root', '/dev', '/proc', '/sys']
+    if os.name == 'nt':
+        sys_root = os.getenv('SystemRoot', 'C:\\Windows')
+        prefixes.extend([
+            sys_root,
+            os.path.join(sys_root, 'System32'),
+            os.getenv('ProgramFiles', 'C:\\Program Files'),
+            os.getenv('ProgramFiles(x86)', 'C:\\Program Files (x86)'),
+            os.getenv('ProgramData', 'C:\\ProgramData'),
+            'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'
+        ])
+    return [os.path.normpath(p).lower() for p in prefixes]
+
+_FORBIDDEN_SYSTEM_PREFIXES = _get_forbidden_system_prefixes()
 
 def _validate_and_sanitize_output_path(filepath: str, input_file: str = None) -> str:
     """Strictly canonicalize and validate output paths to prevent arbitrary path traversal, system directory clobbering, and dangerous symlink attacks (TRX-AST-401/402)."""
@@ -3679,7 +3691,7 @@ def _syntax(x):
                     continue
                 ten = ast.Try(
                     body=[
-                        ast.parse(f"{_eval}('0/0')").body[0],
+                        ast.parse("0/0").body[0],
                         ast.parse(f"""if "ngocuyen" == "deptrai":{rd()},{rd()},{rd()},{rd()},{rd()}\nelse:pass""").body[0]
                     ],
                     handlers=[
@@ -3697,7 +3709,7 @@ def _syntax(x):
 
     def z(statement):
         return ast.Try(
-            body=[ast.parse(f"{_eval}('0/0')").body[0]],
+            body=[ast.parse("0/0").body[0]],
             handlers=[
                 ast.ExceptHandler(
                     type=ast.Name(id='ZeroDivisionError', ctx=ast.Load()),
@@ -4055,8 +4067,8 @@ globals().update({v_dict})
 try:
     {v_fnt} = getattr({v_mod3}, "FunctionType")
     {v_fnt}({v_dict}[{v_k_ve!r}]({v_dict}[{v_k_li!r}]({v_dict}[{v_k_matix!r}]({b!r}))), globals())()
-except Exception:
-    pass
+except Exception as _e:
+    raise _e
 """
 
 
@@ -6386,6 +6398,10 @@ def obfuscate_single_target(src_file: str, output_file: str, options: dict, quie
     Core transformation engine that executes the entire Tr0ngX pipeline on a single file.
     Returns metrics dict with status, file sizes, ratio, and timing.
     """
+    with _obf_execution_lock:
+        return _obfuscate_single_target_core(src_file, output_file, options, quiet_progress=quiet_progress)
+
+def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict, quiet_progress: bool = False) -> dict:
     start_time = time.time()
     try:
         with open(src_file, "r", encoding="utf-8-sig", errors="replace") as f:
