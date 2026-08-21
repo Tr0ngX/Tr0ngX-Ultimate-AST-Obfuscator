@@ -22,6 +22,9 @@ All AI agents operating on this repository MUST strictly abide by the following 
 4. **Git Discipline**:
    - Remove scratch or temporary test output files (e.g. `test_*.py` generated during testing) before committing.
    - Commit changes with clear, descriptive messages and push directly to `origin main`.
+5. **Testing Concurrency Rule (Strict Prohibition)**:
+   - **NEVER execute multi-threaded test harnesses** (e.g. `python tests/run_all_tests.py -w ...` or parallel worker jobs) WITHOUT EXPLICIT PERMISSION/COMMAND FROM THE USER.
+   - All default test runs, validation, and self-testing MUST run in single-thread / single-process mode (`-w 1` or individual standalone target scripts) to avoid system overload and resource starvation.
 
 ---
 
@@ -125,17 +128,23 @@ graph TD
   3. Invisible Space/Tab Bitfield Matrix.
 - Uses a deterministic Linear Congruential Generator (LCG) PRNG state to interleave and reconstruct tracks in memory with zero file-size bloat.
 
+### 4.5 Polymorphic VM Virtualization Engine (`--vm-obf`, `--vm-level`)
+- **Virtual CPU & Polymorphic ISA**: Compiles AST statement chunks into encrypted bytecode blocks (`marshal` + rolling XOR + Base85), executed by a lightweight runtime virtual interpreter.
+- **Randomized Opcode Matrix**: Opcode byte assignments (`V_EXEC`, `V_HALT`, `V_NOP`, `V_TRAP`, `V_SCRUB`) are generated fresh per build across a 256-value space.
+- **Visual Camouflage Integration**: VM registers, program counters, data pools, and dispatchers utilize the repository's hostile identifier matrix (Zalgo, CJK, Homoglyph, Rare Unicode, Invisible).
+- **Anti-Analysis Trap Network**: Level 2+ injects dead traps on unassigned opcode bytes (`os._exit(1)`) and rolling NOP sequences. Level 3 injects decoy encrypted chunks and aggressive GC zeroing.
+
 ---
 
 ## 5. Verification & Testing Protocol
 
 Before committing any modifications:
 ```bash
-# 1. Run full regression test matrix (Multi-threaded across CPU workers)
-python tests/run_all_tests.py -w 6
+# 1. Run single-thread regression verification (DO NOT USE -w multi-threading without user permission)
+python tests/test_01_core_features.py
 
-# 2. Run complex challenge paradigm test
-python tr0ngx_obfuscator.py -i complex_target.py -o test_full_matrix.py -m 3 --moreobf y --antidebug y --selfmod y --velimatix y --veli-level 3 --compile y --double-compile y --kramer y --hyperion y --camouflage y --zalgo y --matrix y --no-art
+# 2. Run complex challenge paradigm test in single-thread mode
+python tr0ngx_obfuscator.py -i tests/test_10_complex_realworld.py -o test_full_matrix.py -m 2 --compile y --double-compile y --velimatix y --veli-level 2 --vm-obf y --vm-level 3 --matrix y --camouflage y --math-opaque y --dyn-strings y --no-art
 
 # 3. Verify execution of obfuscated target
 python test_full_matrix.py
