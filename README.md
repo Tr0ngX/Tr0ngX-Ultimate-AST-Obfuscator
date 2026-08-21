@@ -150,7 +150,7 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `-m`, `--mode` | Obfuscation complexity level | `1`, `2`, `3` |
 | `--moreobf` | Extra string & integer mutation pass | `y` / `n` |
 | `--antidebug` | Inject multi-vector Anti-Debug watchdog shield | `y` / `n` |
-| `--antivm` | Inject Anti-VM & Automated Sandbox Detection matrix (CPU, screen metrics, drivers, registry) | `y` / `n` |
+| `--antivm` | Inject Anti-VM, Automated Sandbox & Virtual Network Adapter Detection matrix (MAC OUI, virtual NICs, SCSI disks, drivers, registry) | `y` / `n` |
 | `--anti-dump` | Inject in-memory anti-dump shield, GC object scrubber, and code metadata neutralizer | `y` / `n` |
 | `--selfmod` | Inject self-modifying code & anti-tamper layer | `y` / `n` |
 | `--math-opaque` | Inject number-theoretic mathematical opaque predicates (Quadratic Non-Residues mod 7, Euler invariants) | `y` / `n` |
@@ -174,7 +174,7 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--zalgo`, `-z` | Enable Extreme Zalgo Combining Marks Shield (Heavy Diacritics Stacking - Z͑͗͑͗...) | `y` / `n` |
 | `--hyperion` | Enable Full Hyperion Engine (Builtins remapping + token variable remapping + math/str obfuscation + chunk shell) | `y` / `n` |
 | `--camouflage`, `--camo` | Enable Hyperion Camouflage Layer (Fake Scientific/Algorithmic Class simulation) | `y` / `n` |
-| `--force-py` | Target specific Python version check (`off` to disable) | `3.10`, `3.11`, `3.12`, etc. |
+| `--force-py` | Multi-vector anti-spoof Python runtime & opcode architecture lock (`off` to disable) | `3.10`, `3.11`, `3.12`, `3.14`, etc. |
 | `--max-ram` | Capping maximum RAM consumption (in MB) | e.g. `2048` |
 | `--cores` | Capping maximum CPU cores used | e.g. `2`, `4` |
 | `--debug-map` | Export detailed JSON rename mapping & stage metrics | `AUTO` or `<path>` |

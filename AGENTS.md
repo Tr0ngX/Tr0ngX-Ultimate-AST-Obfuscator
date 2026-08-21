@@ -61,7 +61,7 @@ graph TD
 | `-m`, `--mode` | Core AST | AST obfuscation complexity level | `1`, `2`, `3` |
 | `--moreobf` | Core AST | Inject extra AST dead code and try-except decoy blocks | `y` / `n` |
 | `--antidebug` | Protection | Inject anti-debugging watchdog daemon, Win32 PEB/remote debug checks, and hook blockers | `y` / `n` |
-| `--antivm` | Protection | Inject Anti-VM & Automated Sandbox Detection matrix (CPU, screen metrics, drivers, registry) | `y` / `n` |
+| `--antivm` | Protection | Inject Anti-VM, Automated Sandbox & Virtual Network Adapter Detection matrix (MAC OUI, virtual NICs, SCSI disks, drivers, registry) | `y` / `n` |
 | `--anti-dump` | Protection | Inject in-memory anti-dump shield, GC object scrubber, and code metadata neutralizer | `y` / `n` |
 | `--selfmod` | Protection | Inject runtime signature mutating self-modification layer | `y` / `n` |
 | `--math-opaque` | Core AST | Inject number-theoretic mathematical opaque predicates (Quadratic Non-Residues mod 7, Euler invariants) | `y` / `n` |
@@ -85,7 +85,7 @@ graph TD
 | `--zalgo`, `-z` | Glitch Shield | Enable Extreme Zalgo Combining Marks Shield (Heavy Diacritics Stacking - `Z͑͗͑͗...`) | `y` / `n` |
 | `--hyperion` | Hyperion | Enable Full Hyperion Engine (Builtins remapping, token variable remap, math/str splitting, chunk shells) | `y` / `n` |
 | `--camouflage`, `--camo` | Camouflage | Wrap in Hyperion Fake Scientific Simulation Class (`MemoryAccess`, `StackOverflow`, `Theory`, etc.) | `y` / `n` |
-| `--force-py` | Environment | Lock execution strictly to specified Python version (`off` to disable) | `3.10`, `3.11`, `3.12`, `3.14`, etc. |
+| `--force-py` | Environment | Multi-vector anti-spoof Python runtime & opcode architecture lock (`off` to disable) | `3.10`, `3.11`, `3.12`, `3.14`, etc. |
 | `--max-ram` | Resource | Limit maximum RAM consumption in megabytes | e.g. `2048` |
 | `--cores` | Resource | Limit maximum CPU cores/threads utilized | e.g. `2`, `4` |
 | `--debug-map` | Diagnostics | Export JSON mapping of renamed symbols and stage durations | `AUTO` or `<path>` |

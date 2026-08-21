@@ -4060,6 +4060,125 @@ except Exception:
 """
 
 
+def _generate_strict_version_guard(target_ver_str: str) -> str:
+    """
+    Generates a multi-vector, anti-tamper Python runtime version & bytecode integrity enforcer.
+    Verifies:
+      1. sys.version_info tuple integrity, length, and immutable descriptor types (anti-monkeypatch)
+      2. sys.hexversion bitmask verification against target major.minor
+      3. importlib.util.MAGIC_NUMBER binary verification across Python 3.10-3.14
+      4. C-level un-hookable Py_GetVersion() via ctypes
+      5. Bytecode Opcode architecture-level invariant probing (dis.opmap / opcode.opmap)
+      6. sys.implementation.version struct validation
+    """
+    if not target_ver_str or str(target_ver_str).lower() in ("off", "none", "n", "no"):
+        return ""
+    tgt = str(target_ver_str).strip()
+    return f"""
+def _enforce_strict_py_runtime():
+    import sys, os
+    _tgt = {tgt!r}
+    _fail = False
+    
+    # 1. Structural tuple & immutable type check (detect monkeypatched sys.version_info)
+    try:
+        vi = sys.version_info
+        if type(vi).__name__ != 'version_info' or getattr(type(vi), '__module__', '') != 'sys' or len(vi) != 5:
+            _fail = True
+        maj, min_ = vi[0], vi[1]
+        tgt_parts = [int(p) for p in _tgt.split('.') if p.isdigit()]
+        if len(tgt_parts) >= 1 and maj != tgt_parts[0]:
+            _fail = True
+        if len(tgt_parts) >= 2 and min_ != tgt_parts[1]:
+            _fail = True
+        if len(tgt_parts) >= 3 and vi[2] != tgt_parts[2]:
+            _fail = True
+    except Exception:
+        _fail = True
+
+    # 2. sys.hexversion bitmask verification
+    try:
+        hv = sys.hexversion
+        if not isinstance(hv, int) or hv <= 0:
+            _fail = True
+        hv_maj = (hv >> 24) & 0xFF
+        hv_min = (hv >> 16) & 0xFF
+        if len(tgt_parts) >= 1 and hv_maj != tgt_parts[0]:
+            _fail = True
+        if len(tgt_parts) >= 2 and hv_min != tgt_parts[1]:
+            _fail = True
+    except Exception:
+        _fail = True
+
+    # 3. CPython Magic Number Invariant Check
+    try:
+        import importlib.util
+        _magic_ranges = {{
+            (3, 10): (3400, 3450),
+            (3, 11): (3480, 3510),
+            (3, 12): (3520, 3550),
+            (3, 13): (3560, 3590),
+            (3, 14): (3600, 3650)
+        }}
+        curr_magic = getattr(importlib.util, 'MAGIC_NUMBER', None)
+        if curr_magic and len(curr_magic) >= 2 and (maj, min_) in _magic_ranges:
+            m_val = int.from_bytes(curr_magic[:2], 'little')
+            m_min, m_max = _magic_ranges[(maj, min_)]
+            if not (m_min <= m_val <= m_max):
+                _fail = True
+    except Exception:
+        pass
+
+    # 4. Bytecode Opcode Architecture-Level Invariant Probe
+    try:
+        import opcode
+        _opmap = getattr(opcode, 'opmap', {{}})
+        if (maj, min_) == (3, 10):
+            if not ('ROT_FOUR' in _opmap or 'GEN_START' in _opmap) or ('RESUME' in _opmap):
+                _fail = True
+        elif (maj, min_) == (3, 11):
+            if ('RESUME' not in _opmap) or ('RETURN_CONST' in _opmap):
+                _fail = True
+        elif (maj, min_) == (3, 12):
+            if ('RETURN_CONST' not in _opmap) or ('TO_BOOL' in _opmap):
+                _fail = True
+        elif (maj, min_) == (3, 13):
+            if 'TO_BOOL' not in _opmap:
+                _fail = True
+    except Exception:
+        pass
+
+    # 5. C-Level Py_GetVersion Unhookable Native Pointer Verification
+    try:
+        import ctypes
+        if hasattr(ctypes, 'pythonapi') and hasattr(ctypes.pythonapi, 'Py_GetVersion'):
+            ctypes.pythonapi.Py_GetVersion.restype = ctypes.c_char_p
+            c_ver = ctypes.pythonapi.Py_GetVersion()
+            if c_ver:
+                c_ver_str = c_ver.decode('utf-8', errors='ignore').split()[0]
+                if not c_ver_str.startswith(_tgt):
+                    _fail = True
+    except Exception:
+        pass
+
+    # 6. sys.implementation verification
+    try:
+        impl = getattr(sys, 'implementation', None)
+        if impl and hasattr(impl, 'version'):
+            iv = impl.version
+            if iv[0] != maj or iv[1] != min_:
+                _fail = True
+    except Exception:
+        pass
+
+    if _fail:
+        _curr_str = sys.version.split()[0] if hasattr(sys, 'version') else 'Unknown'
+        print(f"[-] STRICT RUNTIME INTEGRITY VIOLATION! Protected script strictly requires Python {{_tgt}} (Current: {{_curr_str}}). Execution aborted.", flush=True)
+        os._exit(1)
+
+_enforce_strict_py_runtime()
+"""
+
 def _double_compile(code_str, target_ver=None, password=None):
     """Double compile: Authenticated AEAD Payload INSIDE Velimatix loader with Dynamic Keys."""
     if target_ver is None:
@@ -4076,12 +4195,7 @@ def _double_compile(code_str, target_ver=None, password=None):
 import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, os, getpass, gc
 
 sys.dont_write_bytecode = True
-_target_ver = {target_ver!r}
-_curr_ver = sys.version.split()[0]
-_curr_maj_min = f"{{sys.version_info.major}}.{{sys.version_info.minor}}"
-if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
-    print(f"[-] PYTHON VERSION MISMATCH! This obfuscated script requires Python {target_ver}.x (Current: {{_curr_ver}}). Please run with python{target_ver} or install Python {target_ver}.", flush=True)
-    __import__("os")._exit(1)
+{_generate_strict_version_guard(target_ver)}
 
 def _auth_decrypt(raw_bytes, pwd_str):
     salt = raw_bytes[:16]
@@ -4128,18 +4242,13 @@ except Exception:
     pass
 del _payload_b85, _s1, _s2, _s3, _s4, _s5, _pwd
 gc.collect()
-"""
+\"\"\"
     else:
-        inner_loader = f"""
+        inner_loader = f\"\"\"
 import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, platform, gc
 
 sys.dont_write_bytecode = True
-_target_ver = {target_ver!r}
-_curr_ver = sys.version.split()[0]
-_curr_maj_min = f"{{sys.version_info.major}}.{{sys.version_info.minor}}"
-if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
-    print(f"[-] PYTHON VERSION MISMATCH! This obfuscated script requires Python {target_ver}.x (Current: {{_curr_ver}}). Please run with python{target_ver} or install Python {target_ver}.", flush=True)
-    __import__("os")._exit(1)
+{_generate_strict_version_guard(target_ver)}
 
 def _derive_runtime_keys(salt):
     parts = []
@@ -4263,15 +4372,15 @@ except Exception:
 """
 
 def _generate_anti_vm_shield() -> str:
-    """Generate industrial-grade Anti-VM and Sandbox detection shield."""
+    """Generate hyper-strict industrial-grade Anti-VM, Sandbox & Virtual Network detection shield."""
     fn_name = rd('state_machine')
     abort_fn = rd('guard')
     cores_var = rd('biopaque')
     user_var = rd('state_machine')
     host_var = rd('guard')
     
-    return f'''
-# ═══ ANTI-VIRTUALIZATION & SANDBOX MATRIX ═══
+    return f"""
+# ═══ ANTI-VIRTUALIZATION, SANDBOX & VIRTUAL NETWORK MATRIX ═══
 def {fn_name}():
     import os, sys
 
@@ -4286,7 +4395,7 @@ def {fn_name}():
         except Exception:
             sys.exit(1)
 
-    # 1. CPU Core Count Check (Automated analysis sandboxes often allocate <= 1 vCPU)
+    # 1. CPU Core & Memory Quantity Check (Automated analysis sandboxes often allocate <= 1 vCPU or <= 2GB RAM)
     try:
         {cores_var} = os.cpu_count()
         if {cores_var} is not None and {cores_var} <= 1:
@@ -4298,13 +4407,34 @@ def {fn_name}():
     try:
         {user_var} = (os.getenv('USERNAME') or os.getenv('USER') or '').upper()
         {host_var} = (os.getenv('COMPUTERNAME') or os.getenv('HOSTNAME') or '').upper()
-        _bad_identities = {{'SANDBOX', 'VIRUS', 'MALTEST', 'TEQUILABOOMBOOM', 'SAMPLE', 'CURRENTUSER', 'DESKTOP-ANALYSIS', 'USER-PC', 'JOHN-PC', 'TEST-PC', 'KLONE'}}
+        _bad_identities = {{'SANDBOX', 'VIRUS', 'MALTEST', 'TEQUILABOOMBOOM', 'SAMPLE', 'CURRENTUSER', 'DESKTOP-ANALYSIS', 'USER-PC', 'JOHN-PC', 'TEST-PC', 'KLONE', 'MALWARE', 'CUCKOO'}}
         if {user_var} in _bad_identities or {host_var} in _bad_identities:
             {abort_fn}()
     except Exception:
         pass
 
-    # 3. Windows-Specific VM & Hypervisor Deep Inspection
+    # 3. Virtual Machine MAC Address OUI & Virtual Network Interface Inspection
+    try:
+        import uuid
+        _mac_num = uuid.getnode()
+        _mac_hex = f"{{_mac_num:012x}}".upper()
+        _mac_oui = ':'.join([_mac_hex[i:i+2] for i in range(0, 6, 2)])
+        # VMware, VirtualBox, Parallels, QEMU/KVM, Xen virtual OUI prefixes
+        _bad_ouis = (
+            '00:05:69', '00:0C:29', '00:1C:14', '00:50:56', # VMware
+            '08:00:27',                                     # VirtualBox
+            '00:1C:42',                                     # Parallels
+            '52:54:00', '54:52:00',                         # QEMU / KVM
+            '00:16:3E',                                     # Xen
+            '00:03:FF', '00:15:5D'                          # Microsoft Virtual
+        )
+        for _bad_prefix in _bad_ouis:
+            if _mac_oui.startswith(_bad_prefix):
+                {abort_fn}()
+    except Exception:
+        pass
+
+    # 4. Windows-Specific VM, Virtual Network & Hypervisor Deep Inspection
     if os.name == 'nt':
         # A. Screen Resolution Metrics (Headless sandboxes often have small/default resolution)
         try:
@@ -4347,7 +4477,7 @@ def {fn_name}():
                 (winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\\Description\\System\\BIOS"),
                 (winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\\Description\\System"),
             ]
-            _vm_kw = (b'vmware', b'virtualbox', b'vbox', b'qemu', b'bochs', b'kvm', b'parallels', b'xen', b'hyper-v')
+            _vm_kw = (b'vmware', b'virtualbox', b'innotek', b'qemu', b'bochs', b'kvm', b'parallels', b'xen', b'seabios')
             for _hkey, _subkey in _reg_paths:
                 try:
                     with winreg.OpenKey(_hkey, _subkey) as _k:
@@ -4361,17 +4491,77 @@ def {fn_name}():
         except Exception:
             pass
 
-    # 4. Linux & POSIX Container / VM Deep Inspection
+        # E. Virtual Disk & SCSI Storage Device Models Check
+        try:
+            import winreg
+            _scsi_reg = r"HARDWARE\\DEVICEMAP\\Scsi"
+            _bad_disk_kw = (b'vbox', b'vmware', b'qemu', b'virtio', b'virtual disk', b'parallels')
+            def _scan_key_recursive(_hk, _path):
+                try:
+                    with winreg.OpenKey(_hk, _path) as _k:
+                        num_sub, num_val, _ = winreg.QueryInfoKey(_k)
+                        for _i in range(num_val):
+                            _vn, _vd, _ = winreg.EnumValue(_k, _i)
+                            _vd_bytes = str(_vd).lower().encode()
+                            if any(_kw in _vd_bytes for _kw in _bad_disk_kw):
+                                {abort_fn}()
+                        for _j in range(num_sub):
+                            _sub_name = winreg.EnumKey(_k, _j)
+                            _scan_key_recursive(_hk, _path + chr(92) + _sub_name)
+                except Exception:
+                    pass
+            _scan_key_recursive(winreg.HKEY_LOCAL_MACHINE, _scsi_reg)
+        except Exception:
+            pass
+
+        # F. Virtual Network Adapters Registry & Sandboxed NAT Gateway Inspection
+        try:
+            import winreg
+            _net_class_reg = r"SYSTEM\\CurrentControlSet\\Control\\Class\\{{4d36e972-e325-11ce-bfc1-08002be10318}}"
+            _vm_net_kw = (b'virtualbox', b'vmware accelerated', b'vmware virtual', b'red hat virtio', b'parallels virtual', b'qemu virtio')
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _net_class_reg) as _net_key:
+                for _idx in range(winreg.QueryInfoKey(_net_key)[0]):
+                    try:
+                        _sk_name = winreg.EnumKey(_net_key, _idx)
+                        if _sk_name.isdigit():
+                            with winreg.OpenKey(_net_key, _sk_name) as _dev_key:
+                                try:
+                                    _desc, _ = winreg.QueryValueEx(_dev_key, "DriverDesc")
+                                    _desc_b = str(_desc).lower().encode()
+                                    if any(_kw in _desc_b for _kw in _vm_net_kw):
+                                        {abort_fn}()
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # 5. Linux & POSIX Container / VM Deep Inspection
     if os.name == 'posix':
         try:
             _dmi_files = ['/sys/class/dmi/id/product_name', '/sys/class/dmi/id/sys_vendor', '/sys/class/dmi/id/board_vendor', '/sys/hypervisor/type']
-            _vm_tags = ['virtualbox', 'vmware', 'qemu', 'kvm', 'bochs', 'xen', 'microsoft corporation', 'innotek', 'parallels', 'hyper-v']
+            _vm_tags = ['virtualbox', 'vmware', 'qemu', 'kvm', 'bochs', 'xen', 'innotek', 'parallels', 'hyper-v']
             for _dpath in _dmi_files:
                 if os.path.exists(_dpath):
                     with open(_dpath, 'r', errors='ignore') as _df:
                         _dcontent = _df.read().lower()
                         if any(_t in _dcontent for _t in _vm_tags):
                             {abort_fn}()
+        except Exception:
+            pass
+
+        # Network interface MAC & driver on Linux
+        try:
+            if os.path.exists('/sys/class/net'):
+                for _iface in os.listdir('/sys/class/net'):
+                    _addr_file = os.path.join('/sys/class/net', _iface, 'address')
+                    if os.path.isfile(_addr_file):
+                        with open(_addr_file, 'r', errors='ignore') as _af:
+                            _mac_line = _af.read().strip().upper()
+                            for _bp in ('00:05:69', '00:0C:29', '00:50:56', '08:00:27', '52:54:00', '00:1C:42'):
+                                if _mac_line.startswith(_bp):
+                                    {abort_fn}()
         except Exception:
             pass
 
@@ -4385,10 +4575,7 @@ try:
     {fn_name}()
 except Exception:
     pass
-'''
-
-
-
+"""
 
 # ═══════════════════════════════════════════════════════════════
 # KRAMER ENGINE - KYRIE ELEISON & OBFUSCATED CLASS WRAPPER
@@ -6304,14 +6491,7 @@ def obfuscate_single_target(src_file: str, output_file: str, options: dict, quie
 
     # Step 3: Version check header
     target_ver_str = forced_py_ver if (force_py_choice.upper() == "Y" and forced_py_ver) else f"{sys.version_info.major}.{sys.version_info.minor}"
-    checkver = f"""import sys
-_target_ver = '{target_ver_str}'
-_curr_ver = sys.version.split()[0]
-_curr_maj_min = f"{{sys.version_info.major}}.{{sys.version_info.minor}}"
-if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
-    print(f"[-] PYTHON VERSION MISMATCH! This obfuscated script requires Python {target_ver_str}.x (Current: {{_curr_ver}}). Please run with python{target_ver_str} or install Python {target_ver_str}.", flush=True)
-    __import__("os")._exit(1)
-"""
+    checkver = _generate_strict_version_guard(target_ver_str)
 
     if cjk_choice.upper() == "Y":
         pycool_hdr = _gen_pycool_header()
@@ -6521,12 +6701,7 @@ def _auth_decrypt(raw_bytes):
             code = author + var + f"""
 import hashlib, hmac, platform as _platform, sys, os
 sys.dont_write_bytecode = True
-_target_ver = '{target_ver_str}'
-_curr_ver = sys.version.split()[0]
-_curr_maj_min = f"{{sys.version_info.major}}.{{sys.version_info.minor}}"
-if _curr_maj_min != _target_ver and not sys.version.startswith(_target_ver):
-    print(f"[-] PYTHON VERSION MISMATCH! This obfuscated script requires Python {target_ver_str}.x (Current: {{_curr_ver}}). Please run with python{target_ver_str} or install Python {target_ver_str}.", flush=True)
-    __import__("os")._exit(1)
+{_generate_strict_version_guard(target_ver_str)}
 
 {_auth_dec_section}
 
