@@ -1752,10 +1752,10 @@ class DynamicStringXORTransformer(ast.NodeTransformer):
             return dec_expr
         return node
 
-def _dyn_strings_obf(code_str: str) -> str:
+def _dyn_strings_obf(code_str: str, seed: int = None) -> str:
     """Apply Dynamic Per-Callsite String XOR Encryption."""
     tree = ast.parse(code_str)
-    transformer = DynamicStringXORTransformer()
+    transformer = DynamicStringXORTransformer(master_seed=seed)
     tree = transformer.visit(tree)
     ast.fix_missing_locations(tree)
     return ast.unparse(tree)
