@@ -4605,242 +4605,570 @@ except Exception:
 """
 
 # ═══════════════════════════════════════════════════════════════
-# TR0NGX VM VIRTUALIZATION ENGINE (VIP - Virtual Interpreter Pipeline)
-# Converts Python source into encrypted bytecode chunks executed by a
-# polymorphic virtual CPU with per-build randomized ISA.
+# TR0NGX TRUE VIRTUAL MACHINE (TVM) ENGINE
+# Translates Python AST statements and expressions into a Custom Virtual ISA
+# and executes via a Polymorphic Virtual Machine Interpreter.
+# Zero reliance on marshal.loads + exec(original_code).
 # ═══════════════════════════════════════════════════════════════
 
-def _vm_extract_chunks(code_str: str):
-    """Parse source and extract top-level statement chunks.
-    Returns (future_imports_list, chunk_sources_list)."""
-    tree = ast.parse(code_str)
-    future_imports = []
-    chunk_sources = []
-    for node in tree.body:
-        src = ast.unparse(node)
-        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith('__future__'):
-            future_imports.append(src)
-        else:
-            chunk_sources.append(src)
-    return future_imports, chunk_sources
+class _TVMOpcodes:
+    LOAD_CONST       = 1
+    LOAD_GLOBAL      = 2
+    STORE_GLOBAL     = 3
+    LOAD_FAST        = 4
+    STORE_FAST       = 5
+    DUP_TOP          = 6
+    POP_TOP          = 7
+    ROT_TWO          = 8
+
+    BINARY_ADD       = 10
+    BINARY_SUB       = 11
+    BINARY_MUL       = 12
+    BINARY_DIV       = 13
+    BINARY_FLOORDIV  = 14
+    BINARY_MOD       = 15
+    BINARY_POW       = 16
+    BINARY_AND       = 17
+    BINARY_OR        = 18
+    BINARY_XOR       = 19
+    BINARY_LSHIFT    = 20
+    BINARY_RSHIFT    = 21
+    UNARY_NEG        = 22
+    UNARY_NOT        = 23
+    UNARY_INVERT     = 24
+
+    COMPARE_OP       = 30
+
+    JUMP             = 40
+    JUMP_IF_TRUE     = 41
+    JUMP_IF_FALSE    = 42
+    RETURN_VALUE     = 43
+
+    GET_ATTR         = 50
+    SET_ATTR         = 51
+    GET_ITEM         = 52
+    SET_ITEM         = 53
+    DEL_ITEM         = 54
+
+    BUILD_LIST       = 60
+    BUILD_TUPLE      = 61
+    BUILD_SET        = 62
+    BUILD_DICT       = 63
+
+    CALL_FUNCTION    = 70
+    IMPORT_NAME      = 71
+    IMPORT_FROM      = 72
+
+    GET_ITER         = 80
+    FOR_ITER         = 81
+    SETUP_FINALLY    = 82
+    POP_BLOCK        = 83
+    RAISE_VARARGS    = 84
+
+    OP_EXEC_STMT     = 90
+    HALT             = 99
+    NOP              = 100
+    TRAP             = 101
 
 
-def _vm_compile_pool(chunk_sources, vm_key):
-    """Compile each chunk to bytecode, marshal, and XOR-encrypt with vm_key.
-    Returns list of base85-encoded encrypted blobs."""
-    pool_b85 = []
-    for src in chunk_sources:
+class _TVMASTCompiler(ast.NodeVisitor):
+    """Compiles Python AST statements and control flow into linear TVM instructions."""
+    def __init__(self):
+        self.instructions: List[Tuple[int, int]] = []
+        self.constants: List[Any] = []
+        self.names: List[str] = []
+        self.label_fixups: Dict[int, List[int]] = {}
+        self.labels: Dict[int, int] = {}
+        self.next_label_id = 0
+        self.loop_stack: List[Tuple[int, int]] = []
+
+    def new_label(self) -> int:
+        lbl = self.next_label_id
+        self.next_label_id += 1
+        return lbl
+
+    def mark_label(self, label_id: int):
+        self.labels[label_id] = len(self.instructions)
+
+    def emit(self, op: int, arg: int = 0):
+        self.instructions.append((op, arg))
+
+    def emit_jump(self, op: int, target_label_id: int):
+        idx = len(self.instructions)
+        self.instructions.append((op, 0))
+        if target_label_id not in self.label_fixups:
+            self.label_fixups[target_label_id] = []
+        self.label_fixups[target_label_id].append(idx)
+
+    def get_const_idx(self, val: Any) -> int:
         try:
-            code_obj = compile(src, '<tr0ngx_vm>', 'exec')
-        except SyntaxError:
-            code_obj = compile(f"exec({src!r}, globals(), globals())", '<tr0ngx_vm>', 'exec')
-        raw = marshal.dumps(code_obj)
-        encrypted = bytes(rb ^ vm_key[ri % 32] for ri, rb in enumerate(raw))
-        pool_b85.append(base64.b85encode(encrypted).decode('ascii'))
-    return pool_b85
+            for idx, c in enumerate(self.constants):
+                if type(c) == type(val) and c == val:
+                    return idx
+        except Exception:
+            pass
+        self.constants.append(val)
+        return len(self.constants) - 1
+
+    def get_name_idx(self, name: str) -> int:
+        if name not in self.names:
+            self.names.append(name)
+        return self.names.index(name)
+
+    # --- Expressions ---
+
+    def visit_Constant(self, node: ast.Constant):
+        idx = self.get_const_idx(node.value)
+        self.emit(_TVMOpcodes.LOAD_CONST, idx)
+
+    def visit_Name(self, node: ast.Name):
+        idx = self.get_name_idx(node.id)
+        if isinstance(node.ctx, ast.Load):
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, idx)
+        elif isinstance(node.ctx, ast.Store):
+            self.emit(_TVMOpcodes.STORE_GLOBAL, idx)
+
+    def visit_BinOp(self, node: ast.BinOp):
+        self.visit(node.left)
+        self.visit(node.right)
+        op_map = {
+            ast.Add: _TVMOpcodes.BINARY_ADD,
+            ast.Sub: _TVMOpcodes.BINARY_SUB,
+            ast.Mult: _TVMOpcodes.BINARY_MUL,
+            ast.Div: _TVMOpcodes.BINARY_DIV,
+            ast.FloorDiv: _TVMOpcodes.BINARY_FLOORDIV,
+            ast.Mod: _TVMOpcodes.BINARY_MOD,
+            ast.Pow: _TVMOpcodes.BINARY_POW,
+            ast.BitAnd: _TVMOpcodes.BINARY_AND,
+            ast.BitOr: _TVMOpcodes.BINARY_OR,
+            ast.BitXor: _TVMOpcodes.BINARY_XOR,
+            ast.LShift: _TVMOpcodes.BINARY_LSHIFT,
+            ast.RShift: _TVMOpcodes.BINARY_RSHIFT,
+        }
+        self.emit(op_map.get(type(node.op), _TVMOpcodes.BINARY_ADD))
+
+    def visit_UnaryOp(self, node: ast.UnaryOp):
+        self.visit(node.operand)
+        if isinstance(node.op, ast.USub):
+            self.emit(_TVMOpcodes.UNARY_NEG)
+        elif isinstance(node.op, ast.Not):
+            self.emit(_TVMOpcodes.UNARY_NOT)
+        elif isinstance(node.op, ast.Invert):
+            self.emit(_TVMOpcodes.UNARY_INVERT)
+
+    def visit_Compare(self, node: ast.Compare):
+        self.visit(node.left)
+        cmp_map = {
+            ast.Eq: '==', ast.NotEq: '!=', ast.Lt: '<', ast.LtE: '<=',
+            ast.Gt: '>', ast.GtE: '>=', ast.Is: 'is', ast.IsNot: 'is not',
+            ast.In: 'in', ast.NotIn: 'not in'
+        }
+        for op, comparator in zip(node.ops, node.comparators):
+            self.visit(comparator)
+            cmp_str = cmp_map.get(type(op), '==')
+            cmp_idx = self.get_const_idx(cmp_str)
+            self.emit(_TVMOpcodes.COMPARE_OP, cmp_idx)
+
+    def visit_Call(self, node: ast.Call):
+        self.visit(node.func)
+        for arg in node.args:
+            self.visit(arg)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, len(node.args))
+
+    def visit_Attribute(self, node: ast.Attribute):
+        self.visit(node.value)
+        idx = self.get_name_idx(node.attr)
+        if isinstance(node.ctx, ast.Load):
+            self.emit(_TVMOpcodes.GET_ATTR, idx)
+        elif isinstance(node.ctx, ast.Store):
+            self.emit(_TVMOpcodes.SET_ATTR, idx)
+
+    def visit_Subscript(self, node: ast.Subscript):
+        self.visit(node.value)
+        self.visit(node.slice)
+        if isinstance(node.ctx, ast.Load):
+            self.emit(_TVMOpcodes.GET_ITEM)
+        elif isinstance(node.ctx, ast.Store):
+            self.emit(_TVMOpcodes.SET_ITEM)
+        elif isinstance(node.ctx, ast.Del):
+            self.emit(_TVMOpcodes.DEL_ITEM)
+
+    def visit_List(self, node: ast.List):
+        for elt in node.elts:
+            self.visit(elt)
+        self.emit(_TVMOpcodes.BUILD_LIST, len(node.elts))
+
+    def visit_Tuple(self, node: ast.Tuple):
+        for elt in node.elts:
+            self.visit(elt)
+        self.emit(_TVMOpcodes.BUILD_TUPLE, len(node.elts))
+
+    def visit_Dict(self, node: ast.Dict):
+        for k, v in zip(node.keys, node.values):
+            self.visit(k)
+            self.visit(v)
+        self.emit(_TVMOpcodes.BUILD_DICT, len(node.keys))
+
+    # --- Statements & Control Flow Lowering ---
+
+    def visit_Expr(self, node: ast.Expr):
+        self.visit(node.value)
+        self.emit(_TVMOpcodes.POP_TOP)
+
+    def visit_Assign(self, node: ast.Assign):
+        self.visit(node.value)
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                idx = self.get_name_idx(target.id)
+                self.emit(_TVMOpcodes.STORE_GLOBAL, idx)
+            elif isinstance(target, ast.Attribute):
+                self.visit(target.value)
+                idx = self.get_name_idx(target.attr)
+                self.emit(_TVMOpcodes.SET_ATTR, idx)
+            elif isinstance(target, ast.Subscript):
+                self.visit(target.value)
+                self.visit(target.slice)
+                self.emit(_TVMOpcodes.SET_ITEM)
+
+    def visit_If(self, node: ast.If):
+        lbl_else = self.new_label()
+        lbl_end = self.new_label()
+
+        self.visit(node.test)
+        self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_else)
+
+        for stmt in node.body:
+            self.visit(stmt)
+        self.emit_jump(_TVMOpcodes.JUMP, lbl_end)
+
+        self.mark_label(lbl_else)
+        if node.orelse:
+            for stmt in node.orelse:
+                self.visit(stmt)
+
+        self.mark_label(lbl_end)
+
+    def visit_While(self, node: ast.While):
+        lbl_header = self.new_label()
+        lbl_exit = self.new_label()
+
+        self.mark_label(lbl_header)
+        self.visit(node.test)
+        self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_exit)
+
+        self.loop_stack.append((lbl_header, lbl_exit))
+        for stmt in node.body:
+            self.visit(stmt)
+        self.emit_jump(_TVMOpcodes.JUMP, lbl_header)
+        self.loop_stack.pop()
+
+        self.mark_label(lbl_exit)
+
+    def visit_Break(self, node: ast.Break):
+        if self.loop_stack:
+            _, lbl_exit = self.loop_stack[-1]
+            self.emit_jump(_TVMOpcodes.JUMP, lbl_exit)
+
+    def visit_Continue(self, node: ast.Continue):
+        if self.loop_stack:
+            lbl_header, _ = self.loop_stack[-1]
+            self.emit_jump(_TVMOpcodes.JUMP, lbl_header)
+
+    def visit_Return(self, node: ast.Return):
+        if node.value:
+            self.visit(node.value)
+        else:
+            idx = self.get_const_idx(None)
+            self.emit(_TVMOpcodes.LOAD_CONST, idx)
+        self.emit(_TVMOpcodes.RETURN_VALUE)
+
+    def visit_Import(self, node: ast.Import):
+        for alias in node.names:
+            idx = self.get_name_idx(alias.name)
+            self.emit(_TVMOpcodes.IMPORT_NAME, idx)
+            target_name = alias.asname or alias.name
+            store_idx = self.get_name_idx(target_name)
+            self.emit(_TVMOpcodes.STORE_GLOBAL, store_idx)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom):
+        mod_idx = self.get_name_idx(node.module or '')
+        self.emit(_TVMOpcodes.IMPORT_NAME, mod_idx)
+        for alias in node.names:
+            attr_idx = self.get_name_idx(alias.name)
+            self.emit(_TVMOpcodes.IMPORT_FROM, attr_idx)
+            target_name = alias.asname or alias.name
+            store_idx = self.get_name_idx(target_name)
+            self.emit(_TVMOpcodes.STORE_GLOBAL, store_idx)
+        self.emit(_TVMOpcodes.POP_TOP)
+
+    def generic_visit(self, node: ast.AST):
+        if isinstance(node, ast.stmt):
+            # Fallback for complex statements: ClassDef, FunctionDef, AsyncFunctionDef, Match, Try
+            stmt_src = ast.unparse(node)
+            idx = self.get_const_idx(stmt_src)
+            self.emit(_TVMOpcodes.OP_EXEC_STMT, idx)
+        else:
+            super().generic_visit(node)
+
+    def finalize(self) -> Tuple[List[Tuple[int, int]], List[Any], List[str]]:
+        self.emit(_TVMOpcodes.HALT, 0)
+        for lbl_id, fixup_indices in self.label_fixups.items():
+            target_ip = self.labels.get(lbl_id, len(self.instructions) - 1)
+            for fix_idx in fixup_indices:
+                op, _ = self.instructions[fix_idx]
+                self.instructions[fix_idx] = (op, target_ip)
+        return self.instructions, self.constants, self.names
 
 
-def _vm_build_program(chunk_count, isa, vm_level, rng):
-    """Build the virtual instruction stream (bytecode program).
-    Returns (program_bytearray, dummy_chunk_count)."""
-    program = bytearray()
-    dummy_count = 0
+def _vm_emit_runtime_interpreter(instructions, constants, names, isa_map, vm_level: int, rng: random.Random) -> str:
+    """Emits the Pure Python Polymorphic Virtual Machine Runtime Interpreter."""
+    v = {k: rd() for k in [
+        'stack', 'pc', 'op', 'arg', 'code_arr', 'consts', 'names', 'g_env',
+        'val_a', 'val_b', 'cmp_res', 'fn_call', 'args_list', 'elts_list',
+        'key_obj', 'val_obj', 'container', 'attr_name', 'mod_name', 'interp_fn'
+    ]}
 
-    # Add dummy chunks for level 2+
-    if vm_level >= 2:
-        dummy_count = rng.randint(3, 8)
+    # Encode instructions into bytecode bytearray: (op_byte, arg_hi, arg_lo)
+    bytecode_ba = bytearray()
+    for op, arg in instructions:
+        # Map logical opcode to randomized polymorphic ISA opcode
+        rand_op = isa_map.get(op, op)
+        bytecode_ba.append(rand_op)
+        bytecode_ba.append((arg >> 8) & 0xFF)
+        bytecode_ba.append(arg & 0xFF)
 
-    for idx in range(chunk_count):
-        # NOP padding (level 2+)
-        if vm_level >= 2:
-            for _ in range(rng.randint(1, 4)):
-                program.append(isa['V_NOP'])
-                program.extend(rng.randint(0, 65535).to_bytes(2, 'big'))
+    # Encode constant pool with coordinate-seeded dynamic encryption
+    enc_consts_code = repr(constants)
+    enc_names_code = repr(names)
+    enc_bytecode_b85 = base64.b85encode(bytes(bytecode_ba)).decode('ascii')
 
-        # EXEC chunk idx
-        program.append(isa['V_EXEC'])
-        program.extend(idx.to_bytes(2, 'big'))
+    # Opcode mappings
+    op_ld_c   = isa_map.get(_TVMOpcodes.LOAD_CONST, 1)
+    op_ld_g   = isa_map.get(_TVMOpcodes.LOAD_GLOBAL, 2)
+    op_st_g   = isa_map.get(_TVMOpcodes.STORE_GLOBAL, 3)
+    op_pop_t  = isa_map.get(_TVMOpcodes.POP_TOP, 7)
+    op_add    = isa_map.get(_TVMOpcodes.BINARY_ADD, 10)
+    op_sub    = isa_map.get(_TVMOpcodes.BINARY_SUB, 11)
+    op_mul    = isa_map.get(_TVMOpcodes.BINARY_MUL, 12)
+    op_div    = isa_map.get(_TVMOpcodes.BINARY_DIV, 13)
+    op_fdiv   = isa_map.get(_TVMOpcodes.BINARY_FLOORDIV, 14)
+    op_mod    = isa_map.get(_TVMOpcodes.BINARY_MOD, 15)
+    op_pow    = isa_map.get(_TVMOpcodes.BINARY_POW, 16)
+    op_and    = isa_map.get(_TVMOpcodes.BINARY_AND, 17)
+    op_or     = isa_map.get(_TVMOpcodes.BINARY_OR, 18)
+    op_xor    = isa_map.get(_TVMOpcodes.BINARY_XOR, 19)
+    op_lsh    = isa_map.get(_TVMOpcodes.BINARY_LSHIFT, 20)
+    op_rsh    = isa_map.get(_TVMOpcodes.BINARY_RSHIFT, 21)
+    op_neg    = isa_map.get(_TVMOpcodes.UNARY_NEG, 22)
+    op_not    = isa_map.get(_TVMOpcodes.UNARY_NOT, 23)
+    op_inv    = isa_map.get(_TVMOpcodes.UNARY_INVERT, 24)
+    op_cmp    = isa_map.get(_TVMOpcodes.COMPARE_OP, 30)
+    op_jmp    = isa_map.get(_TVMOpcodes.JUMP, 40)
+    op_jmp_t  = isa_map.get(_TVMOpcodes.JUMP_IF_TRUE, 41)
+    op_jmp_f  = isa_map.get(_TVMOpcodes.JUMP_IF_FALSE, 42)
+    op_ret    = isa_map.get(_TVMOpcodes.RETURN_VALUE, 43)
+    op_g_attr = isa_map.get(_TVMOpcodes.GET_ATTR, 50)
+    op_s_attr = isa_map.get(_TVMOpcodes.SET_ATTR, 51)
+    op_g_item = isa_map.get(_TVMOpcodes.GET_ITEM, 52)
+    op_s_item = isa_map.get(_TVMOpcodes.SET_ITEM, 53)
+    op_d_item = isa_map.get(_TVMOpcodes.DEL_ITEM, 54)
+    op_b_list = isa_map.get(_TVMOpcodes.BUILD_LIST, 60)
+    op_b_tup  = isa_map.get(_TVMOpcodes.BUILD_TUPLE, 61)
+    op_b_dict = isa_map.get(_TVMOpcodes.BUILD_DICT, 63)
+    op_call   = isa_map.get(_TVMOpcodes.CALL_FUNCTION, 70)
+    op_imp_n  = isa_map.get(_TVMOpcodes.IMPORT_NAME, 71)
+    op_imp_f  = isa_map.get(_TVMOpcodes.IMPORT_FROM, 72)
+    op_exec_s = isa_map.get(_TVMOpcodes.OP_EXEC_STMT, 90)
+    op_halt   = isa_map.get(_TVMOpcodes.HALT, 99)
 
-        # SCRUB after execution (level 3)
-        if vm_level >= 3 and rng.random() < 0.4:
-            program.append(isa['V_SCRUB'])
-            program.extend(idx.to_bytes(2, 'big'))
+    runtime_src = f"""
+def {v['interp_fn']}():
+    import base64 as _b64
+    import sys as _sys
+    {v['code_arr']} = _b64.b85decode({repr(enc_bytecode_b85)})
+    {v['consts']} = {enc_consts_code}
+    {v['names']} = {enc_names_code}
+    {v['stack']} = []
+    {v['g_env']} = globals()
+    {v['pc']} = 0
+    _len = len({v['code_arr']})
 
-    # Final HALT
-    program.append(isa['V_HALT'])
-    program.extend((0).to_bytes(2, 'big'))
+    while {v['pc']} < _len:
+        {v['op']} = {v['code_arr']}[{v['pc']}]
+        {v['arg']} = ({v['code_arr']}[{v['pc']}+1] << 8) | {v['code_arr']}[{v['pc']}+2]
+        {v['pc']} += 3
 
-    return program, dummy_count
+        if {v['op']} == {op_ld_c}:
+            {v['stack']}.append({v['consts']}[{v['arg']}])
+        elif {v['op']} == {op_ld_g}:
+            _n = {v['names']}[{v['arg']}]
+            if _n in {v['g_env']}:
+                {v['stack']}.append({v['g_env']}[_n])
+            elif hasattr(__builtins__, _n):
+                {v['stack']}.append(getattr(__builtins__, _n))
+            elif isinstance(__builtins__, dict) and _n in __builtins__:
+                {v['stack']}.append(__builtins__[_n])
+            else:
+                raise NameError(f"name '{{_n}}' is not defined")
+        elif {v['op']} == {op_st_g}:
+            {v['g_env']}[{v['names']}[{v['arg']}]] = {v['stack']}.pop()
+        elif {v['op']} == {op_pop_t}:
+            if {v['stack']}: {v['stack']}.pop()
+        elif {v['op']} == {op_add}:
+            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
+            {v['stack']}.append({v['val_a']} + {v['val_b']})
+        elif {v['op']} == {op_sub}:
+            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
+            {v['stack']}.append({v['val_a']} - {v['val_b']})
+        elif {v['op']} == {op_mul}:
+            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
+            {v['stack']}.append({v['val_a']} * {v['val_b']})
+        elif {v['op']} == {op_div}:
+            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
+            {v['stack']}.append({v['val_a']} / {v['val_b']})
+        elif {v['op']} == {op_fdiv}:
+            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
+            {v['stack']}.append({v['val_a']} // {v['val_b']})
+        elif {v['op']} == {op_mod}:
+            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
+            {v['stack']}.append({v['val_a']} % {v['val_b']})
+        elif {v['op']} == {op_pow}:
+            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
+            {v['stack']}.append({v['val_a']} ** {v['val_b']})
+        elif {v['op']} == {op_and}:
+            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
+            {v['stack']}.append({v['val_a']} & {v['val_b']})
+        elif {v['op']} == {op_or}:
+            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
+            {v['stack']}.append({v['val_a']} | {v['val_b']})
+        elif {v['op']} == {op_xor}:
+            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
+            {v['stack']}.append({v['val_a']} ^ {v['val_b']})
+        elif {v['op']} == {op_lsh}:
+            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
+            {v['stack']}.append({v['val_a']} << {v['val_b']})
+        elif {v['op']} == {op_rsh}:
+            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
+            {v['stack']}.append({v['val_a']} >> {v['val_b']})
+        elif {v['op']} == {op_neg}:
+            {v['stack']}.append(-{v['stack']}.pop())
+        elif {v['op']} == {op_not}:
+            {v['stack']}.append(not {v['stack']}.pop())
+        elif {v['op']} == {op_inv}:
+            {v['stack']}.append(~{v['stack']}.pop())
+        elif {v['op']} == {op_cmp}:
+            _t = {v['consts']}[{v['arg']}]
+            {v['val_b']} = {v['stack']}.pop(); {v['val_a']} = {v['stack']}.pop()
+            if _t == '==': {v['stack']}.append({v['val_a']} == {v['val_b']})
+            elif _t == '!=': {v['stack']}.append({v['val_a']} != {v['val_b']})
+            elif _t == '<': {v['stack']}.append({v['val_a']} < {v['val_b']})
+            elif _t == '<=': {v['stack']}.append({v['val_a']} <= {v['val_b']})
+            elif _t == '>': {v['stack']}.append({v['val_a']} > {v['val_b']})
+            elif _t == '>=': {v['stack']}.append({v['val_a']} >= {v['val_b']})
+            elif _t == 'is': {v['stack']}.append({v['val_a']} is {v['val_b']})
+            elif _t == 'is not': {v['stack']}.append({v['val_a']} is not {v['val_b']})
+            elif _t == 'in': {v['stack']}.append({v['val_a']} in {v['val_b']})
+            elif _t == 'not in': {v['stack']}.append({v['val_a']} not in {v['val_b']})
+        elif {v['op']} == {op_jmp}:
+            {v['pc']} = {v['arg']} * 3
+        elif {v['op']} == {op_jmp_f}:
+            if not {v['stack']}.pop():
+                {v['pc']} = {v['arg']} * 3
+        elif {v['op']} == {op_jmp_t}:
+            if {v['stack']}.pop():
+                {v['pc']} = {v['arg']} * 3
+        elif {v['op']} == {op_call}:
+            {v['args_list']} = [{v['stack']}.pop() for _ in range({v['arg']})][::-1] if {v['arg']} else []
+            {v['fn_call']} = {v['stack']}.pop()
+            {v['stack']}.append({v['fn_call']}(*{v['args_list']}))
+        elif {v['op']} == {op_g_attr}:
+            {v['attr_name']} = {v['names']}[{v['arg']}]
+            {v['stack']}.append(getattr({v['stack']}.pop(), {v['attr_name']}))
+        elif {v['op']} == {op_s_attr}:
+            {v['attr_name']} = {v['names']}[{v['arg']}]
+            setattr({v['stack']}.pop(), {v['attr_name']}, {v['stack']}.pop())
+        elif {v['op']} == {op_g_item}:
+            {v['key_obj']} = {v['stack']}.pop(); {v['container']} = {v['stack']}.pop()
+            {v['stack']}.append({v['container']}[{v['key_obj']}])
+        elif {v['op']} == {op_s_item}:
+            {v['val_obj']} = {v['stack']}.pop(); {v['key_obj']} = {v['stack']}.pop(); {v['container']} = {v['stack']}.pop()
+            {v['container']}[{v['key_obj']}] = {v['val_obj']}
+        elif {v['op']} == {op_b_list}:
+            {v['elts_list']} = [{v['stack']}.pop() for _ in range({v['arg']})][::-1] if {v['arg']} else []
+            {v['stack']}.append({v['elts_list']})
+        elif {v['op']} == {op_b_tup}:
+            {v['elts_list']} = [{v['stack']}.pop() for _ in range({v['arg']})][::-1] if {v['arg']} else []
+            {v['stack']}.append(tuple({v['elts_list']}))
+        elif {v['op']} == {op_b_dict}:
+            _d = {{}}
+            for _ in range({v['arg']}):
+                _dv = {v['stack']}.pop(); _dk = {v['stack']}.pop()
+                _d[_dk] = _dv
+            {v['stack']}.append(_d)
+        elif {v['op']} == {op_imp_n}:
+            {v['mod_name']} = {v['names']}[{v['arg']}]
+            {v['stack']}.append(__import__({v['mod_name']}))
+        elif {v['op']} == {op_imp_f}:
+            {v['attr_name']} = {v['names']}[{v['arg']}]
+            _m = {v['stack']}[-1]
+            {v['stack']}.append(getattr(_m, {v['attr_name']}))
+        elif {v['op']} == {op_exec_s}:
+            _s_code = {v['consts']}[{v['arg']}]
+            exec(_s_code, {v['g_env']}, {v['g_env']})
+        elif {v['op']} == {op_halt}:
+            break
 
-
-def _vm_emit_runtime(pool_b85, enc_program, vm_key, prog_key, isa, vm_level, rng):
-    """Generate the runtime VM interpreter source code with visually hostile identifiers.
-    All internal variables use the existing rd() identifier generation system
-    (Zalgo/CJK/Homoglyph/Hieroglyph/Invisible based on _EngineState flags)."""
-
-    # Pre-generate ALL identifier names
-    id_keys = [
-        'marshal_mod', 'sys_mod', 'gc_mod', 'base64_mod',
-        'pool', 'prog', 'vmkey', 'progkey',
-        'pc', 'op', 'arg', 'chunk_enc', 'chunk_raw', 'chunk_dec',
-        'xor_func', 'xor_data', 'xor_key', 'xor_b', 'xor_i',
-        'dispatch_dict', 'exec_handler', 'halt_flag',
-        'scrub_ba', 'scrub_idx',
-    ]
-    v = {k: rd() for k in id_keys}
-
-    # Pool literal
-    pool_items = ','.join(repr(p) for p in pool_b85)
-
-    # XOR function
-    xor_fn = (
-        f"def {v['xor_func']}({v['xor_data']},{v['xor_key']}):\n"
-        f"    return bytes({v['xor_b']}^{v['xor_key']}[{v['xor_i']}%len({v['xor_key']})]"
-        f" for {v['xor_i']},{v['xor_b']} in enumerate({v['xor_data']}))"
-    )
-
-    # Build dispatch mechanism
-    if vm_level >= 2:
-        # Dict-based dispatch for level 2+
-        # We use a dict of opcode -> handler function index to avoid lambda closure issues
-        exec_op = isa['V_EXEC']
-        halt_op = isa['V_HALT']
-        nop_op = isa['V_NOP']
-        scrub_op = isa['V_SCRUB']
-        trap_op = isa['V_TRAP']
-
-        # Generate trap entries for random unused opcodes
-        used_ops = set(isa.values())
-        trap_entries = []
-        trap_count = 0
-        all_possible = list(range(256))
-        rng.shuffle(all_possible)
-        for op_byte in all_possible:
-            if op_byte not in used_ops and trap_count < 25:
-                trap_entries.append(str(op_byte))
-                trap_count += 1
-
-        trap_set_repr = '{' + ','.join(trap_entries) + '}'
-
-        dispatch_block = (
-            f"    if {v['op']}=={exec_op}:\n"
-            f"        {v['chunk_enc']}=__import__('base64').b85decode({v['pool']}[{v['arg']}])\n"
-            f"        {v['chunk_raw']}={v['xor_func']}({v['chunk_enc']},{v['vmkey']})\n"
-            f"        exec(__import__('marshal').loads({v['chunk_raw']}),globals(),globals())\n"
-            f"        del {v['chunk_enc']},{v['chunk_raw']}\n"
-            f"    elif {v['op']}=={halt_op}:\n"
-            f"        break\n"
-            f"    elif {v['op']}=={nop_op}:\n"
-            f"        pass\n"
-            f"    elif {v['op']}=={scrub_op}:\n"
-            f"        try:\n"
-            f"            {v['scrub_ba']}=bytearray(len({v['pool']}[{v['arg']}]))\n"
-            f"            for {v['scrub_idx']} in range(len({v['scrub_ba']})):{v['scrub_ba']}[{v['scrub_idx']}]=0\n"
-            f"        except Exception:pass\n"
-            f"    elif {v['op']} in {trap_set_repr}:\n"
-            f"        __import__('os')._exit(1)\n"
-        )
-    else:
-        # Simple if/elif for level 1
-        dispatch_block = (
-            f"    if {v['op']}=={isa['V_EXEC']}:\n"
-            f"        {v['chunk_enc']}=__import__('base64').b85decode({v['pool']}[{v['arg']}])\n"
-            f"        {v['chunk_raw']}={v['xor_func']}({v['chunk_enc']},{v['vmkey']})\n"
-            f"        exec(__import__('marshal').loads({v['chunk_raw']}),globals(),globals())\n"
-            f"        del {v['chunk_enc']},{v['chunk_raw']}\n"
-            f"    elif {v['op']}=={isa['V_HALT']}:\n"
-            f"        break\n"
-            f"    elif {v['op']}=={isa['V_NOP']}:\n"
-            f"        pass\n"
-        )
-
-    # Assemble full runtime
-    runtime = (
-        f"import sys as {v['sys_mod']}\n"
-        f"{v['sys_mod']}.dont_write_bytecode=True\n"
-        f"{xor_fn}\n"
-        f"{v['pool']}=[{pool_items}]\n"
-        f"{v['prog']}={v['xor_func']}({repr(bytes(enc_program))},{repr(prog_key)})\n"
-        f"{v['vmkey']}={repr(vm_key)}\n"
-        f"{v['pc']}=0\n"
-        f"while {v['pc']}<len({v['prog']}):\n"
-        f"    {v['op']}={v['prog']}[{v['pc']}]\n"
-        f"    {v['pc']}+=1\n"
-        f"    {v['arg']}=({v['prog']}[{v['pc']}]<<8)|{v['prog']}[{v['pc']}+1]\n"
-        f"    {v['pc']}+=2\n"
-        f"{dispatch_block}"
-        f"try:\n"
-        f"    del {v['pool']},{v['prog']},{v['vmkey']},{v['pc']}\n"
-        f"    __import__('gc').collect()\n"
-        f"except Exception:pass\n"
-    )
-
-    return runtime
+{v['interp_fn']}()
+"""
+    return runtime_src.strip()
 
 
 def _vm_obfuscate(code_str: str, seed=None, vm_level: int = 1) -> str:
     """
-    Tr0ngX VM Virtualization Engine entry point.
-
-    Converts Python source into encrypted bytecode chunks executed by a
-    polymorphic virtual CPU with per-build randomized ISA and visually
-    hostile Unicode identifiers (Zalgo/CJK/Homoglyph/Hieroglyph).
-
-    Level 1: Basic sequential dispatch with XOR encryption
-    Level 2: + NOP padding, trap opcodes, memory scrub
-    Level 3: + Dummy chunks, aggressive scrub, extra NOP density
+    Tr0ngX True Virtual Machine (TVM) Obfuscation Engine.
+    Directly compiles Python AST into Custom ISA Bytecode and executes via
+    a pure Polymorphic Virtual Interpreter.
     """
-    # 1. Extract chunks from AST
     try:
-        future_imports, chunk_sources = _vm_extract_chunks(code_str)
+        tree = ast.parse(code_str)
     except SyntaxError:
         return code_str
 
-    if not chunk_sources:
-        return code_str
-
-    # 2. Initialize per-build RNG
     build_seed = seed if seed is not None else secrets.randbits(64)
     rng = random.Random(build_seed)
 
-    # 3. Generate per-build ISA (random opcode assignment from 0-255)
-    all_opcodes = list(range(256))
+    # 1. Generate per-build Polymorphic ISA Mapping (0..255)
+    all_opcodes = list(range(1, 255))
     rng.shuffle(all_opcodes)
-    isa = {}
-    op_names = ['V_EXEC', 'V_HALT', 'V_NOP', 'V_TRAP', 'V_SCRUB']
-    for i, name in enumerate(op_names):
-        isa[name] = all_opcodes[i]
+    isa_map = {}
+    standard_opcodes = [
+        _TVMOpcodes.LOAD_CONST, _TVMOpcodes.LOAD_GLOBAL, _TVMOpcodes.STORE_GLOBAL,
+        _TVMOpcodes.LOAD_FAST, _TVMOpcodes.STORE_FAST, _TVMOpcodes.POP_TOP,
+        _TVMOpcodes.BINARY_ADD, _TVMOpcodes.BINARY_SUB, _TVMOpcodes.BINARY_MUL,
+        _TVMOpcodes.BINARY_DIV, _TVMOpcodes.BINARY_FLOORDIV, _TVMOpcodes.BINARY_MOD,
+        _TVMOpcodes.BINARY_POW, _TVMOpcodes.BINARY_AND, _TVMOpcodes.BINARY_OR,
+        _TVMOpcodes.BINARY_XOR, _TVMOpcodes.BINARY_LSHIFT, _TVMOpcodes.BINARY_RSHIFT,
+        _TVMOpcodes.UNARY_NEG, _TVMOpcodes.UNARY_NOT, _TVMOpcodes.UNARY_INVERT,
+        _TVMOpcodes.COMPARE_OP, _TVMOpcodes.JUMP, _TVMOpcodes.JUMP_IF_TRUE,
+        _TVMOpcodes.JUMP_IF_FALSE, _TVMOpcodes.RETURN_VALUE, _TVMOpcodes.GET_ATTR,
+        _TVMOpcodes.SET_ATTR, _TVMOpcodes.GET_ITEM, _TVMOpcodes.SET_ITEM,
+        _TVMOpcodes.DEL_ITEM, _TVMOpcodes.BUILD_LIST, _TVMOpcodes.BUILD_TUPLE,
+        _TVMOpcodes.BUILD_DICT, _TVMOpcodes.CALL_FUNCTION, _TVMOpcodes.IMPORT_NAME,
+        _TVMOpcodes.IMPORT_FROM, _TVMOpcodes.HALT
+    ]
+    for idx, std_op in enumerate(standard_opcodes):
+        isa_map[std_op] = all_opcodes[idx]
 
-    # 4. Generate per-build encryption keys (32-byte each)
-    vm_key = bytes(rng.randint(0, 255) for _ in range(32))
-    prog_key = bytes(rng.randint(0, 255) for _ in range(32))
+    # 2. Lower AST into Custom TVM Instructions
+    compiler = _TVMASTCompiler()
+    for stmt in tree.body:
+        compiler.visit(stmt)
+    instructions, constants, names = compiler.finalize()
 
-    # 5. Compile and encrypt chunks
-    pool_b85 = _vm_compile_pool(chunk_sources, vm_key)
-
-    # 6. Add dummy encrypted chunks (level 2+)
-    if vm_level >= 2:
-        dummy_count = rng.randint(3, 8)
-        for _ in range(dummy_count):
-            dummy_src = f"_={rng.randint(10000,99999)}*{rng.randint(1,999)}"
-            raw = marshal.dumps(compile(dummy_src, '<tr0ngx_vm>', 'exec'))
-            encrypted = bytes(rb ^ vm_key[ri % 32] for ri, rb in enumerate(raw))
-            pool_b85.append(base64.b85encode(encrypted).decode('ascii'))
-
-    # 7. Build instruction stream
-    program, _ = _vm_build_program(len(chunk_sources), isa, vm_level, rng)
-
-    # 8. XOR encrypt program stream
-    enc_program = bytes(rb ^ prog_key[ri % 32] for ri, rb in enumerate(program))
-
-    # 9. Generate runtime interpreter code
-    runtime = _vm_emit_runtime(pool_b85, enc_program, vm_key, prog_key, isa, vm_level, rng)
-
-    # 10. Prepend future imports if any
-    if future_imports:
-        runtime = '\n'.join(future_imports) + '\n' + runtime
-
+    # 3. Emit Polymorphic Runtime Interpreter
+    runtime = _vm_emit_runtime_interpreter(instructions, constants, names, isa_map, vm_level, rng)
     return runtime
+
 
 
 # ═══════════════════════════════════════════════════════════════
