@@ -39,12 +39,13 @@ graph TD
     D --> E[3. Anti-Analysis Matrix: Anti-Debug, Anti-Hook, Watchdog, Self-Mod]
     E --> F[4. Velimatix AST Engine: BiOpaque, Exception Jump, Match-Case, Builtin Rename]
     F --> G[5. Trongdepzai AST Multi-Layer Obfuscator Layers 1..3]
-    G --> H[6. Multi-Layer AEAD Bytecode Compilation: Marshal + 2x XOR + 2x Zlib + Bz2 + Base85]
-    H --> I[7. Double Compile: Inner Bytecode wrapped in Velimatix Loader]
-    I --> J[8. Dynamic Outer Shields: Fused Matrix / Kramer Kyrie Eleison / Emoji / Whitespace]
-    J --> K[9. Hyperion Camouflage: Fake Scientific/Algorithmic Class Simulator]
-    K --> L[10. Unicode Glitch Shields: Extreme Zalgo Diacritics Stacking & Ancient Hieroglyphs]
-    L --> M[Final Obfuscated Output Script]
+    G --> H[6. VM Virtualization Engine: Polymorphic CPU, Randomized ISA & Encrypted V-Bytecode]
+    H --> I[7. Multi-Layer AEAD Bytecode Compilation: Marshal + 2x XOR + 2x Zlib + Bz2 + Base85]
+    I --> J[8. Double Compile: Inner Bytecode wrapped in Velimatix Loader]
+    J --> K[9. Dynamic Outer Shields: Fused Matrix / Kramer Kyrie Eleison / Emoji / Whitespace]
+    K --> L[10. Hyperion Camouflage: Fake Scientific/Algorithmic Class Simulator]
+    L --> M[11. Unicode Glitch Shields: Extreme Zalgo Diacritics Stacking & Ancient Hieroglyphs]
+    M --> N[Final Obfuscated Output Script]
 ```
 
 ---
@@ -73,6 +74,8 @@ graph TD
 | `--seed` | Core AST | Deterministic seed for reproducible builds | e.g. `1337` |
 | `--velimatix` | Velimatix | Enable Velimatix ExceptionJump & AST control flow engine | `y` / `n` |
 | `--veli-level` | Velimatix | Velimatix intensity level (1: BiOpaque, 2: Exception Jump, 3: Match-Case State Machine) | `1`, `2`, `3` |
+| `--vm-obf` | Core VM | Enable VM Virtualization Engine (Polymorphic Virtual CPU + Encrypted Bytecode) | `y` / `n` |
+| `--vm-level` | Core VM | VM Virtualization intensity level (1: Basic, 2: + Traps/NOP, 3: + Dummy/Scrub) | `1`, `2`, `3` |
 | `--double-compile` | Crypto | Package inner compiled bytecode inside outer Velimatix loader | `y` / `n` |
 | `--kramer` | Outer Shield | Wrap with Kramer Kyrie Eleison outer dynamic shield class | `y` / `n` |
 | `--matrix`, `--fused` | Outer Shield | Enable 3-Track Symbiotic Interleaved Matrix Shield (Kyrie + Emoji + Whitespace) | `y` / `n` |

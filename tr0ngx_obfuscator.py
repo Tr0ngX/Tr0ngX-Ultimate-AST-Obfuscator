@@ -63,6 +63,7 @@ class _EngineState:
     use_math_opaque = False
     use_dyn_strings = False
     use_anti_dump = False
+    use_vm_obf = False
     custom_seed = None
     max_output_size = None
 
@@ -1143,7 +1144,14 @@ class ExceptionJumpTransformer():
         return self.tree
 
     class _ExceptionJumpInner(ast.NodeTransformer):
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+            return node
+
         def visit_FunctionDef(self, node: ast.FunctionDef):
+            # Skip if contains yield, yield from, or await (coroutine/generator)
+            for child in ast.walk(node):
+                if isinstance(child, (ast.Yield, ast.YieldFrom, ast.Await)):
+                    return node
             node = ExceptionJumpUtils.generate_block(node)
             return node
 
@@ -1303,9 +1311,16 @@ class ControlFlowTransformer():
         def __init__(self, tree):
             self.tree = tree
 
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+            return node
+
         def visit_FunctionDef(self, node: ast.FunctionDef):
             if node.name.startswith('__'):
                 return node
+            # Skip if contains yield, yield from, or await (coroutine/generator)
+            for child in ast.walk(node):
+                if isinstance(child, (ast.Yield, ast.YieldFrom, ast.Await)):
+                    return node
             if len(node.body) <= 1:
                 return node
             real_stmts = [n for n in node.body if not isinstance(n, (ast.Global, ast.Nonlocal))]
@@ -1500,7 +1515,7 @@ class BuiltinRenamerTransformer():
                 continue
 
         for node in ast.walk(tree):
-            if isinstance(node, ast.Name) and node.id in self.mapping:
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in self.mapping:
                 node.id = self.mapping[node.id]
 
         xor_key = secrets.randbelow(200) + 55
@@ -4254,9 +4269,9 @@ except Exception:
     pass
 del _payload_b85, _s1, _s2, _s3, _s4, _s5, _pwd
 gc.collect()
-\"\"\"
+"""
     else:
-        inner_loader = f\"\"\"
+        inner_loader = f"""
 import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, platform, gc
 
 sys.dont_write_bytecode = True
@@ -4588,6 +4603,245 @@ try:
 except Exception:
     pass
 """
+
+# ═══════════════════════════════════════════════════════════════
+# TR0NGX VM VIRTUALIZATION ENGINE (VIP - Virtual Interpreter Pipeline)
+# Converts Python source into encrypted bytecode chunks executed by a
+# polymorphic virtual CPU with per-build randomized ISA.
+# ═══════════════════════════════════════════════════════════════
+
+def _vm_extract_chunks(code_str: str):
+    """Parse source and extract top-level statement chunks.
+    Returns (future_imports_list, chunk_sources_list)."""
+    tree = ast.parse(code_str)
+    future_imports = []
+    chunk_sources = []
+    for node in tree.body:
+        src = ast.unparse(node)
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith('__future__'):
+            future_imports.append(src)
+        else:
+            chunk_sources.append(src)
+    return future_imports, chunk_sources
+
+
+def _vm_compile_pool(chunk_sources, vm_key):
+    """Compile each chunk to bytecode, marshal, and XOR-encrypt with vm_key.
+    Returns list of base85-encoded encrypted blobs."""
+    pool_b85 = []
+    for src in chunk_sources:
+        try:
+            code_obj = compile(src, '<tr0ngx_vm>', 'exec')
+        except SyntaxError:
+            code_obj = compile(f"exec({src!r}, globals(), globals())", '<tr0ngx_vm>', 'exec')
+        raw = marshal.dumps(code_obj)
+        encrypted = bytes(rb ^ vm_key[ri % 32] for ri, rb in enumerate(raw))
+        pool_b85.append(base64.b85encode(encrypted).decode('ascii'))
+    return pool_b85
+
+
+def _vm_build_program(chunk_count, isa, vm_level, rng):
+    """Build the virtual instruction stream (bytecode program).
+    Returns (program_bytearray, dummy_chunk_count)."""
+    program = bytearray()
+    dummy_count = 0
+
+    # Add dummy chunks for level 2+
+    if vm_level >= 2:
+        dummy_count = rng.randint(3, 8)
+
+    for idx in range(chunk_count):
+        # NOP padding (level 2+)
+        if vm_level >= 2:
+            for _ in range(rng.randint(1, 4)):
+                program.append(isa['V_NOP'])
+                program.extend(rng.randint(0, 65535).to_bytes(2, 'big'))
+
+        # EXEC chunk idx
+        program.append(isa['V_EXEC'])
+        program.extend(idx.to_bytes(2, 'big'))
+
+        # SCRUB after execution (level 3)
+        if vm_level >= 3 and rng.random() < 0.4:
+            program.append(isa['V_SCRUB'])
+            program.extend(idx.to_bytes(2, 'big'))
+
+    # Final HALT
+    program.append(isa['V_HALT'])
+    program.extend((0).to_bytes(2, 'big'))
+
+    return program, dummy_count
+
+
+def _vm_emit_runtime(pool_b85, enc_program, vm_key, prog_key, isa, vm_level, rng):
+    """Generate the runtime VM interpreter source code with visually hostile identifiers.
+    All internal variables use the existing rd() identifier generation system
+    (Zalgo/CJK/Homoglyph/Hieroglyph/Invisible based on _EngineState flags)."""
+
+    # Pre-generate ALL identifier names
+    id_keys = [
+        'marshal_mod', 'sys_mod', 'gc_mod', 'base64_mod',
+        'pool', 'prog', 'vmkey', 'progkey',
+        'pc', 'op', 'arg', 'chunk_enc', 'chunk_raw', 'chunk_dec',
+        'xor_func', 'xor_data', 'xor_key', 'xor_b', 'xor_i',
+        'dispatch_dict', 'exec_handler', 'halt_flag',
+        'scrub_ba', 'scrub_idx',
+    ]
+    v = {k: rd() for k in id_keys}
+
+    # Pool literal
+    pool_items = ','.join(repr(p) for p in pool_b85)
+
+    # XOR function
+    xor_fn = (
+        f"def {v['xor_func']}({v['xor_data']},{v['xor_key']}):\n"
+        f"    return bytes({v['xor_b']}^{v['xor_key']}[{v['xor_i']}%len({v['xor_key']})]"
+        f" for {v['xor_i']},{v['xor_b']} in enumerate({v['xor_data']}))"
+    )
+
+    # Build dispatch mechanism
+    if vm_level >= 2:
+        # Dict-based dispatch for level 2+
+        # We use a dict of opcode -> handler function index to avoid lambda closure issues
+        exec_op = isa['V_EXEC']
+        halt_op = isa['V_HALT']
+        nop_op = isa['V_NOP']
+        scrub_op = isa['V_SCRUB']
+        trap_op = isa['V_TRAP']
+
+        # Generate trap entries for random unused opcodes
+        used_ops = set(isa.values())
+        trap_entries = []
+        trap_count = 0
+        all_possible = list(range(256))
+        rng.shuffle(all_possible)
+        for op_byte in all_possible:
+            if op_byte not in used_ops and trap_count < 25:
+                trap_entries.append(str(op_byte))
+                trap_count += 1
+
+        trap_set_repr = '{' + ','.join(trap_entries) + '}'
+
+        dispatch_block = (
+            f"    if {v['op']}=={exec_op}:\n"
+            f"        {v['chunk_enc']}=__import__('base64').b85decode({v['pool']}[{v['arg']}])\n"
+            f"        {v['chunk_raw']}={v['xor_func']}({v['chunk_enc']},{v['vmkey']})\n"
+            f"        exec(__import__('marshal').loads({v['chunk_raw']}),globals(),globals())\n"
+            f"        del {v['chunk_enc']},{v['chunk_raw']}\n"
+            f"    elif {v['op']}=={halt_op}:\n"
+            f"        break\n"
+            f"    elif {v['op']}=={nop_op}:\n"
+            f"        pass\n"
+            f"    elif {v['op']}=={scrub_op}:\n"
+            f"        try:\n"
+            f"            {v['scrub_ba']}=bytearray(len({v['pool']}[{v['arg']}]))\n"
+            f"            for {v['scrub_idx']} in range(len({v['scrub_ba']})):{v['scrub_ba']}[{v['scrub_idx']}]=0\n"
+            f"        except Exception:pass\n"
+            f"    elif {v['op']} in {trap_set_repr}:\n"
+            f"        __import__('os')._exit(1)\n"
+        )
+    else:
+        # Simple if/elif for level 1
+        dispatch_block = (
+            f"    if {v['op']}=={isa['V_EXEC']}:\n"
+            f"        {v['chunk_enc']}=__import__('base64').b85decode({v['pool']}[{v['arg']}])\n"
+            f"        {v['chunk_raw']}={v['xor_func']}({v['chunk_enc']},{v['vmkey']})\n"
+            f"        exec(__import__('marshal').loads({v['chunk_raw']}),globals(),globals())\n"
+            f"        del {v['chunk_enc']},{v['chunk_raw']}\n"
+            f"    elif {v['op']}=={isa['V_HALT']}:\n"
+            f"        break\n"
+            f"    elif {v['op']}=={isa['V_NOP']}:\n"
+            f"        pass\n"
+        )
+
+    # Assemble full runtime
+    runtime = (
+        f"import sys as {v['sys_mod']}\n"
+        f"{v['sys_mod']}.dont_write_bytecode=True\n"
+        f"{xor_fn}\n"
+        f"{v['pool']}=[{pool_items}]\n"
+        f"{v['prog']}={v['xor_func']}({repr(bytes(enc_program))},{repr(prog_key)})\n"
+        f"{v['vmkey']}={repr(vm_key)}\n"
+        f"{v['pc']}=0\n"
+        f"while {v['pc']}<len({v['prog']}):\n"
+        f"    {v['op']}={v['prog']}[{v['pc']}]\n"
+        f"    {v['pc']}+=1\n"
+        f"    {v['arg']}=({v['prog']}[{v['pc']}]<<8)|{v['prog']}[{v['pc']}+1]\n"
+        f"    {v['pc']}+=2\n"
+        f"{dispatch_block}"
+        f"try:\n"
+        f"    del {v['pool']},{v['prog']},{v['vmkey']},{v['pc']}\n"
+        f"    __import__('gc').collect()\n"
+        f"except Exception:pass\n"
+    )
+
+    return runtime
+
+
+def _vm_obfuscate(code_str: str, seed=None, vm_level: int = 1) -> str:
+    """
+    Tr0ngX VM Virtualization Engine entry point.
+
+    Converts Python source into encrypted bytecode chunks executed by a
+    polymorphic virtual CPU with per-build randomized ISA and visually
+    hostile Unicode identifiers (Zalgo/CJK/Homoglyph/Hieroglyph).
+
+    Level 1: Basic sequential dispatch with XOR encryption
+    Level 2: + NOP padding, trap opcodes, memory scrub
+    Level 3: + Dummy chunks, aggressive scrub, extra NOP density
+    """
+    # 1. Extract chunks from AST
+    try:
+        future_imports, chunk_sources = _vm_extract_chunks(code_str)
+    except SyntaxError:
+        return code_str
+
+    if not chunk_sources:
+        return code_str
+
+    # 2. Initialize per-build RNG
+    build_seed = seed if seed is not None else secrets.randbits(64)
+    rng = random.Random(build_seed)
+
+    # 3. Generate per-build ISA (random opcode assignment from 0-255)
+    all_opcodes = list(range(256))
+    rng.shuffle(all_opcodes)
+    isa = {}
+    op_names = ['V_EXEC', 'V_HALT', 'V_NOP', 'V_TRAP', 'V_SCRUB']
+    for i, name in enumerate(op_names):
+        isa[name] = all_opcodes[i]
+
+    # 4. Generate per-build encryption keys (32-byte each)
+    vm_key = bytes(rng.randint(0, 255) for _ in range(32))
+    prog_key = bytes(rng.randint(0, 255) for _ in range(32))
+
+    # 5. Compile and encrypt chunks
+    pool_b85 = _vm_compile_pool(chunk_sources, vm_key)
+
+    # 6. Add dummy encrypted chunks (level 2+)
+    if vm_level >= 2:
+        dummy_count = rng.randint(3, 8)
+        for _ in range(dummy_count):
+            dummy_src = f"_={rng.randint(10000,99999)}*{rng.randint(1,999)}"
+            raw = marshal.dumps(compile(dummy_src, '<tr0ngx_vm>', 'exec'))
+            encrypted = bytes(rb ^ vm_key[ri % 32] for ri, rb in enumerate(raw))
+            pool_b85.append(base64.b85encode(encrypted).decode('ascii'))
+
+    # 7. Build instruction stream
+    program, _ = _vm_build_program(len(chunk_sources), isa, vm_level, rng)
+
+    # 8. XOR encrypt program stream
+    enc_program = bytes(rb ^ prog_key[ri % 32] for ri, rb in enumerate(program))
+
+    # 9. Generate runtime interpreter code
+    runtime = _vm_emit_runtime(pool_b85, enc_program, vm_key, prog_key, isa, vm_level, rng)
+
+    # 10. Prepend future imports if any
+    if future_imports:
+        runtime = '\n'.join(future_imports) + '\n' + runtime
+
+    return runtime
+
 
 # ═══════════════════════════════════════════════════════════════
 # KRAMER ENGINE - KYRIE ELEISON & OBFUSCATED CLASS WRAPPER
@@ -6081,6 +6335,8 @@ VÍ DỤ SỬ DỤNG:
     parser.add_argument("--math-opaque", choices=["y", "n", "Y", "N"], help="Kích hoạt vị từ toán học mờ (Mathematical Opaque Predicates - Quadratic Non-Residue mod 7 & Euler invariants) (y/n)", default=None)
     parser.add_argument("--dyn-strings", choices=["y", "n", "Y", "N"], help="Mã hóa chuỗi động XOR cục bộ từng vị trí gọi (Per-callsite dynamic XOR string encryption) (y/n)", default=None)
     parser.add_argument("--anti-dump", choices=["y", "n", "Y", "N"], help="Kích hoạt khiên chống memory dump & lọc đối tượng GC (In-Memory Anti-Dump & GC Object Scrubber) (y/n)", default=None)
+    parser.add_argument("--vm-obf", choices=["y", "n", "Y", "N"], help="Kích hoạt VM Virtualization Engine - biến đổi code thành bytecode ảo thực thi bởi CPU ảo đa hình (y/n)", default=None)
+    parser.add_argument("--vm-level", type=int, choices=[1, 2, 3], help="Cấp độ VM Virtualization (1: Basic, 2: + Traps/NOP, 3: + Dummy/Scrub)", default=None)
 
     cli_args, unknown = parser.parse_known_args()
     is_cli_mode = bool(cli_args.input is not None or cli_args.dir is not None)
@@ -6253,6 +6509,8 @@ VÍ DỤ SỬ DỤNG:
     math_opaque_choice = getattr(cli_args, 'math_opaque', None) or ("N" if is_cli_mode else _prompt_input(" MATHEMATICAL OPAQUE PREDICATES (Number theory invariants)? (y/n): "))
     dyn_strings_choice = getattr(cli_args, 'dyn_strings', None) or ("N" if is_cli_mode else _prompt_input(" DYNAMIC PER-CALLSITE STRING XOR (Zero global table)? (y/n): "))
     antidump_choice = getattr(cli_args, 'anti_dump', None) or ("N" if is_cli_mode else _prompt_input(" IN-MEMORY ANTI-DUMP & GC SCRUBBER? (y/n): "))
+    vm_obf_choice = getattr(cli_args, 'vm_obf', None) or ("N" if is_cli_mode else _prompt_input(" VM VIRTUALIZATION ENGINE? (y/n): "))
+    vm_level_choice = getattr(cli_args, 'vm_level', None) or 1
 
     # Force Python version
     if cli_args.force_py is not None:
@@ -6352,6 +6610,8 @@ VÍ DỤ SỬ DỤNG:
         "math_opaque": math_opaque_choice,
         "dyn_strings": dyn_strings_choice,
         "anti_dump": antidump_choice,
+        "vm_obf": vm_obf_choice,
+        "vm_level": vm_level_choice,
         "force_py_choice": force_py_choice,
         "forced_py_ver": forced_py_ver,
         "debug_map": debug_map_arg,
@@ -6447,6 +6707,8 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
     math_opaque_choice = options.get("math_opaque", "N")
     dyn_strings_choice = options.get("dyn_strings", "N")
     antidump_choice = options.get("anti_dump", "N")
+    vm_obf_choice = options.get("vm_obf", "N")
+    vm_level_choice = options.get("vm_level", 1)
     force_py_choice = options.get("force_py_choice", "N")
     forced_py_ver = options.get("forced_py_ver", "")
     _debug_map_choice = options.get("debug_map")
@@ -6478,7 +6740,7 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
             t0 = time.time()
             sz0 = len(code)
             if not quiet_progress: _v_step(2, 8, "AST junk injection...")
-            code = _ast_junk(code)
+            code = __moreobf(code)
             _track_debug_stage("2_ast_junk_injection", time.time() - t0, sz0, len(code))
         except Exception as e:
             _log_stage_error("2_ast_junk_injection", e)
@@ -6597,6 +6859,17 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
         sz0 = len(code)
         code = _generate_self_modify_wrapper() + code
         _track_debug_stage("5.5_self_modify_layer", time.time() - t0, sz0, len(code))
+
+    # Step 6.5: VM Virtualization Engine
+    if vm_obf_choice.upper() == "Y":
+        if not quiet_progress: _v_step("6.5", 8, f"VM Virtualization Engine (level {vm_level_choice})...")
+        try:
+            t0 = time.time()
+            sz0 = len(code)
+            code = _vm_obfuscate(code, seed=custom_seed, vm_level=int(vm_level_choice))
+            _track_debug_stage(f"6.5_vm_virtualization_level_{vm_level_choice}", time.time() - t0, sz0, len(code))
+        except Exception as e:
+            _log_stage_error(f"6.5_vm_virtualization_level_{vm_level_choice}", e)
 
     # Step 8: Packaging & Compilation
     if method.upper() != "Y":

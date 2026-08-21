@@ -161,6 +161,8 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--max-output-size` | Maximum output size DoS limit (aborts and unlinks if exceeded) | e.g. `10MB`, `50MB` |
 | `--seed` | Integer seed for deterministic reproducible obfuscation builds | e.g. `1337` |
 | `--double-compile` | Double compile (Tr0ngX + Velimatix loader) | `y` / `n` |
+| `--vm-obf` | Enable VM Virtualization Engine (Polymorphic Virtual CPU + Encrypted Bytecode) | `y` / `n` |
+| `--vm-level` | VM Virtualization intensity level (1: Basic, 2: + Traps/NOP, 3: + Dummy/Scrub) | `1`, `2`, `3` |
 | `--velimatix` | Enable Velimatix ExceptionJump & AST spam engine | `y` / `n` |
 | `--veli-level` | Velimatix intensity level | `1`, `2`, `3` |
 | `--kramer` | Wrap with Kramer Kyrie Eleison outer dynamic shield | `y` / `n` |
