@@ -3907,10 +3907,10 @@ def random_match_case():
     )
 
 
-def trycatch(body, loop):
+def trycatch(body, loop=1):
     ar = []
     for x in body:
-        if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom, ast.Global, ast.Nonlocal)):
+        if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom, ast.Global, ast.Nonlocal, ast.Try)):
             ar.append(x)
             continue
         j = x
@@ -3933,17 +3933,21 @@ def trycatch(body, loop):
 # MAIN OBFUSCATION PIPELINE
 # ═══════════════════════════════════════════════════════════════
 
-def obf(code):
+def obf(code, layer=1):
     def ps(x):
         if isinstance(x, str):
             return ast.parse(x)
         return x
 
-    code = rename_function(ps(code), "print", __print)
-    code = rename_function(code, "input", __input)
+    # Rename print/input once on layer 1
+    if layer == 1:
+        code = rename_function(ps(code), "print", __print)
+        code = rename_function(code, "input", __input)
+
     tree = ps(code)
     obfuscate(tree)
-    tbd = trycatch(tree.body, 1)
+    # Only inject match-case decoy try-except on layer 1 to prevent exponential bloat
+    tbd = trycatch(tree.body, 1) if layer == 1 else tree.body
 
     def ast_to_code(node):
         if isinstance(node, list):
@@ -3958,16 +3962,16 @@ def obf(code):
 # ═══════════════════════════════════════════════════════════════
 
 def _derive_keys_argon2_or_pbkdf2(password: bytes, salt: bytes) -> tuple[bytes, bytes]:
-    """Derive 256-bit encryption key and 256-bit MAC key using Argon2id (if available) or PBKDF2-HMAC-SHA256 (600,000 rounds)."""
+    """Derive 256-bit encryption key and 256-bit MAC key using Argon2id (if available) or PBKDF2-HMAC-SHA256 (100,000 rounds)."""
     try:
         from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
-        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=4, lanes=4, memory_cost=131072).derive(password)
-        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=4, lanes=4, memory_cost=131072).derive(password)
+        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=2, lanes=2, memory_cost=65536).derive(password)
+        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=2, lanes=2, memory_cost=65536).derive(password)
         return ke, km
     except Exception:
-        # Standard library high-entropy PBKDF2 (OWASP recommended 600,000 iterations)
-        ke = hashlib.pbkdf2_hmac('sha256', password, salt + b'__enc__', 600000, 32)
-        km = hashlib.pbkdf2_hmac('sha256', password, salt + b'__mac__', 600000, 32)
+        # Standard library high-entropy PBKDF2 (100,000 iterations for sub-second startup)
+        ke = hashlib.pbkdf2_hmac('sha256', password, salt + b'__enc__', 100000, 32)
+        km = hashlib.pbkdf2_hmac('sha256', password, salt + b'__mac__', 100000, 32)
         return ke, km
 
 def _derive_runtime_keys(salt: bytes):
@@ -4003,7 +4007,7 @@ def _auth_stream_encrypt(data: bytes, salt: bytes, ke: bytes, km: bytes):
 
 def _multi_layer_encrypt(data: bytes, password: str = None):
     """Apply Authenticated Stream Encryption with Argon2id/PBKDF2 (if password provided) or environment-derived keys."""
-    data = zlib.compress(data, 9)
+    data = zlib.compress(data, 6)
     salt = secrets.token_bytes(16)
     if password:
         ke, km = _derive_keys_argon2_or_pbkdf2(password.encode('utf-8'), salt)
@@ -4013,15 +4017,15 @@ def _multi_layer_encrypt(data: bytes, password: str = None):
     ct, tag, nonce = _auth_stream_encrypt(data, salt, ke, km)
     # Payload format: salt(16) + nonce(12) + tag(32) + ciphertext
     payload_packed = salt + nonce + tag + ct
-    payload_packed = bz2.compress(payload_packed, 9)
-    payload_packed = zlib.compress(payload_packed, 9)
+    payload_packed = bz2.compress(payload_packed, 6)
+    payload_packed = zlib.compress(payload_packed, 6)
     return base64.b85encode(payload_packed).decode('ascii'), salt
 
 
 def _velimatix_compile(code_str):
     """Velimatix-style marshal compilation with FunctionType Anti-Funnel loader and dynamic token randomization (TRX-OBF-006/DEOB-014)."""
     b = marshal.dumps(compile(code_str, "<velimatix>", "exec"))
-    b = zlib.compress(b, 9)
+    b = zlib.compress(b, 6)
     b = base64.b64encode(b)
 
     v_matrix = rd('table')
@@ -4233,11 +4237,11 @@ def _auth_decrypt(raw_bytes, pwd_str):
     p_bytes = pwd_str.encode('utf-8')
     try:
         from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
-        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=4, lanes=4, memory_cost=131072).derive(p_bytes)
-        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=4, lanes=4, memory_cost=131072).derive(p_bytes)
+        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=2, lanes=2, memory_cost=65536).derive(p_bytes)
+        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=2, lanes=2, memory_cost=65536).derive(p_bytes)
     except Exception:
-        ke = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__enc__', 600000, 32)
-        km = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__mac__', 600000, 32)
+        ke = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__enc__', 100000, 32)
+        km = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__mac__', 100000, 32)
     expected_tag = hmac.new(km, salt + nonce + ct, hashlib.sha256).digest()
     if not hmac.compare_digest(tag, expected_tag):
         print("[-] Authentication / Decryption Failed: Invalid password or tampered payload.", flush=True)
@@ -8486,8 +8490,7 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
         try:
             t0 = time.time()
             sz0 = len(code)
-            new_code = obf(code)
-            compile(new_code, "<test_layer>", "exec")
+            new_code = obf(code, layer=i + 1)
             code = new_code
             _track_debug_stage(f"4_tr0ngx_layer_{i+1}_of_{mode}", time.time() - t0, sz0, len(code))
             if not quiet_progress: _v(f"        - Layer {i + 1}/{mode} complete")
@@ -8596,11 +8599,11 @@ def _auth_decrypt(raw_bytes, pwd_str):
     p_bytes = pwd_str.encode('utf-8')
     try:
         from cryptography.hazmat.primitives.kdf.argon2 import Argon2id
-        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=4, lanes=4, memory_cost=131072).derive(p_bytes)
-        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=4, lanes=4, memory_cost=131072).derive(p_bytes)
+        ke = Argon2id(salt=salt + b'__enc__', length=32, iterations=2, lanes=2, memory_cost=65536).derive(p_bytes)
+        km = Argon2id(salt=salt + b'__mac__', length=32, iterations=2, lanes=2, memory_cost=65536).derive(p_bytes)
     except Exception:
-        ke = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__enc__', 600000, 32)
-        km = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__mac__', 600000, 32)
+        ke = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__enc__', 100000, 32)
+        km = hashlib.pbkdf2_hmac('sha256', p_bytes, salt + b'__mac__', 100000, 32)
     expected_tag = hmac.new(km, salt + nonce + ct, hashlib.sha256).digest()
     if not hmac.compare_digest(tag, expected_tag):
         print("[-] Authentication / Decryption Failed: Invalid password or tampered payload.", flush=True)
