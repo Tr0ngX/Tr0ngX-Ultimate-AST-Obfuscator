@@ -212,8 +212,8 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 Tr0ngX includes comprehensive native test suites and end-to-end multi-configuration stress harnesses:
 
 ```bash
-# Run all automated integration & stress matrix tests (Multi-Threaded)
-python tests/run_all_tests.py -w 6
+# Run comprehensive mode-by-mode benchmark & performance profiler (Single-Threaded)
+python benchmark_all_modes.py
 
 # Run individual functional validation suites
 python tests/test_01_core_features.py
