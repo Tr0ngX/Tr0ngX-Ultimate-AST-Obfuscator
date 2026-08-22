@@ -8649,16 +8649,19 @@ CÔNG CỤ LÀM RỐI MÃ NGUỒN PYTHON ĐA TẦNG CỰC MẠNH:
   • Tầng 0: Hyperion Engine (Builtin remapping, token variable remap, math/str splitting)
   • Tầng 1: Tr0ngX AST Transformer (Biến đổi hằng số, chuỗi, số nguyên, logic)
   • Tầng 2: Velimatix Engine (BiOpaque predicates, Exception jump, Match-Case state machine)
-  • Tầng 3: Double Compile Bytecode Loader (marshal + XOR + zlib + bz2 + base85)
-  • Tầng 4: Kramer Kyrie Eleison Outer Shield (Mã hóa dịch chuyển Caesar động + Class ảo)
-  • Tầng 5: Tên biến tiếng Trung / CJK + Watermark bản quyền PyCool
-  • Tầng 6: Emoji Obfuscation (Code → chuỗi emoji 🐀🐁🐂 + self-decoding loader)
-  • Tầng 7: Homoglyph Names (Tên biến Cyrillic/Greek trông giống ASCII: a->а, o->о)
-  • Tầng 8: Rare Unicode Names (CJK Extension B, Kangxi Radicals: 龘 鱻 𪚥)
-  • Tầng 9: Whitespace Obfuscation (Code biến đổi thành không gian trắng space/tab binary)
-  • Tầng 10: Extreme Zalgo Diacritics Shield (Chồng lớp dấu tổ hợp làm tê liệt decompiler GUI)
-  • Tầng 11: Hyperion Scientific Class Camouflage (Ngụy trang lớp mô phỏng bộ nhớ khoa học)
-  • Tầng 12: 3-Track Symbiotic Fused Matrix Shield (Kyrie + Emoji + Whitespace hợp nhất không phình dung lượng)
+  • Tầng 3: Trongdepzai Multi-Layer AST Obfuscation (Lớp 1..3)
+  • Tầng 4: True VM Virtualization 2.0 (TVM: Polymorphic CPU, Randomized ISA & Encrypted V-Bytecode)
+  • Tầng 5: Double Compile Bytecode Loader (marshal + XOR + zlib + bz2 + base85)
+  • Tầng 6: Anti-Analysis Matrix (Anti-Debug, Anti-VM/Sandbox, In-Memory Anti-Dump, Self-Mod)
+  • Tầng 7: Math Opaque & Dynamic Callsite XOR Strings
+  • Tầng 8: Kramer Kyrie Eleison Outer Shield (Mã hóa dịch chuyển Caesar động + Class ảo)
+  • Tầng 9: Tên biến tiếng Trung / CJK + Watermark bản quyền PyCool
+  • Tầng 10: Emoji Obfuscation (Code → chuỗi emoji 🐀🐁🐂 + self-decoding loader)
+  • Tầng 11: Homoglyph & Rare Unicode Names (Cyrillic/Greek & CJK Ext-B, Kangxi, Hieroglyphs)
+  • Tầng 12: Whitespace Obfuscation (Code biến đổi thành không gian trắng space/tab binary)
+  • Tầng 13: Extreme Zalgo Diacritics Shield (Chồng lớp dấu tổ hợp làm tê liệt decompiler GUI)
+  • Tầng 14: Hyperion Scientific Class Camouflage (Ngụy trang lớp mô phỏng bộ nhớ khoa học)
+  • Tầng 15: 3-Track Symbiotic Fused Matrix Shield (Kyrie + Emoji + Whitespace hợp nhất không phình dung lượng)
         """,
         epilog="""
 VÍ DỤ SỬ DỤNG:

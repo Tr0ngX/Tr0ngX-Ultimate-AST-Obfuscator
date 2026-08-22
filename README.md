@@ -26,11 +26,15 @@ Combining **deep Abstract Syntax Tree (AST) mutations**, **cryptographically aut
 
 ```mermaid
 graph TD
-    Source[Raw Python Source Code] --> AST[Multi-Pass AST Transformations]
-    AST --> Renaming[Polymorphic Identifier Renamer]
-    Renaming --> Protection[Anti-Debug & Anti-Analysis Shield]
-    Protection --> Compilation[Multi-Layer AEAD Bytecode Encapsulation]
-    Compilation --> Shield[Symbiotic Matrix & Kramer Outer Shield]
+    Source[Raw Python Source Code] --> Hyperion[0. Hyperion Engine & Builtin Remapper]
+    Hyperion --> AST[1. Multi-Pass AST Transformations & Mutator Ladders]
+    AST --> Opaque[2. Math-Opaque Predicates & Dynamic Callsite XOR Strings]
+    Opaque --> Protection[3. Anti-Analysis Matrix: Anti-Debug, Anti-VM, Anti-Dump, Self-Mod]
+    Protection --> Velimatix[4. Velimatix Control Flow & ExceptionJump Engine]
+    Velimatix --> TVM[5. True Virtual Machine 2.0: Polymorphic CPU, ISA & Encrypted V-Bytecode]
+    TVM --> Compilation[6. Multi-Layer AEAD Bytecode Encapsulation & Double Compile]
+    Compilation --> Camouflage[7. Hyperion Scientific Simulation Camouflage]
+    Camouflage --> Shield[8. Fused 3-Track Symbiotic Matrix & Glitch Shields]
     Shield --> Output[Protected Standalone Python Executable]
 ```
 
@@ -41,33 +45,44 @@ graph TD
 - **Method & Function Cloning**: Generates randomized decoy branches and polymorphic clones to mislead decompilers.
 - **Builtin Dynamic Obfuscation & Renaming**: Intercepts and remaps standard builtin calls (`print`, `exec`, `eval`, `globals`, `__import__`) through runtime resolution.
 
-### 2. Polymorphic Identifier Renaming
+### 2. True Virtual Machine Virtualization Engine 2.0 (TVM)
+- **Virtual CPU & Custom ISA**: Translates Python AST into polymorphic custom bytecode instructions with zero-exec fallback (full execution of closures, nested functions, classes, async with/for, and exception unwind handlers).
+- **Randomized Dispatch Table**: Opcode mappings are randomized per build via affine transformation hashes `(op * M + A) % 256` with dead traps (`TRAP` / `os._exit(1)`) on unassigned slots.
+- **KDF V3 Domain-Separated Cryptography**: Code constants and nested bytecode objects are protected by independent `TRX_TVM_ENC_KEY_V3` and `TRX_TVM_MAC_KEY_V3` keys with SHA-256 HMAC integrity verification and level 9 zlib compression.
+- **Anti-Dump Memory Scrubbing**: Aggressively clears frame stacks, exception handlers, and local dictionaries on frame exit with garbage collection purging.
+
+### 3. Mathematical Opaque Predicates & Dynamic Callsite XOR Strings
+- **Number-Theoretic Opaque Predicates (`--math-opaque`)**: Injects quadratic non-residues mod 7 and Euler totient invariants into dead/live conditional branches.
+- **Dynamic Per-Callsite XOR Strings (`--dyn-strings`)**: Dynamically encrypts string literals per callsite using keys derived from AST topological coordinates.
+
+### 4. Polymorphic Identifier Renaming & Glitch Shields
 - **Collision-Free Variable Generation**: Deterministic, scope-aware renaming engine.
 - **CJK Chinese & PyCool Docstrings**: Obfuscates symbols into multi-byte CJK ideographs and synthetic docstrings.
 - **Homoglyph Disguise**: Uses Cyrillic and Greek unicode lookalikes (`а` vs `a`, `о` vs `o`) to render source code unreadable.
 - **Rare Ancient Unicode Scripts**: Leverages Egyptian Hieroglyphs, Cuneiform, Yi Syllables, Tangut, and CJK Extension-B codepoints.
-- **Blended Hybrid Matrix Names**: Interweaves multiple character sets across local and global scopes.
+- **Extreme Zalgo Diacritics Shield (`--zalgo`)**: Stacks combining characters (`Z͑͗͑͗...`) to overwhelm text rendering engines and disassemblers.
 
-### 3. Dynamic Cryptography & Environment-Bound Key Derivation
+### 5. Dynamic Cryptography & Environment-Bound Key Derivation
 - **Cryptographic Randomness**: Employs Python `secrets` CSPRNG for all keys, salts, and nonces.
 - **Multi-Layer AEAD Encryption**: Combines zlib/bz2 compression with authenticated stream encryption and HMAC-SHA256 message authentication codes.
-- **Runtime Environment Key Derivation (`_derive_runtime_keys`)**: Keys are never stored in plain text inside the output file; instead, they are derived dynamically at runtime from the cryptographic salt and local interpreter environment (`sys.version`, `platform`, `sys.maxsize`, `sys.byteorder`).
+- **Runtime Environment Key Derivation (`_derive_runtime_keys`)**: Keys are derived dynamically at runtime from cryptographic salt and interpreter environment (`sys.version`, `platform`, `sys.maxsize`, `sys.byteorder`).
 
-### 4. Symbiotic Multi-Track Outer Shields
-- **Kramer Outer Shield (Kyrie Eleison)**: Encapsulates final payloads into dynamic polymorphic classes with fake type annotations, memory anti-dumping, and file-read self-verification.
-- **Emoji Stream Obfuscation**: Transforms bytecode stream into executable sequences of Unicode identifiers.
+### 6. Symbiotic Multi-Track Outer Shields & Camouflage
+- **Hyperion Camouflage (`--camouflage`)**: Encapsulates binary payloads inside authentic-looking algorithmic and scientific simulation classes (`MemoryAccess`, `StackOverflow`, `Hypothesis`).
+- **Kramer Outer Shield (Kyrie Eleison)**: Encapsulates payloads into dynamic polymorphic classes with fake type annotations, memory anti-dumping, and file-read self-verification.
+- **Emoji Stream Obfuscation**: Transforms bytecode stream into executable sequences of Unicode animal emojis (`🐀🐁🐂`).
 - **Whitespace Invisible Bitfields**: Hides payloads within invisible Unicode tab/space bitfields.
-- **Fused 3-Track Symbiotic Matrix Shield**: Fuses Kramer Kyrie, Emoji Stream, and Whitespace Bitfields into a zero-bloat in-memory reconstruction pipeline.
+- **Fused 3-Track Symbiotic Matrix Shield (`--matrix`)**: Interweaves Kramer Kyrie, Emoji Stream, and Whitespace Bitfields into a single zero-bloat in-memory stream.
 
-### 5. Enterprise Anti-Tamper & Anti-Analysis Shield
-- **Tracer & Profiler Nullification**: Intercepts `sys.settrace()` and `sys.setprofile()`.
-- **PEP 669 & PEP 578 Tamper Shield**: Neutralizes `sys.monitoring` monitoring tools and overrides Python-level audit hooks.
-- **Meta-Path Import Interceptor (PEP 451)**: `_ImportBlocker` blocks decompiler and debugger modules (`uncompyle6`, `pycdc`, `debugpy`, `pydevd`, `xdis`, `coverage`, etc.).
-- **Bytecode Integrity Verification**: `_ExecGuard` and `_EvalGuard` verify runtime function identity and SHA-256 bytecode hashes.
-- **Frame Depth & C-Level Trace Vector**: Vector 7 anomaly detection checks for deep debug call stacks; Vector 8 checks C-level `PyEval_SetTrace` hooks via ctypes.
-- **Daemon Watchdog Thread**: Runs concurrent continuous patrols verifying builtin integrity and anti-monkey-patching.
+### 7. Enterprise Anti-Tamper & Anti-Analysis Matrix
+- **Anti-Debug Watchdog Daemon**: Continuous background patrol verifying builtin integrity, PEB debugger flags, and anti-monkey-patching.
+- **Anti-VM & Sandbox Detection (`--antivm`)**: Deep hardware and hypervisor probing checking MAC OUIs, SCSI virtual disks, system uptime, and VM driver devices.
+- **In-Memory Anti-Dump & GC Object Scrubber (`--anti-dump`)**: Neutralizes reflection inspection, purges `linecache`, and zeros bytearrays post-execution.
+- **Self-Modifying Signature Morphing (`--selfmod`)**: Dynamically recalculates source hashes and injects zero-width Unicode signatures to invalidate static forensic dumps.
+- **Tracer & Profiler Nullification**: Intercepts `sys.settrace()`, `sys.setprofile()`, and locks `sys.monitoring` tool IDs on Python 3.12+.
+- **Meta-Path Import Interceptor (PEP 451)**: `_ImportBlocker` blocks decompiler and debugger modules (`uncompyle6`, `pycdc`, `debugpy`, `pydevd`, `xdis`, `coverage`).
 
-### 6. Resource Management & Diagnostic Profiling
+### 8. Resource Management & Diagnostic Profiling
 - **RAM & CPU Core Limits**: Built-in `--max-ram` (MB) and `--cores` limiter prevents memory exhaustion during heavy obfuscation passes.
 - **Micro-Stage Profiler & Debug Map**: High-resolution performance timer tracking and optional JSON mapping export (`--debug-map`).
 
@@ -117,16 +132,22 @@ python tr0ngx_obfuscator.py -i file1.py file2.py file3.py -o dist/ -m 2 --compil
 # Entire Directory Recursive Obfuscation
 python tr0ngx_obfuscator.py -D src/ -o dist/ -r -m 2 --compile y --matrix y
 
-# MAXIMUM POWER MODE (All transformations, Anti-Debug, SelfMod, Fused Matrix Shield & Rare Unicode)
+# MAXIMUM POWER MODE (TVM 2.0, Camouflage, Fused Matrix, Anti-Analysis Matrix & Unicode Shields)
 python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
   --moreobf y \
   --antidebug y \
   --antivm y \
+  --anti-dump y \
   --selfmod y \
+  --math-opaque y \
+  --dyn-strings y \
+  --vm-obf y \
+  --vm-level 3 \
   --compile y \
   --velimatix y \
   --veli-level 3 \
   --double-compile y \
+  --camouflage y \
   --matrix y \
   --kramer y \
   --emoji-obf y \
@@ -134,6 +155,7 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
   --cjk-vars y \
   --rare-unicode y \
   --homoglyph y \
+  --zalgo y \
   --max-ram 2048 \
   --cores 4
 ```
