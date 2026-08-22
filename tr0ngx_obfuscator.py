@@ -9083,21 +9083,30 @@ VÍ DỤ SỬ DỤNG:
 
     _setup = None
     if not is_cli_mode:
-        _v(" [!] TR0NGX CONFIGURATION SETUP")
-        _v("  1. QUICK MODE (Mode 2, Compile, Velimatix L2, Kramer, Anti-Debug)")
-        _v("  2. CUSTOM MODE (Cấu hình chi tiết từng bước)")
-        _setup = _prompt_input(" Choose mode (1/2): ").strip()
+        _v(_gradient_text(" ╔══════════════════════════════════════════════════════════════════════╗", (0, 240, 255), (140, 80, 255)))
+        _v(_gradient_text(" ║        TR0NGX ULTIMATE TUI - CẤU HÌNH BẢO VỆ MÃ NGUỒN PYTHON        ║", (0, 240, 255), (140, 80, 255)))
+        _v(_gradient_text(" ╚══════════════════════════════════════════════════════════════════════╝", (0, 240, 255), (140, 80, 255)))
+        _v("  1. FAST LITE PRESET      -- (Mode 1 AST + Dynamic Strings)")
+        _v("  2. BALANCED PRESET       -- (Mode 2 + AEAD Compile + Velimatix L2 + Fused Matrix + Anti-Debug)")
+        _v("  3. MAXIMUM ARSENAL       -- (Mode 3 + TVM 2.0 L3 + Fused Matrix + Camouflage + Zalgo +")
+        _v("                              Math Opaque + Dyn Strings + Dec Traps + Var Split + Str Frag +")
+        _v("                              Debug Poison + Spoof Meta + In-Memory Anti-Dump)")
+        _v("  4. CUSTOM STEP-BY-STEP   -- (Tùy chỉnh chi tiết từng bước toàn bộ 17 tầng bảo vệ)")
+        _setup = _prompt_input(" Choose profile (1/2/3/4, default 2): ").strip()
+        if not _setup:
+            _setup = "2"
+
         if _setup == "1":
-            cli_args.mode = 2
-            cli_args.moreobf = "Y"
-            cli_args.antidebug = "Y"
+            cli_args.mode = 1
+            cli_args.moreobf = "N"
+            cli_args.antidebug = "N"
             cli_args.antivm = "N"
             cli_args.selfmod = "N"
-            cli_args.compile = "Y"
-            cli_args.velimatix = "Y"
-            cli_args.veli_level = 2
-            cli_args.double_compile = "Y"
-            cli_args.kramer = "Y"
+            cli_args.compile = "N"
+            cli_args.velimatix = "N"
+            cli_args.veli_level = 1
+            cli_args.double_compile = "N"
+            cli_args.kramer = "N"
             cli_args.cjk_vars = "N"
             cli_args.matrix = "N"
             cli_args.emoji_obf = "N"
@@ -9109,8 +9118,79 @@ VÍ DỤ SỬ DỤNG:
             cli_args.hyperion = "N"
             cli_args.camouflage = "N"
             cli_args.math_opaque = "N"
-            cli_args.dyn_strings = "N"
+            cli_args.dyn_strings = "Y"
             cli_args.anti_dump = "N"
+            cli_args.vm_obf = "N"
+            cli_args.vm_level = 1
+            cli_args.dec_trap = "N"
+            cli_args.var_split = "N"
+            cli_args.str_frag = "N"
+            cli_args.debug_poison = "N"
+            cli_args.spoof_meta = "N"
+            cli_args.force_py = "off"
+        elif _setup == "2":
+            cli_args.mode = 2
+            cli_args.moreobf = "Y"
+            cli_args.antidebug = "Y"
+            cli_args.antivm = "Y"
+            cli_args.selfmod = "N"
+            cli_args.compile = "Y"
+            cli_args.velimatix = "Y"
+            cli_args.veli_level = 2
+            cli_args.double_compile = "Y"
+            cli_args.kramer = "N"
+            cli_args.cjk_vars = "N"
+            cli_args.matrix = "Y"
+            cli_args.emoji_obf = "N"
+            cli_args.homoglyph = "N"
+            cli_args.rare_unicode = "N"
+            cli_args.zalgo = "N"
+            cli_args.whitespace_obf = "N"
+            cli_args.blank_padding = "N"
+            cli_args.hyperion = "N"
+            cli_args.camouflage = "N"
+            cli_args.math_opaque = "Y"
+            cli_args.dyn_strings = "Y"
+            cli_args.anti_dump = "Y"
+            cli_args.vm_obf = "N"
+            cli_args.vm_level = 1
+            cli_args.dec_trap = "Y"
+            cli_args.var_split = "Y"
+            cli_args.str_frag = "Y"
+            cli_args.debug_poison = "Y"
+            cli_args.spoof_meta = "Y"
+            cli_args.force_py = "off"
+        elif _setup == "3":
+            cli_args.mode = 3
+            cli_args.moreobf = "Y"
+            cli_args.antidebug = "Y"
+            cli_args.antivm = "Y"
+            cli_args.selfmod = "Y"
+            cli_args.compile = "Y"
+            cli_args.velimatix = "Y"
+            cli_args.veli_level = 2
+            cli_args.double_compile = "Y"
+            cli_args.kramer = "N"
+            cli_args.cjk_vars = "N"
+            cli_args.matrix = "Y"
+            cli_args.emoji_obf = "N"
+            cli_args.homoglyph = "N"
+            cli_args.rare_unicode = "N"
+            cli_args.zalgo = "Y"
+            cli_args.whitespace_obf = "N"
+            cli_args.blank_padding = "N"
+            cli_args.hyperion = "Y"
+            cli_args.camouflage = "Y"
+            cli_args.math_opaque = "Y"
+            cli_args.dyn_strings = "Y"
+            cli_args.anti_dump = "Y"
+            cli_args.vm_obf = "Y"
+            cli_args.vm_level = 3
+            cli_args.dec_trap = "Y"
+            cli_args.var_split = "Y"
+            cli_args.str_frag = "Y"
+            cli_args.debug_poison = "Y"
+            cli_args.spoof_meta = "Y"
             cli_args.force_py = "off"
 
     # Resource capping and workers

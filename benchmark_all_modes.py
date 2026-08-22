@@ -165,8 +165,33 @@ BENCHMARK_MODES: List[BenchmarkModeConfig] = [
         cli_flags=["-m", "2", "--matrix", "y", "--no-art"]
     ),
     BenchmarkModeConfig(
+        name="Decompiler Trapping Matrix",
+        description="Decompiler Control Flow Traps (uncompyle6/decompyle3/pycdc breaker)",
+        cli_flags=["-m", "2", "--dec-trap", "y", "--no-art"]
+    ),
+    BenchmarkModeConfig(
+        name="Variable Secret Sharing",
+        description="Integer Variable Secret Sharing (XOR Split shares)",
+        cli_flags=["-m", "2", "--var-split", "y", "--no-art"]
+    ),
+    BenchmarkModeConfig(
+        name="String Fragmentation Pool",
+        description="String Fragmentation v2 & Decoy Pool Assembly",
+        cli_flags=["-m", "2", "--str-frag", "y", "--no-art"]
+    ),
+    BenchmarkModeConfig(
+        name="Deceptive Debug Poisoning",
+        description="Deceptive Debug Poisoning State Machine (Silent Key Degradation)",
+        cli_flags=["-m", "2", "--debug-poison", "y", "--no-art"]
+    ),
+    BenchmarkModeConfig(
+        name="Metadata Spoofing Shield",
+        description="Metadata & co_filename Spoofing (Stdlib path masquerade)",
+        cli_flags=["-m", "2", "--spoof-meta", "y", "--no-art"]
+    ),
+    BenchmarkModeConfig(
         name="FULL ARSENAL MAXIMUM",
-        description="All 15 defense tiers combined: TVM 2.0 L3 + Camouflage + Matrix + Anti-Analysis Matrix",
+        description="All 17 defense tiers combined: TVM 2.0 L3 + Camouflage + Matrix + Anti-Analysis + Bedrock Matrix",
         cli_flags=[
             "-m", "2",
             "--compile", "y",
@@ -179,6 +204,11 @@ BENCHMARK_MODES: List[BenchmarkModeConfig] = [
             "--camouflage", "y",
             "--math-opaque", "y",
             "--dyn-strings", "y",
+            "--dec-trap", "y",
+            "--var-split", "y",
+            "--str-frag", "y",
+            "--debug-poison", "y",
+            "--spoof-meta", "y",
             "--moreobf", "y",
             "--antivm", "y",
             "--anti-dump", "y",
