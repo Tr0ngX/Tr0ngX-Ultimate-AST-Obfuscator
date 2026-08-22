@@ -4645,6 +4645,7 @@ class _TVMOpcodes:
     UNARY_NEG        = 22
     UNARY_NOT        = 23
     UNARY_INVERT     = 24
+    BINARY_MATMUL    = 25
 
     # Comparisons
     COMPARE_OP       = 30
@@ -4899,6 +4900,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
             ast.BitXor: _TVMOpcodes.BINARY_XOR,
             ast.LShift: _TVMOpcodes.BINARY_LSHIFT,
             ast.RShift: _TVMOpcodes.BINARY_RSHIFT,
+            ast.MatMult: _TVMOpcodes.BINARY_MATMUL,
         }
         self.emit(op_map.get(type(node.op), _TVMOpcodes.BINARY_ADD))
 
@@ -4910,6 +4912,19 @@ class _TVMASTCompiler(ast.NodeVisitor):
             self.emit(_TVMOpcodes.UNARY_NOT)
         elif isinstance(node.op, ast.Invert):
             self.emit(_TVMOpcodes.UNARY_INVERT)
+        elif isinstance(node.op, ast.UAdd):
+            pass
+
+    def visit_TypeAlias(self, node: ast.AST):
+        if hasattr(node, 'value'):
+            self.visit(node.value)
+            if hasattr(node, 'name'):
+                self._store_target(node.name)
+            else:
+                self.emit(_TVMOpcodes.POP_TOP)
+
+    def visit_TryStar(self, node: ast.AST):
+        self.visit_Try(node)
 
     def visit_BoolOp(self, node: ast.BoolOp):
         # Short-circuiting boolean operations (And / Or)
@@ -5097,19 +5112,81 @@ class _TVMASTCompiler(ast.NodeVisitor):
             self.emit(_TVMOpcodes.DEL_ITEM)
 
     def visit_List(self, node: ast.List):
-        for elt in node.elts:
-            self.visit(elt)
-        self.emit(_TVMOpcodes.BUILD_LIST, len(node.elts))
+        has_starred = any(isinstance(e, ast.Starred) for e in node.elts)
+        if has_starred:
+            self.emit(_TVMOpcodes.BUILD_LIST, 0)
+            lst_slot = self.code_obj.get_local_idx(f'_$list_{self.new_label()}')
+            self.emit(_TVMOpcodes.STORE_FAST, lst_slot)
+            for e in node.elts:
+                if isinstance(e, ast.Starred):
+                    self.emit(_TVMOpcodes.LOAD_FAST, lst_slot)
+                    self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('extend'))
+                    self.visit(e.value)
+                    self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+                    self.emit(_TVMOpcodes.POP_TOP)
+                else:
+                    self.emit(_TVMOpcodes.LOAD_FAST, lst_slot)
+                    self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('append'))
+                    self.visit(e)
+                    self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+                    self.emit(_TVMOpcodes.POP_TOP)
+            self.emit(_TVMOpcodes.LOAD_FAST, lst_slot)
+        else:
+            for elt in node.elts:
+                self.visit(elt)
+            self.emit(_TVMOpcodes.BUILD_LIST, len(node.elts))
 
     def visit_Tuple(self, node: ast.Tuple):
-        for elt in node.elts:
-            self.visit(elt)
-        self.emit(_TVMOpcodes.BUILD_TUPLE, len(node.elts))
+        has_starred = any(isinstance(e, ast.Starred) for e in node.elts)
+        if has_starred:
+            self.emit(_TVMOpcodes.BUILD_LIST, 0)
+            lst_slot = self.code_obj.get_local_idx(f'_$tup_lst_{self.new_label()}')
+            self.emit(_TVMOpcodes.STORE_FAST, lst_slot)
+            for e in node.elts:
+                if isinstance(e, ast.Starred):
+                    self.emit(_TVMOpcodes.LOAD_FAST, lst_slot)
+                    self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('extend'))
+                    self.visit(e.value)
+                    self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+                    self.emit(_TVMOpcodes.POP_TOP)
+                else:
+                    self.emit(_TVMOpcodes.LOAD_FAST, lst_slot)
+                    self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('append'))
+                    self.visit(e)
+                    self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+                    self.emit(_TVMOpcodes.POP_TOP)
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('tuple'))
+            self.emit(_TVMOpcodes.LOAD_FAST, lst_slot)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+        else:
+            for elt in node.elts:
+                self.visit(elt)
+            self.emit(_TVMOpcodes.BUILD_TUPLE, len(node.elts))
 
     def visit_Set(self, node: ast.Set):
-        for elt in node.elts:
-            self.visit(elt)
-        self.emit(_TVMOpcodes.BUILD_SET, len(node.elts))
+        has_starred = any(isinstance(e, ast.Starred) for e in node.elts)
+        if has_starred:
+            self.emit(_TVMOpcodes.BUILD_SET, 0)
+            set_slot = self.code_obj.get_local_idx(f'_$set_{self.new_label()}')
+            self.emit(_TVMOpcodes.STORE_FAST, set_slot)
+            for e in node.elts:
+                if isinstance(e, ast.Starred):
+                    self.emit(_TVMOpcodes.LOAD_FAST, set_slot)
+                    self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('update'))
+                    self.visit(e.value)
+                    self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+                    self.emit(_TVMOpcodes.POP_TOP)
+                else:
+                    self.emit(_TVMOpcodes.LOAD_FAST, set_slot)
+                    self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('add'))
+                    self.visit(e)
+                    self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+                    self.emit(_TVMOpcodes.POP_TOP)
+            self.emit(_TVMOpcodes.LOAD_FAST, set_slot)
+        else:
+            for elt in node.elts:
+                self.visit(elt)
+            self.emit(_TVMOpcodes.BUILD_SET, len(node.elts))
 
     def visit_Dict(self, node: ast.Dict):
         has_unpacking = any(k is None for k in node.keys)
@@ -5181,6 +5258,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
             ast.BitXor: _TVMOpcodes.BINARY_XOR,
             ast.LShift: _TVMOpcodes.BINARY_LSHIFT,
             ast.RShift: _TVMOpcodes.BINARY_RSHIFT,
+            ast.MatMult: _TVMOpcodes.BINARY_MATMUL,
         }
         bin_op = op_map.get(type(node.op), _TVMOpcodes.BINARY_ADD)
 
@@ -5610,6 +5688,12 @@ class _TVMASTCompiler(ast.NodeVisitor):
 
         self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(sub_code))
         self.emit(_TVMOpcodes.BUILD_CLASS, 0)
+
+        for dec in reversed(node.decorator_list):
+            self.visit(dec)
+            self.emit(_TVMOpcodes.ROT_TWO)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+
         self._store_target(ast.Name(id=node.name, ctx=ast.Store()))
 
     def visit_If(self, node: ast.If):
@@ -5729,104 +5813,157 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.loop_depth -= 1
 
     def visit_With(self, node: ast.With):
-        ctx_slots = []
-        for item in node.items:
-            self.visit(item.context_expr)
-            ctx_slot = self.code_obj.get_local_idx(f'_$ctx_mgr_{self.new_label()}')
-            ctx_slots.append(ctx_slot)
-            self.emit(_TVMOpcodes.STORE_FAST, ctx_slot)
-            self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
-            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__enter__'))
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 0)
-            if item.optional_vars:
-                self._store_target(item.optional_vars)
-            else:
-                self.emit(_TVMOpcodes.POP_TOP)
+        if len(node.items) > 1:
+            inner_with = ast.With(items=node.items[1:], body=node.body)
+            single_with = ast.With(items=[node.items[0]], body=[inner_with])
+            self.visit(single_with)
+            return
+
+        item = node.items[0]
+        ctx_slot = self.code_obj.get_local_idx(f'_$ctx_mgr_{self.new_label()}')
+        self.visit(item.context_expr)
+        self.emit(_TVMOpcodes.STORE_FAST, ctx_slot)
+
+        self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
+        self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__enter__'))
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 0)
+        if item.optional_vars:
+            self._store_target(item.optional_vars)
+        else:
+            self.emit(_TVMOpcodes.POP_TOP)
 
         lbl_handler = self.new_label()
         lbl_end = self.new_label()
+        lbl_suppressed = self.new_label()
+
         self.emit_jump(_TVMOpcodes.SETUP_FINALLY, lbl_handler)
         for stmt in node.body:
             self.visit(stmt)
         self.emit(_TVMOpcodes.POP_BLOCK)
 
-        # Normal exit: call __exit__(None, None, None)
-        for ctx_slot in reversed(ctx_slots):
-            self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
-            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__exit__'))
-            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
-            self.emit(_TVMOpcodes.POP_TOP)
+        # Normal exit: __exit__(None, None, None)
+        self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
+        self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__exit__'))
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
+        self.emit(_TVMOpcodes.POP_TOP)
         self.emit_jump(_TVMOpcodes.JUMP, lbl_end)
 
         # Exception exit:
         self.mark_label(lbl_handler)
-        for ctx_slot in reversed(ctx_slots):
-            self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
-            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__exit__'))
-            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
-            self.emit(_TVMOpcodes.POP_TOP)
+        exc_slot = self.code_obj.get_local_idx(f'_$with_exc_{self.new_label()}')
+        self.emit(_TVMOpcodes.STORE_FAST, exc_slot)
+
+        self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
+        self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__exit__'))
+
+        # Arg 1: type(e)
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('type'))
+        self.emit(_TVMOpcodes.LOAD_FAST, exc_slot)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+
+        # Arg 2: e
+        self.emit(_TVMOpcodes.LOAD_FAST, exc_slot)
+
+        # Arg 3: getattr(e, '__traceback__', None)
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('getattr'))
+        self.emit(_TVMOpcodes.LOAD_FAST, exc_slot)
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx('__traceback__'))
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
+
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
+        self.emit_jump(_TVMOpcodes.JUMP_IF_TRUE, lbl_suppressed)
+
+        # Re-raise if __exit__ returned falsy
+        self.emit(_TVMOpcodes.LOAD_FAST, exc_slot)
         self.emit(_TVMOpcodes.RAISE_VARARGS)
 
+        self.mark_label(lbl_suppressed)
         self.mark_label(lbl_end)
 
     def visit_AsyncWith(self, node: ast.AsyncWith):
-        ctx_slots = []
-        for item in node.items:
-            self.visit(item.context_expr)
-            ctx_slot = self.code_obj.get_local_idx(f'_$actx_mgr_{self.new_label()}')
-            ctx_slots.append(ctx_slot)
-            self.emit(_TVMOpcodes.STORE_FAST, ctx_slot)
-            self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
-            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__aenter__'))
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 0)
-            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
-            self.emit(_TVMOpcodes.ROT_TWO)
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
-            if item.optional_vars:
-                self._store_target(item.optional_vars)
-            else:
-                self.emit(_TVMOpcodes.POP_TOP)
+        if len(node.items) > 1:
+            inner_with = ast.AsyncWith(items=node.items[1:], body=node.body)
+            single_with = ast.AsyncWith(items=[node.items[0]], body=[inner_with])
+            self.visit(single_with)
+            return
+
+        item = node.items[0]
+        ctx_slot = self.code_obj.get_local_idx(f'_$actx_mgr_{self.new_label()}')
+        self.visit(item.context_expr)
+        self.emit(_TVMOpcodes.STORE_FAST, ctx_slot)
+
+        self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
+        self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__aenter__'))
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 0)
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+        self.emit(_TVMOpcodes.ROT_TWO)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+        if item.optional_vars:
+            self._store_target(item.optional_vars)
+        else:
+            self.emit(_TVMOpcodes.POP_TOP)
 
         lbl_handler = self.new_label()
         lbl_end = self.new_label()
+        lbl_suppressed = self.new_label()
+
         self.emit_jump(_TVMOpcodes.SETUP_FINALLY, lbl_handler)
         for stmt in node.body:
             self.visit(stmt)
         self.emit(_TVMOpcodes.POP_BLOCK)
 
-        for ctx_slot in reversed(ctx_slots):
-            self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
-            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__aexit__'))
-            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
-            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
-            self.emit(_TVMOpcodes.ROT_TWO)
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
-            self.emit(_TVMOpcodes.POP_TOP)
+        # Normal exit: __aexit__(None, None, None)
+        self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
+        self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__aexit__'))
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+        self.emit(_TVMOpcodes.ROT_TWO)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+        self.emit(_TVMOpcodes.POP_TOP)
         self.emit_jump(_TVMOpcodes.JUMP, lbl_end)
 
+        # Exception handler
         self.mark_label(lbl_handler)
-        for ctx_slot in reversed(ctx_slots):
-            self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
-            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__aexit__'))
-            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
-            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
-            self.emit(_TVMOpcodes.ROT_TWO)
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
-            self.emit(_TVMOpcodes.POP_TOP)
+        exc_slot = self.code_obj.get_local_idx(f'_$awith_exc_{self.new_label()}')
+        self.emit(_TVMOpcodes.STORE_FAST, exc_slot)
+
+        self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
+        self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__aexit__'))
+
+        # Arg 1: type(e)
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('type'))
+        self.emit(_TVMOpcodes.LOAD_FAST, exc_slot)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+
+        # Arg 2: e
+        self.emit(_TVMOpcodes.LOAD_FAST, exc_slot)
+
+        # Arg 3: getattr(e, '__traceback__', None)
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('getattr'))
+        self.emit(_TVMOpcodes.LOAD_FAST, exc_slot)
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx('__traceback__'))
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
+
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+        self.emit(_TVMOpcodes.ROT_TWO)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+
+        self.emit_jump(_TVMOpcodes.JUMP_IF_TRUE, lbl_suppressed)
+
+        # Re-raise if __aexit__ returned falsy
+        self.emit(_TVMOpcodes.LOAD_FAST, exc_slot)
         self.emit(_TVMOpcodes.RAISE_VARARGS)
 
+        self.mark_label(lbl_suppressed)
         self.mark_label(lbl_end)
 
     def visit_Try(self, node: ast.Try):
@@ -6159,11 +6296,11 @@ class _TVMASTCompiler(ast.NodeVisitor):
 
 def _tvm_derive_runtime_keys(seed_bytes: bytes, salt_bytes: bytes = b'') -> Tuple[bytes, bytes]:
     """
-    Derives dynamic cryptographic keystream and HMAC keys using iterative SHA-256 expansion.
+    Derives dynamic cryptographic keystream and HMAC keys using iterative SHA-256 expansion with domain separation.
     Returns (k_enc, k_mac).
     """
-    k_enc = hashlib.sha256(b"TRX_TVM_ENC_KEY_V2:" + seed_bytes + salt_bytes).digest()
-    k_mac = hashlib.sha256(b"TRX_TVM_MAC_KEY_V2:" + k_enc + salt_bytes).digest()
+    k_enc = hashlib.sha256(b"TRX_TVM_ENC_KEY_V3:" + seed_bytes + salt_bytes).digest()
+    k_mac = hashlib.sha256(b"TRX_TVM_MAC_KEY_V3:" + seed_bytes + salt_bytes).digest()
     return k_enc, k_mac
 
 
@@ -6218,7 +6355,9 @@ def _serialize_tvm_code_object(code: _TVMCodeObject, isa_map: Dict[int, int], k_
         tuple(code.names)
     ))
 
-    return _tvm_aead_encrypt(raw_payload, k_enc, k_mac)
+    import zlib as _zlib_mod
+    compressed_payload = _zlib_mod.compress(raw_payload, level=9)
+    return _tvm_aead_encrypt(compressed_payload, k_enc, k_mac)
 
 
 def _vm_emit_runtime_interpreter_v2(root_code: _TVMCodeObject, isa_map: Dict[int, int], vm_level: int, rng: random.Random) -> str:
@@ -6271,6 +6410,7 @@ def _vm_emit_runtime_interpreter_v2(root_code: _TVMCodeObject, isa_map: Dict[int
     slot_neg     = affine_slot(_TVMOpcodes.UNARY_NEG)
     slot_not     = affine_slot(_TVMOpcodes.UNARY_NOT)
     slot_inv     = affine_slot(_TVMOpcodes.UNARY_INVERT)
+    slot_matmul  = affine_slot(_TVMOpcodes.BINARY_MATMUL)
 
     slot_cmp     = affine_slot(_TVMOpcodes.COMPARE_OP)
 
@@ -6344,6 +6484,7 @@ def _vm_emit_runtime_interpreter_v2(root_code: _TVMCodeObject, isa_map: Dict[int
         (slot_neg, '_h_neg'),
         (slot_not, '_h_not'),
         (slot_inv, '_h_inv'),
+        (slot_matmul, '_h_matmul'),
         (slot_cmp, '_h_cmp'),
         (slot_jmp, '_h_jmp'),
         (slot_jmp_t, '_h_jmp_t'),
@@ -6395,10 +6536,22 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
     import marshal as _marshal
     import os as _os
     import sys as _sys
+    import zlib as _zlib
+
+    if hasattr(_sys, 'monitoring'):
+        try:
+            for _tool_id in range(6):
+                try:
+                    _sys.monitoring.use_tool_id(_tool_id, f"trx_tvm_{{_tool_id}}")
+                    _sys.monitoring.set_events(_tool_id, 0)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def {v['derive_keys_fn']}(_seed, _salt=b''):
-        _k1 = _hashlib.sha256(b"TRX_TVM_ENC_KEY_V2:" + _seed + _salt).digest()
-        _k2 = _hashlib.sha256(b"TRX_TVM_MAC_KEY_V2:" + _k1 + _salt).digest()
+        _k1 = _hashlib.sha256(b"TRX_TVM_ENC_KEY_V3:" + _seed + _salt).digest()
+        _k2 = _hashlib.sha256(b"TRX_TVM_MAC_KEY_V3:" + _seed + _salt).digest()
         return _k1, _k2
 
     def {v['decrypt_packet_fn']}(_packet, _k_enc, _k_mac):
@@ -6419,7 +6572,8 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         return bytes(_c ^ _k for _c, _k in zip(_ciphertext, _ks[:_plen]))
 
     def {v['decode_code_fn']}(_packet, _k_enc, _k_mac):
-        _raw_bytes = {v['decrypt_packet_fn']}(_packet, _k_enc, _k_mac)
+        _compressed_bytes = {v['decrypt_packet_fn']}(_packet, _k_enc, _k_mac)
+        _raw_bytes = _zlib.decompress(_compressed_bytes)
         _data = _marshal.loads(_raw_bytes)
         return {v['code_obj_cls']}(_data, _k_enc)
 
@@ -6570,6 +6724,9 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     def _h_inv(_f, _a):
         _f.stack.append(~_f.stack.pop())
+
+    def _h_matmul(_f, _a):
+        _b = _f.stack.pop(); _a_val = _f.stack.pop(); _f.stack.append(_a_val @ _b)
 
     def _h_cmp(_f, _a):
         _b = _f.stack.pop(); _a_val = _f.stack.pop()
@@ -7051,6 +7208,7 @@ def _vm_obfuscate(code_str: str, seed=None, vm_level: int = 1) -> str:
         _TVMOpcodes.BINARY_POW, _TVMOpcodes.BINARY_AND, _TVMOpcodes.BINARY_OR,
         _TVMOpcodes.BINARY_XOR, _TVMOpcodes.BINARY_LSHIFT, _TVMOpcodes.BINARY_RSHIFT,
         _TVMOpcodes.UNARY_NEG, _TVMOpcodes.UNARY_NOT, _TVMOpcodes.UNARY_INVERT,
+        _TVMOpcodes.BINARY_MATMUL,
         _TVMOpcodes.COMPARE_OP, _TVMOpcodes.JUMP, _TVMOpcodes.JUMP_IF_TRUE,
         _TVMOpcodes.JUMP_IF_FALSE, _TVMOpcodes.JUMP_IF_FALSE_OR_POP, _TVMOpcodes.JUMP_IF_TRUE_OR_POP,
         _TVMOpcodes.RETURN_VALUE, _TVMOpcodes.GET_ATTR, _TVMOpcodes.SET_ATTR,
