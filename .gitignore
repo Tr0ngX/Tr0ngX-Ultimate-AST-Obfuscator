@@ -62,3 +62,5 @@ Thumbs.db
 *.lnk
 scratch/
 .system_generated/
+research_repos/
+external_repos/
