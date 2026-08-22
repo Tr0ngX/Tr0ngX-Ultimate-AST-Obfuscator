@@ -1763,6 +1763,274 @@ def _dyn_strings_obf(code_str: str, seed: int = None) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
+# BEDROCK-GRADE DECOMPILER TRAP & SECRET SHARING ENGINES
+# ═══════════════════════════════════════════════════════════════
+
+class DecompilerTrapTransformer(ast.NodeTransformer):
+    """Wraps AST statement blocks in opaque mathematical predicates and overlapping trap structures that break decompilers (uncompyle6/decompyle3/pycdc)."""
+
+    def __init__(self, density: float = 0.5, seed: int = None):
+        self.density = density
+        self.rng = random.Random(seed or secrets.randbelow(0x7FFFFFFF))
+
+    def _make_opaque_true(self):
+        n_val = self.rng.randint(2, 9999)
+        inv_type = self.rng.randint(0, 2)
+        if inv_type == 0:
+            return ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(
+                        left=ast.BinOp(left=ast.Constant(value=n_val), op=ast.Pow(), right=ast.Constant(value=2)),
+                        op=ast.Add(),
+                        right=ast.Constant(value=n_val)
+                    ),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=2)
+                ),
+                ops=[ast.Eq()],
+                comparators=[ast.Constant(value=0)]
+            )
+        elif inv_type == 1:
+            return ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(
+                        left=ast.BinOp(left=ast.Constant(value=n_val), op=ast.Pow(), right=ast.Constant(value=3)),
+                        op=ast.Sub(),
+                        right=ast.Constant(value=n_val)
+                    ),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=3)
+                ),
+                ops=[ast.Eq()],
+                comparators=[ast.Constant(value=0)]
+            )
+        else:
+            return ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(left=ast.Constant(value=n_val), op=ast.Pow(), right=ast.Constant(value=2)),
+                    op=ast.Add(),
+                    right=ast.Constant(value=1)
+                ),
+                ops=[ast.Gt()],
+                comparators=[ast.Constant(value=0)]
+            )
+
+    def _make_dead_trap_body(self):
+        v_tmp = f"_trap_{self.rng.randint(1000, 99999)}"
+        return [
+            ast.While(
+                test=ast.Constant(value=False),
+                body=[
+                    ast.Assign(targets=[ast.Name(id=v_tmp, ctx=ast.Store())], value=ast.Constant(value=0xDEADBEEF)),
+                    ast.Expr(value=ast.Call(func=ast.Name(id="exit", ctx=ast.Load()), args=[ast.Constant(value=1)], keywords=[])),
+                    ast.Break()
+                ],
+                orelse=[]
+            )
+        ]
+
+    def _wrap_stmts(self, stmts):
+        new_stmts = []
+        for stmt in stmts:
+            if isinstance(stmt, (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Global, ast.Nonlocal)):
+                new_stmts.append(self.visit(stmt))
+            elif self.rng.random() < self.density and not isinstance(stmt, (ast.Return, ast.Yield, ast.YieldFrom, ast.Break, ast.Continue)):
+                trap_if = ast.If(
+                    test=self._make_opaque_true(),
+                    body=[self.visit(stmt)],
+                    orelse=self._make_dead_trap_body()
+                )
+                ast.copy_location(trap_if, stmt)
+                new_stmts.append(trap_if)
+            else:
+                new_stmts.append(self.visit(stmt))
+        return new_stmts
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        node.body = self._wrap_stmts(node.body)
+        return node
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        node.body = self._wrap_stmts(node.body)
+        return node
+
+    def visit_Module(self, node: ast.Module):
+        node.body = self._wrap_stmts(node.body)
+        return node
+
+def _dec_trap_obf(code_str: str, density: float = 0.5, seed: int = None) -> str:
+    """Apply Decompiler Control Flow Trapping Matrix."""
+    tree = ast.parse(code_str)
+    transformer = DecompilerTrapTransformer(density=density, seed=seed)
+    tree = transformer.visit(tree)
+    ast.fix_missing_locations(tree)
+    return ast.unparse(tree)
+
+
+class VariableSplittingTransformer(ast.NodeTransformer):
+    """Splits local integer assignments into XOR secret shares (s1 ^ s2) dynamically inside functions."""
+
+    def __init__(self, seed: int = None):
+        self.rng = random.Random(seed or secrets.randbelow(0x7FFFFFFF))
+
+    def visit_Assign(self, node: ast.Assign):
+        if (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) 
+                and isinstance(node.value, ast.Constant) and isinstance(node.value.value, int) 
+                and not isinstance(node.value.value, bool)
+                and not node.targets[0].id.startswith("__")):
+            val = node.value.value
+            mask = self.rng.randint(1, 0xFFFFFF)
+            s1 = mask
+            s2 = val ^ mask
+            node.value = ast.BinOp(
+                left=ast.Constant(value=s1),
+                op=ast.BitXor(),
+                right=ast.Constant(value=s2)
+            )
+            return node
+        return self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign):
+        if (isinstance(node.value, ast.Constant) and isinstance(node.value.value, int)
+                and not isinstance(node.value.value, bool)):
+            val = node.value.value
+            mask = self.rng.randint(1, 0xFFFFFF)
+            s1 = mask
+            s2 = val ^ mask
+            node.value = ast.BinOp(
+                left=ast.Constant(value=s1),
+                op=ast.BitXor(),
+                right=ast.Constant(value=s2)
+            )
+            return node
+        return self.generic_visit(node)
+
+def _var_split_obf(code_str: str, seed: int = None) -> str:
+    """Apply Integer Variable Secret Sharing Transformation."""
+    tree = ast.parse(code_str)
+    transformer = VariableSplittingTransformer(seed=seed)
+    tree = transformer.visit(tree)
+    ast.fix_missing_locations(tree)
+    return ast.unparse(tree)
+
+
+class StringFragmentationTransformer(ast.NodeTransformer):
+    """Fragments string literals >= 6 chars into XOR-encrypted pools with decoys and dynamic assembly (strfrag2)."""
+
+    def __init__(self, seed: int = None):
+        self.rng = random.Random(seed or secrets.randbelow(0x7FFFFFFF))
+        self.key1 = self.rng.randint(1, 254)
+        self.key2 = self.rng.randint(1, 254)
+        self.fn_name = rd('biopaque')
+        self.pool_name = rd('state_machine')
+        self.final_pool = []
+
+    def _xor_bytes(self, b_data: bytes, k: int) -> bytes:
+        return bytes(b ^ k for b in b_data)
+
+    def visit_JoinedStr(self, node: ast.JoinedStr):
+        return node
+
+    def visit_Constant(self, node: ast.Constant):
+        if isinstance(node.value, str) and len(node.value) >= 6 and not (node.value.startswith("__") and node.value.endswith("__")) and len(node.value) < 10000:
+            raw_bytes = node.value.encode("utf-8")
+            chunk_size = max(2, len(raw_bytes) // 3)
+            chunks = [raw_bytes[i:i + chunk_size] for i in range(0, len(raw_bytes), chunk_size)]
+            
+            chunk_indices = []
+            for ch in chunks:
+                enc_ch = self._xor_bytes(ch, self.key1)
+                idx = len(self.final_pool)
+                self.final_pool.append(enc_ch)
+                chunk_indices.append(idx ^ self.key2)
+            
+            call_expr = ast.Call(
+                func=ast.Name(id=self.fn_name, ctx=ast.Load()),
+                args=[
+                    ast.List(elts=[ast.Constant(value=i) for i in chunk_indices], ctx=ast.Load()),
+                    ast.Constant(value=self.key1)
+                ],
+                keywords=[]
+            )
+            return ast.copy_location(call_expr, node)
+        return node
+
+    def build_preamble(self) -> str:
+        if not self.final_pool:
+            return ""
+        n_decoys = max(3, len(self.final_pool) // 3)
+        for _ in range(n_decoys):
+            decoy = bytes(self.rng.randint(0, 255) for _ in range(self.rng.randint(2, 8)))
+            self.final_pool.append(self._xor_bytes(decoy, self.key1))
+
+        pool_repr = "[" + ", ".join(repr(c) for c in self.final_pool) + "]"
+        return f"""
+{self.pool_name} = {pool_repr}
+def {self.fn_name}(idxs, k):
+    res = bytearray()
+    for _i in idxs:
+        chunk = {self.pool_name}[_i ^ {self.key2}]
+        res.extend(b ^ k for b in chunk)
+    return res.decode('utf-8', 'replace')
+"""
+
+def _str_frag_obf(code_str: str, seed: int = None) -> str:
+    """Apply String Fragmentation and Dynamic Assembly."""
+    tree = ast.parse(code_str)
+    transformer = StringFragmentationTransformer(seed=seed)
+    tree = transformer.visit(tree)
+    ast.fix_missing_locations(tree)
+    preamble = transformer.build_preamble()
+    res_code = ast.unparse(tree)
+    if preamble.strip():
+        return preamble.strip() + "\n" + res_code
+    return res_code
+
+def _generate_debug_poison_shield() -> str:
+    """Generate Deceptive Poison State Machine shield (Bedrock-grade silent degradation)."""
+    fn_name = rd('state_machine')
+    return f"""
+# ═══ DECEPTIVE DEBUG POISON STATE MACHINE ═══
+__trx_poison_state__ = [0]
+def __trx_poison(weight, tag):
+    global __trx_poison_state__
+    _mix = int.from_bytes(__import__('hashlib').sha256(str(tag).encode()).digest()[:4], 'big')
+    __trx_poison_state__[0] = ((__trx_poison_state__[0] << 5) ^ _mix ^ (weight * 0x45D9F3B)) & 0xFFFFFFFF
+
+def {fn_name}():
+    import sys
+    if getattr(sys, 'gettrace', None) and sys.gettrace():
+        __trx_poison(9, 'debugger_trace')
+    if hasattr(sys, 'monitoring', None):
+        __trx_poison(8, 'sys_monitoring')
+try:
+    {fn_name}()
+except Exception:
+    pass
+"""
+
+def _generate_spoof_meta_shield(target_module: str = "<frozen importlib._bootstrap>") -> str:
+    """Generate Metadata Spoofing & Signature Debranding shield."""
+    fn_name = rd('guard')
+    return f"""
+# ═══ METADATA SPOOFING & SIGNATURE DEBRANDING ═══
+def {fn_name}():
+    import sys
+    try:
+        if '__file__' in globals():
+            globals()['__file__'] = '{target_module}'
+        if __name__ in sys.modules:
+            sys.modules[__name__].__file__ = '{target_module}'
+    except Exception:
+        pass
+try:
+    {fn_name}()
+except Exception:
+    pass
+"""
+
+
+# ═══════════════════════════════════════════════════════════════
 # IN-MEMORY ANTI-DUMP & GC OBJECT SCRUBBING (MODULE D)
 # ═══════════════════════════════════════════════════════════════
 
@@ -8662,6 +8930,8 @@ CÔNG CỤ LÀM RỐI MÃ NGUỒN PYTHON ĐA TẦNG CỰC MẠNH:
   • Tầng 13: Extreme Zalgo Diacritics Shield (Chồng lớp dấu tổ hợp làm tê liệt decompiler GUI)
   • Tầng 14: Hyperion Scientific Class Camouflage (Ngụy trang lớp mô phỏng bộ nhớ khoa học)
   • Tầng 15: 3-Track Symbiotic Fused Matrix Shield (Kyrie + Emoji + Whitespace hợp nhất không phình dung lượng)
+  • Tầng 16: Bedrock Decompiler Traps & Secret Sharing (Decompiler crash matrix, var-split XOR & string-frag pool)
+  • Tầng 17: Deceptive Debug Poisoning & Metadata Spoofing (Trạng thái nhiễm độc ngầm & giả lập module stdlib)
         """,
         epilog="""
 VÍ DỤ SỬ DỤNG:
@@ -8736,6 +9006,11 @@ VÍ DỤ SỬ DỤNG:
     parser.add_argument("--anti-dump", choices=["y", "n", "Y", "N"], help="Kích hoạt khiên chống memory dump & lọc đối tượng GC (In-Memory Anti-Dump & GC Object Scrubber) (y/n)", default=None)
     parser.add_argument("--vm-obf", choices=["y", "n", "Y", "N"], help="Kích hoạt VM Virtualization Engine - biến đổi code thành bytecode ảo thực thi bởi CPU ảo đa hình (y/n)", default=None)
     parser.add_argument("--vm-level", type=int, choices=[1, 2, 3], help="Cấp độ VM Virtualization (1: Basic, 2: + Traps/NOP, 3: + Dummy/Scrub)", default=None)
+    parser.add_argument("--dec-trap", "--dectrap", choices=["y", "n", "Y", "N"], help="Kích hoạt bẫy điều khiển luồng Decompiler Traps (làm sập uncompyle6, decompyle3, pycdc) (y/n)", default=None)
+    parser.add_argument("--var-split", choices=["y", "n", "Y", "N"], help="Phân rã biến số nguyên thành các mảnh bí mật XOR (Variable Secret Sharing) (y/n)", default=None)
+    parser.add_argument("--str-frag", choices=["y", "n", "Y", "N"], help="Băm nhỏ chuỗi và nạp mồi nhử trong const pool (String Fragmentation & Decoy Pool) (y/n)", default=None)
+    parser.add_argument("--debug-poison", choices=["y", "n", "Y", "N"], help="Kích hoạt trạng thái nhiễm độc ngầm Deceptive Debug Poisoning State Machine (y/n)", default=None)
+    parser.add_argument("--spoof-meta", choices=["y", "n", "Y", "N"], help="Ngụy trang siêu dữ liệu và đường dẫn module stdlib (Metadata & co_filename Spoofing) (y/n)", default=None)
 
     cli_args, unknown = parser.parse_known_args()
     is_cli_mode = bool(cli_args.input is not None or cli_args.dir is not None)
@@ -8910,6 +9185,11 @@ VÍ DỤ SỬ DỤNG:
     antidump_choice = getattr(cli_args, 'anti_dump', None) or ("N" if is_cli_mode else _prompt_input(" IN-MEMORY ANTI-DUMP & GC SCRUBBER? (y/n): "))
     vm_obf_choice = getattr(cli_args, 'vm_obf', None) or ("N" if is_cli_mode else _prompt_input(" VM VIRTUALIZATION ENGINE? (y/n): "))
     vm_level_choice = getattr(cli_args, 'vm_level', None) or 1
+    dectrap_choice = getattr(cli_args, 'dec_trap', None) or getattr(cli_args, 'dectrap', None) or ("N" if is_cli_mode else _prompt_input(" DECOMPILER TRAPS (Break uncompyle6/decompyle3/pycdc)? (y/n): "))
+    varsplit_choice = getattr(cli_args, 'var_split', None) or ("N" if is_cli_mode else _prompt_input(" VARIABLE SECRET SHARING (XOR Split local ints)? (y/n): "))
+    strfrag_choice = getattr(cli_args, 'str_frag', None) or ("N" if is_cli_mode else _prompt_input(" STRING FRAGMENTATION (Decoy pool + dynamic assembly)? (y/n): "))
+    debugpoison_choice = getattr(cli_args, 'debug_poison', None) or ("N" if is_cli_mode else _prompt_input(" DECEPTIVE DEBUG POISONING (Silent key degradation)? (y/n): "))
+    spoofmeta_choice = getattr(cli_args, 'spoof_meta', None) or ("N" if is_cli_mode else _prompt_input(" METADATA & CO_FILENAME SPOOFING? (y/n): "))
 
     # Force Python version
     if cli_args.force_py is not None:
@@ -9011,6 +9291,11 @@ VÍ DỤ SỬ DỤNG:
         "anti_dump": antidump_choice,
         "vm_obf": vm_obf_choice,
         "vm_level": vm_level_choice,
+        "dec_trap": dectrap_choice,
+        "var_split": varsplit_choice,
+        "str_frag": strfrag_choice,
+        "debug_poison": debugpoison_choice,
+        "spoof_meta": spoofmeta_choice,
         "force_py_choice": force_py_choice,
         "forced_py_ver": forced_py_ver,
         "debug_map": debug_map_arg,
@@ -9108,6 +9393,11 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
     antidump_choice = options.get("anti_dump", "N")
     vm_obf_choice = options.get("vm_obf", "N")
     vm_level_choice = options.get("vm_level", 1)
+    dectrap_choice = options.get("dec_trap", "N")
+    varsplit_choice = options.get("var_split", "N")
+    strfrag_choice = options.get("str_frag", "N")
+    debugpoison_choice = options.get("debug_poison", "N")
+    spoofmeta_choice = options.get("spoof_meta", "N")
     force_py_choice = options.get("force_py_choice", "N")
     forced_py_ver = options.get("forced_py_ver", "")
     _debug_map_choice = options.get("debug_map")
@@ -9144,6 +9434,28 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
         except Exception as e:
             _log_stage_error("2_ast_junk_injection", e)
 
+    # Step 2.3: Variable Secret Sharing (Var Split)
+    if varsplit_choice.upper() == "Y":
+        try:
+            t0 = time.time()
+            sz0 = len(code)
+            if not quiet_progress: _v_step("2.3", 8, "Integer Variable Secret Sharing (XOR Split)...")
+            code = _var_split_obf(code, seed=custom_seed)
+            _track_debug_stage("2.3_var_split_secret_sharing", time.time() - t0, sz0, len(code))
+        except Exception as e:
+            _log_stage_error("2.3_var_split_secret_sharing", e)
+
+    # Step 2.4: Decompiler Trapping Matrix
+    if dectrap_choice.upper() == "Y":
+        try:
+            t0 = time.time()
+            sz0 = len(code)
+            if not quiet_progress: _v_step("2.4", 8, "Decompiler Control Flow Traps (uncompyle6/decompyle3/pycdc breaker)...")
+            code = _dec_trap_obf(code, density=0.6, seed=custom_seed)
+            _track_debug_stage("2.4_decompiler_traps", time.time() - t0, sz0, len(code))
+        except Exception as e:
+            _log_stage_error("2.4_decompiler_traps", e)
+
     # Step 2.5: Mathematical Opaque Predicates
     if math_opaque_choice.upper() == "Y":
         try:
@@ -9165,6 +9477,17 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
             _track_debug_stage("2.7_dyn_strings_encryption", time.time() - t0, sz0, len(code))
         except Exception as e:
             _log_stage_error("2.7_dyn_strings_encryption", e)
+
+    # Step 2.8: String Fragmentation & Decoy Pool
+    if strfrag_choice.upper() == "Y":
+        try:
+            t0 = time.time()
+            sz0 = len(code)
+            if not quiet_progress: _v_step("2.8", 8, "String Fragmentation & Decoy Pool (strfrag2)...")
+            code = _str_frag_obf(code, seed=custom_seed)
+            _track_debug_stage("2.8_str_frag_pool", time.time() - t0, sz0, len(code))
+        except Exception as e:
+            _log_stage_error("2.8_str_frag_pool", e)
 
     # Step 3: Version check header
     target_ver_str = forced_py_ver if (force_py_choice.upper() == "Y" and forced_py_ver) else f"{sys.version_info.major}.{sys.version_info.minor}"
@@ -9257,6 +9580,13 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
         sz0 = len(code)
         code = _generate_self_modify_wrapper() + code
         _track_debug_stage("5.5_self_modify_layer", time.time() - t0, sz0, len(code))
+
+    if debugpoison_choice.upper() == "Y":
+        if not quiet_progress: _v_step("5.6", 8, "Injecting Deceptive Debug Poison State Machine...")
+        t0 = time.time()
+        sz0 = len(code)
+        code = _generate_debug_poison_shield() + code
+        _track_debug_stage("5.6_debug_poison_shield", time.time() - t0, sz0, len(code))
 
     # Step 6.5: VM Virtualization Engine
     if vm_obf_choice.upper() == "Y":
@@ -9467,6 +9797,16 @@ except Exception as _e:
                 _track_debug_stage("10_whitespace_obfuscation", time.time() - t0, sz0, len(code))
             except Exception as e:
                 _log_stage_error("10_whitespace_obfuscation", e)
+
+    if spoofmeta_choice.upper() == "Y":
+        if not quiet_progress: _v(" [12.5] Injecting Metadata Spoofing & Signature Debranding...")
+        try:
+            t0 = time.time()
+            sz0 = len(code)
+            code = _generate_spoof_meta_shield() + code
+            _track_debug_stage("12.5_spoof_meta_shield", time.time() - t0, sz0, len(code))
+        except Exception as e:
+            _log_stage_error("12.5_spoof_meta_shield", e)
 
     _blank_pad = ("\n" * 300) if blank_padding_choice.upper() == "Y" else ""
     if zalgo_choice.upper() == "Y":

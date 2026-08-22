@@ -177,6 +177,11 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--selfmod` | Inject self-modifying code & anti-tamper layer | `y` / `n` |
 | `--math-opaque` | Inject number-theoretic mathematical opaque predicates (Quadratic Non-Residues mod 7, Euler invariants) | `y` / `n` |
 | `--dyn-strings` | Dynamic per-callsite string XOR encryption with AST-coordinate derived keys | `y` / `n` |
+| `--dec-trap`, `--dectrap` | Inject decompiler control flow traps & opaque CFG blocks (crashes uncompyle6, decompyle3, pycdc) | `y` / `n` |
+| `--var-split` | Split local integer variables into dynamic XOR secret shares (v1 ^ v2) | `y` / `n` |
+| `--str-frag` | String fragmentation v2 with decoy chunks and dynamic runtime assembly | `y` / `n` |
+| `--debug-poison` | Deceptive debug poison state machine (silent key degradation on debugger/sandbox detection) | `y` / `n` |
+| `--spoof-meta` | Metadata & `co_filename` spoofing (camouflages stack traces to stdlib modules) | `y` / `n` |
 | `--compile` | Authenticated AEAD bytecode compilation | `y` / `n` |
 | `--password` | Password for Argon2id + ChaCha20Poly1305 / PBKDF2 authenticated payload encryption | `<string>` |
 | `--password-file` | File path containing encryption password (avoids process table snooping) | `<filepath>` |

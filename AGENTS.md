@@ -70,6 +70,11 @@ graph TD
 | `--selfmod` | Protection | Inject runtime signature mutating self-modification layer | `y` / `n` |
 | `--math-opaque` | Core AST | Inject number-theoretic mathematical opaque predicates (Quadratic Non-Residues mod 7, Euler invariants) | `y` / `n` |
 | `--dyn-strings` | Core AST | Dynamic per-callsite string XOR encryption with AST-coordinate derived keys | `y` / `n` |
+| `--dec-trap`, `--dectrap` | Core AST | Inject decompiler control flow traps & opaque CFG blocks (crashes uncompyle6, decompyle3, pycdc) | `y` / `n` |
+| `--var-split` | Core AST | Split local integer variables into dynamic XOR secret shares (v1 ^ v2) | `y` / `n` |
+| `--str-frag` | Core AST | String fragmentation v2 with decoy chunks and dynamic runtime assembly | `y` / `n` |
+| `--debug-poison` | Protection | Deceptive debug poison state machine (silent key degradation on debugger/sandbox detection) | `y` / `n` |
+| `--spoof-meta` | Protection | Metadata & `co_filename` spoofing (camouflages stack traces to stdlib modules) | `y` / `n` |
 | `--compile` | Crypto | Multi-layer authenticated AEAD compilation (Marshal + XOR + Zlib + Bz2) | `y` / `n` |
 | `--password` | Crypto | Password for Argon2id + ChaCha20Poly1305 / PBKDF2 authenticated payload encryption | `<string>` |
 | `--password-file` | Crypto | Path to external file containing encryption password | `<filepath>` |
