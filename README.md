@@ -226,7 +226,6 @@ python tests/test_07_reproducible.py
 python tests/test_08_dos_limits.py
 python tests/test_09_antivm_antidebug.py
 python tests/test_10_complex_realworld.py
-python complex_benchmark.py
 ```
 
 ---
