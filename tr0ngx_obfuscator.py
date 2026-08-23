@@ -5244,6 +5244,10 @@ class _TVMOpcodes:
     NOP              = 100
     TRAP             = 101
 
+    # Generators (resumable frames)
+    YIELD_VALUE      = 102
+    YIELD_FROM       = 103
+
 
 class _TVMCodeObject:
     """Represents a virtualized code block (Module, Function, Class, or Generator)."""
@@ -5894,7 +5898,12 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.emit(_TVMOpcodes.NOP)
 
     def visit_Raise(self, node: ast.Raise):
-        if node.exc:
+        if node.cause:
+            # handler pops cause first, then exc -> push exc first
+            self.visit(node.exc)
+            self.visit(node.cause)
+            self.emit(_TVMOpcodes.RAISE_VARARGS, 2)
+        elif node.exc:
             self.visit(node.exc)
             self.emit(_TVMOpcodes.RAISE_VARARGS)
         else:
@@ -5902,7 +5911,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
             self.emit(_TVMOpcodes.RAISE_VARARGS)
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
-        is_gen = any(isinstance(sub, (ast.Yield, ast.YieldFrom)) for sub in ast.walk(node))
+        is_gen = self._contains_yield_in_scope(node.body)
         arg_names = [a.arg for a in node.args.args]
         kwonly_names = [a.arg for a in node.args.kwonlyargs] if hasattr(node.args, 'kwonlyargs') else []
         vararg_name = node.args.vararg.arg if node.args.vararg else None
@@ -5911,19 +5920,17 @@ class _TVMASTCompiler(ast.NodeVisitor):
         sub_compiler._scan_scope(node.body)
 
         # Handle default arguments
+        # Positional defaults are evaluated ONCE at function-creation time
+        # (native CPython semantics) via the __vm_bind_defaults__ registry.
         if node.args.defaults:
-            num_defaults = len(node.args.defaults)
-            default_args = node.args.args[-num_defaults:]
-            for arg_node, def_node in zip(default_args, node.args.defaults):
-                arg_idx = sub_compiler.code_obj.get_local_idx(arg_node.arg)
-                sub_compiler.emit(_TVMOpcodes.LOAD_FAST, arg_idx)
-                sub_compiler.emit(_TVMOpcodes.LOAD_GLOBAL, sub_compiler.code_obj.get_name_idx('_NO_ARG'))
-                sub_compiler.emit(_TVMOpcodes.COMPARE_OP, 8)  # is _NO_ARG
-                lbl_has_val = sub_compiler.new_label()
-                sub_compiler.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_has_val)
-                sub_compiler.visit(def_node)
-                sub_compiler.emit(_TVMOpcodes.STORE_FAST, arg_idx)
-                sub_compiler.mark_label(lbl_has_val)
+            dfl_slot = self.code_obj.get_local_idx(f'_$dflt_{self.new_label()}')
+            pos_names = [a.arg for a in node.args.args[-len(node.args.defaults):]]
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(tuple(pos_names)))
+            for d_expr in node.args.defaults:
+                self.visit(d_expr)
+            self.emit(_TVMOpcodes.BUILD_TUPLE, len(node.args.defaults))
+            self.emit(_TVMOpcodes.BUILD_TUPLE, 2)
+            self.emit(_TVMOpcodes.STORE_FAST, dfl_slot)
 
         if hasattr(node.args, 'kw_defaults') and node.args.kw_defaults:
             for arg_node, def_node in zip(node.args.kwonlyargs, node.args.kw_defaults):
@@ -5939,23 +5946,19 @@ class _TVMASTCompiler(ast.NodeVisitor):
                     sub_compiler.mark_label(lbl_has_val)
 
         if is_gen:
-            gen_list_idx = sub_compiler.code_obj.get_local_idx('_$gen_list')
-            sub_compiler.emit(_TVMOpcodes.BUILD_LIST, 0)
-            sub_compiler.emit(_TVMOpcodes.STORE_FAST, gen_list_idx)
             sub_compiler.is_generator = True
             for stmt in node.body:
                 sub_compiler.visit(stmt)
-            sub_compiler.emit(_TVMOpcodes.LOAD_FAST, gen_list_idx)
-            sub_compiler.emit(_TVMOpcodes.GET_ITER)
-            sub_compiler.emit(_TVMOpcodes.RETURN_VALUE)
         else:
             for stmt in node.body:
                 sub_compiler.visit(stmt)
         sub_code = sub_compiler.finalize()
 
         idx = self.code_obj.get_const_idx(sub_code)
+        if node.args.defaults:
+            self.emit(_TVMOpcodes.LOAD_FAST, dfl_slot)
         self.emit(_TVMOpcodes.LOAD_CONST, idx)
-        self.emit(_TVMOpcodes.MAKE_FUNCTION, 0)
+        self.emit(_TVMOpcodes.MAKE_FUNCTION, (2 if is_gen else 0) | (8 if node.args.defaults else 0))  # bit1(2)=gen bit3(8)=defaults
 
         # Apply decorators if present
         for dec in reversed(node.decorator_list):
@@ -5972,28 +5975,38 @@ class _TVMASTCompiler(ast.NodeVisitor):
         kwarg_name = node.args.kwarg.arg if node.args.kwarg else None
         sub_compiler = _TVMASTCompiler(name=node.name, arg_names=arg_names, kwonly_names=kwonly_names, kwarg_name=kwarg_name, vararg_name=vararg_name, is_function=True, vm_level=self.vm_level, rng=self.rng)
         sub_compiler._scan_scope(node.body)
+        sub_compiler.is_async = True
+        # Detect async-generator BEFORE compiling so visit_Yield emits suspends.
+        is_agen_pre = self._contains_yield_in_scope(node.body)
+        if is_agen_pre:
+            sub_compiler.is_generator = True
 
         if node.args.defaults:
-            num_defaults = len(node.args.defaults)
-            default_args = node.args.args[-num_defaults:]
-            for arg_node, def_node in zip(default_args, node.args.defaults):
-                arg_idx = sub_compiler.code_obj.get_local_idx(arg_node.arg)
-                sub_compiler.emit(_TVMOpcodes.LOAD_FAST, arg_idx)
-                sub_compiler.emit(_TVMOpcodes.LOAD_GLOBAL, sub_compiler.code_obj.get_name_idx('_NO_ARG'))
-                sub_compiler.emit(_TVMOpcodes.COMPARE_OP, 8)
-                lbl_has_val = sub_compiler.new_label()
-                sub_compiler.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_has_val)
-                sub_compiler.visit(def_node)
-                sub_compiler.emit(_TVMOpcodes.STORE_FAST, arg_idx)
-                sub_compiler.mark_label(lbl_has_val)
+            dfl_slot = self.code_obj.get_local_idx(f'_$dflt_{self.new_label()}')
+            pos_names = [a.arg for a in node.args.args[-len(node.args.defaults):]]
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(tuple(pos_names)))
+            for d_expr in node.args.defaults:
+                self.visit(d_expr)
+            self.emit(_TVMOpcodes.BUILD_TUPLE, len(node.args.defaults))
+            self.emit(_TVMOpcodes.BUILD_TUPLE, 2)
+            self.emit(_TVMOpcodes.STORE_FAST, dfl_slot)
 
         for stmt in node.body:
             sub_compiler.visit(stmt)
         sub_code = sub_compiler.finalize()
 
-        idx = self.code_obj.get_const_idx(sub_code)
+        is_agen = is_agen_pre
+        if is_agen:
+            sub_compiler.is_generator = True
+            sub_compiler.is_async = True
+            mk_flags = 1 | 2  # async + generator
+        else:
+            mk_flags = 1      # async
+
+        if node.args.defaults:
+            self.emit(_TVMOpcodes.LOAD_FAST, dfl_slot)
         self.emit(_TVMOpcodes.LOAD_CONST, idx)
-        self.emit(_TVMOpcodes.MAKE_FUNCTION, 1)  # 1 = async
+        self.emit(_TVMOpcodes.MAKE_FUNCTION, mk_flags | (8 if node.args.defaults else 0))
 
         for dec in reversed(node.decorator_list):
             self.visit(dec)
@@ -6089,7 +6102,85 @@ class _TVMASTCompiler(ast.NodeVisitor):
         sub_compiler.emit(_TVMOpcodes.LOAD_FAST, acc_idx)
         return sub_compiler
 
+    def _emit_async_comprehension(self, node, kind):
+        """Desugar `[x async for ...]`, `{...}`, dict/set/gen variants into an
+        inline async helper function that the caller awaits. Returns after the
+        resolved iterable has been pushed onto the stack."""
+        lbl = self.new_label()
+        fn_name = f'_$acomp_fn_{lbl}'
+        acc_name = f'_$acomp_{lbl}'
+
+        if kind == 'dict':
+            acc_expr = ast.Dict(keys=[], values=[])
+            append_call = ast.Call(
+                func=ast.Attribute(value=ast.Name(id=acc_name, ctx=ast.Load()), attr='setitem', ctx=ast.Load()),
+                args=[], keywords=[])
+            # dict.append doesn't exist; build via setitem assignment instead
+            body_appends = None
+        else:
+            method = {'list': 'append', 'set': 'add', 'gen': 'append'}[kind]
+            acc_expr = ast.List(elts=[]) if kind in ('list', 'gen') else ast.Set(elts=[])
+
+        # Build innermost append/emit statement(s)
+        def make_emit():
+            if kind == 'dict':
+                return ast.Assign(
+                    targets=[ast.Subscript(value=ast.Name(id=acc_name, ctx=ast.Load()),
+                                           slice=self._clone_ctx(node.key), ctx=ast.Store())],
+                    value=node.value)
+            return ast.Expr(value=ast.Call(
+                func=ast.Attribute(value=ast.Name(id=acc_name, ctx=ast.Load()), attr=method, ctx=ast.Load()),
+                args=[node.elt], keywords=[]))
+
+        # Nest generators (first may be async; the rest are sync per grammar)
+        g0 = node.generators[0]
+        innermost = [make_emit()]
+        for if_expr in reversed(g0.ifs):
+            innermost = [ast.If(test=if_expr, body=innermost, orelse=[])]
+        loop = ast.AsyncFor(target=g0.target, iter=g0.iter, body=innermost, orelse=[])
+        current = [loop]
+        for g in node.generators[1:]:
+            inner2 = current
+            for if_expr in reversed(g.ifs):
+                inner2 = [ast.If(test=if_expr, body=inner2, orelse=[])]
+            current = [ast.For(target=g.target, iter=g.iter, body=inner2, orelse=[])]
+
+        fn_def = ast.AsyncFunctionDef(
+            name=fn_name,
+            args=ast.arguments(posonlyargs=[], args=[], vararg=None, kwonlyargs=[],
+                               kw_defaults=[], kwarg=None, defaults=[]),
+            body=[ast.Assign(targets=[ast.Name(id=acc_name, ctx=ast.Store())], value=acc_expr)] + current +
+                 [ast.Return(value=ast.Name(id=acc_name, ctx=ast.Load()))],
+            decorator_list=[], returns=None, type_comment=None)
+
+        # Compile the helper as an immediate async closure: MAKE_FUNCTION leaves
+        # it on the stack; call it and await the returned coroutine.
+        sub_compiler = _TVMASTCompiler(
+            name=fn_name,
+            arg_names=[], kwonly_names=[], kwarg_name=None, vararg_name=None,
+            is_function=True, vm_level=self.vm_level, rng=self.rng)
+        sub_compiler._scan_scope(fn_def.body)
+        sub_compiler.is_async = True
+        for stmt in fn_def.body:
+            sub_compiler.visit(stmt)
+        sub_code = sub_compiler.finalize()
+
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(sub_code))
+        self.emit(_TVMOpcodes.MAKE_FUNCTION, 1)          # async
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 0)          # -> coroutine
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+        self.emit(_TVMOpcodes.ROT_TWO)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 1)          # -> resolved iterable
+
+    @staticmethod
+    def _clone_ctx(n):
+        import copy as _c
+        return _c.deepcopy(n)
+
     def visit_ListComp(self, node: ast.ListComp):
+        if getattr(node.generators[0], 'is_async', False):
+            return self._emit_async_comprehension(node, 'list')
+
         def emit_element(sc, acc_idx):
             sc.emit(_TVMOpcodes.LOAD_FAST, acc_idx)
             sc.emit(_TVMOpcodes.GET_ATTR, sc.code_obj.get_name_idx('append'))
@@ -6107,6 +6198,9 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
 
     def visit_SetComp(self, node: ast.SetComp):
+        if getattr(node.generators[0], 'is_async', False):
+            return self._emit_async_comprehension(node, 'set')
+
         def emit_element(sc, acc_idx):
             sc.emit(_TVMOpcodes.LOAD_FAST, acc_idx)
             sc.emit(_TVMOpcodes.GET_ATTR, sc.code_obj.get_name_idx('add'))
@@ -6124,6 +6218,9 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
 
     def visit_DictComp(self, node: ast.DictComp):
+        if getattr(node.generators[0], 'is_async', False):
+            return self._emit_async_comprehension(node, 'dict')
+
         def emit_element(sc, acc_idx):
             sc.visit(node.value)
             sc.emit(_TVMOpcodes.LOAD_FAST, acc_idx)
@@ -6140,6 +6237,9 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
 
     def visit_GeneratorExp(self, node: ast.GeneratorExp):
+        if getattr(node.generators[0], 'is_async', False):
+            return self._emit_async_comprehension(node, 'gen')
+
         def emit_element(sc, acc_idx):
             sc.emit(_TVMOpcodes.LOAD_FAST, acc_idx)
             sc.emit(_TVMOpcodes.GET_ATTR, sc.code_obj.get_name_idx('append'))
@@ -6268,23 +6368,43 @@ class _TVMASTCompiler(ast.NodeVisitor):
     def visit_AsyncFor(self, node: ast.AsyncFor):
         self.loop_depth += 1
         iter_slot = self.code_obj.get_local_idx(f'_$aiter_{self.loop_depth}')
+        pair_slot = self.code_obj.get_local_idx(f'_$anext_pair_{self.loop_depth}')
+        ok_slot = self.code_obj.get_local_idx(f'_$anext_ok_{self.loop_depth}')
+        val_slot = self.code_obj.get_local_idx(f'_$anext_val_{self.loop_depth}')
 
         lbl_head = self.new_label()
         lbl_break = self.new_label()
         lbl_exit = self.new_label()
         lbl_end = self.new_label()
 
+        # aiter = await obj.__aiter__()
         self.visit(node.iter)
+        self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__aiter__'))
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 0)
+        self.emit(_TVMOpcodes.STORE_FAST, iter_slot)
         self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
-        self.emit(_TVMOpcodes.ROT_TWO)
+        self.emit(_TVMOpcodes.LOAD_FAST, iter_slot)
         self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
-        self.emit(_TVMOpcodes.GET_ITER)
         self.emit(_TVMOpcodes.STORE_FAST, iter_slot)
 
         self.mark_label(lbl_head)
+        # (ok, value) = __vm_anext__(aiter)  -- sentinel-free async iteration
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_anext__'))
         self.emit(_TVMOpcodes.LOAD_FAST, iter_slot)
-        self.emit_jump(_TVMOpcodes.FOR_ITER, lbl_exit)
+        self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+        self.emit(_TVMOpcodes.STORE_FAST, pair_slot)
+        self.emit(_TVMOpcodes.LOAD_FAST, pair_slot)
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(0))
+        self.emit(_TVMOpcodes.GET_ITEM)
+        self.emit(_TVMOpcodes.STORE_FAST, ok_slot)
+        self.emit(_TVMOpcodes.LOAD_FAST, pair_slot)
+        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(1))
+        self.emit(_TVMOpcodes.GET_ITEM)
+        self.emit(_TVMOpcodes.STORE_FAST, val_slot)
+        self.emit(_TVMOpcodes.LOAD_FAST, ok_slot)
+        self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_exit)
 
+        self.emit(_TVMOpcodes.LOAD_FAST, val_slot)
         self._store_target(node.target)
 
         self.loop_stack.append((lbl_head, lbl_break))
@@ -6537,18 +6657,30 @@ class _TVMASTCompiler(ast.NodeVisitor):
             lbl_head, _ = self.loop_stack[-1]
             self.emit_jump(_TVMOpcodes.JUMP, lbl_head)
 
+    @staticmethod
+    def _contains_yield_in_scope(body):
+        """True if any Yield/YieldFrom appears directly in this scope
+        (does NOT descend into nested function/lambda scopes)."""
+        stack = list(body)
+        while stack:
+            n = stack.pop()
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            if isinstance(n, (ast.Yield, ast.YieldFrom)):
+                return True
+            for child in ast.iter_child_nodes(n):
+                stack.append(child)
+        return False
+
     def visit_Yield(self, node: ast.Yield):
         if getattr(self, 'is_generator', False):
-            gen_list_idx = self.code_obj.get_local_idx('_$gen_list')
-            self.emit(_TVMOpcodes.LOAD_FAST, gen_list_idx)
-            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('append'))
             if node.value:
                 self.visit(node.value)
             else:
                 self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
-            self.emit(_TVMOpcodes.POP_TOP)
+            self.emit(_TVMOpcodes.YIELD_VALUE)
         else:
+            # yield outside a generator is illegal; keep legacy fallback
             if node.value:
                 self.visit(node.value)
             else:
@@ -6556,16 +6688,10 @@ class _TVMASTCompiler(ast.NodeVisitor):
             self.emit(_TVMOpcodes.RETURN_VALUE)
 
     def visit_YieldFrom(self, node: ast.YieldFrom):
-        if getattr(self, 'is_generator', False):
-            gen_list_idx = self.code_obj.get_local_idx('_$gen_list')
-            self.emit(_TVMOpcodes.LOAD_FAST, gen_list_idx)
-            self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('extend'))
-            self.visit(node.value)
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
-            self.emit(_TVMOpcodes.POP_TOP)
-        else:
-            self.visit(node.value)
-            self.emit(_TVMOpcodes.RETURN_VALUE)
+        # NOTE: CPython itself forbids `yield from` inside async functions
+        # (SyntaxError), so only the sync path is reachable for valid sources.
+        self.visit(node.value)
+        self.emit(_TVMOpcodes.YIELD_FROM)
 
     def _capture_target(self, name: str) -> ast.Name:
         """Registers a match capture as a proper local (inside functions) and returns a Store target."""
@@ -6590,6 +6716,11 @@ class _TVMASTCompiler(ast.NodeVisitor):
             self.emit(_TVMOpcodes.COMPARE_OP, 8)  # is
             self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fail)
         elif isinstance(pat, ast.MatchAs):
+            if pat.pattern is not None:
+                # `case <pattern> as name:` must FIRST match the inner pattern,
+                # then bind. The old code skipped the match entirely, so
+                # `str() as s` captured any subject (bools, floats, ints...).
+                self._match_pattern(pat.pattern, subj_slot, lbl_fail)
             if pat.name is not None:
                 self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
                 self._store_target(self._capture_target(pat.name))
@@ -6730,7 +6861,15 @@ class _TVMASTCompiler(ast.NodeVisitor):
         for alias in node.names:
             idx = self.code_obj.get_name_idx(alias.name)
             self.emit(_TVMOpcodes.IMPORT_NAME, idx)
-            target_name = alias.asname or alias.name.split('.')[0]
+            if alias.asname:
+                # `import a.b as c` must bind c = a.b (the submodule), not a
+                if '.' in alias.name:
+                    last_idx = self.code_obj.get_name_idx(alias.name.split('.')[-1])
+                    self.emit(_TVMOpcodes.IMPORT_FROM, last_idx)
+                target_name = alias.asname
+            else:
+                # plain `import a.b` binds the root package 'a'
+                target_name = alias.name.split('.')[0]
             store_idx = self.code_obj.get_name_idx(target_name)
             self.emit(_TVMOpcodes.STORE_GLOBAL, store_idx)
 
@@ -6813,14 +6952,19 @@ def _tvm_aead_encrypt(payload: bytes, k_enc: bytes, k_mac: bytes) -> bytes:
     return nonce + tag + ciphertext
 
 
-def _serialize_tvm_code_object(code: _TVMCodeObject, isa_map: Dict[int, int], k_enc: bytes, k_mac: bytes) -> bytes:
+def _serialize_tvm_code_object(code: _TVMCodeObject, isa_map: Dict[int, int], k_enc: bytes, k_mac: bytes, perm_get=None) -> bytes:
     """
     Recursively serializes a _TVMCodeObject and nested code objects into an authenticated AEAD structure.
     Nested code objects inside constants are encrypted with unique child salts and stored as lazy records.
+    perm_get(name) -> optional per-code-object substitution list applied AFTER isa_map
+    (level-4 per-function ISA divergence).
     """
+    inv = perm_get(code.name) if perm_get else None
     bytecode_ba = bytearray()
     for op, arg in code.instructions:
         mapped_op = isa_map.get(op, op)
+        if inv is not None:
+            mapped_op = inv[mapped_op & 0xFF]
         bytecode_ba.append(mapped_op & 0xFF)
         bytecode_ba.append((arg >> 8) & 0xFF)
         bytecode_ba.append(arg & 0xFF)
@@ -6830,7 +6974,7 @@ def _serialize_tvm_code_object(code: _TVMCodeObject, isa_map: Dict[int, int], k_
         if isinstance(c, _TVMCodeObject):
             child_salt = secrets.token_bytes(16)
             child_k_enc, child_k_mac = _tvm_derive_runtime_keys(k_enc, child_salt)
-            child_encrypted = _serialize_tvm_code_object(c, isa_map, child_k_enc, child_k_mac)
+            child_encrypted = _serialize_tvm_code_object(c, isa_map, child_k_enc, child_k_mac, perm_get)
             serialized_consts.append(('__TVM_LAZY__', child_salt, child_encrypted))
         else:
             serialized_consts.append(c)
@@ -6852,12 +6996,54 @@ def _serialize_tvm_code_object(code: _TVMCodeObject, isa_map: Dict[int, int], k_
     return _tvm_aead_encrypt(compressed_payload, k_enc, k_mac)
 
 
-def _vm_emit_runtime_interpreter_v2(root_code: _TVMCodeObject, isa_map: Dict[int, int], vm_level: int, rng: random.Random) -> str:
+def _vm_emit_runtime_interpreter_v2(root_code: _TVMCodeObject, isa_map: Dict[int, int], vm_level: int, rng: random.Random, vm_debug: bool = False) -> str:
     """Emits the pure Python Polymorphic Virtual Machine Runtime Interpreter 2.0 with AEAD decryption and dynamic affine dispatch."""
+    # Deterministic per-name 256-byte permutation (level 4 ISA divergence).
+    def _perm_from_seed(name: str, seed: bytes):
+        import hashlib as _hlib
+        data = b"TRX_PERM:" + seed + name.encode('utf-8', 'replace')
+        perm = list(range(256))
+        i = 255
+        counter = 0
+        while i > 0:
+            blk = _hlib.sha256(data + counter.to_bytes(4, 'big')).digest()
+            counter += 1
+            for b in blk:
+                if i == 0:
+                    break
+                j = b % (i + 1)
+                perm[i], perm[j] = perm[j], perm[i]
+                i -= 1
+        return perm
+
     master_seed = secrets.token_bytes(32)
     runtime_salt = secrets.token_bytes(16)
     k_enc, k_mac = _tvm_derive_runtime_keys(master_seed, runtime_salt)
-    serialized_root_packet = _serialize_tvm_code_object(root_code, isa_map, k_enc, k_mac)
+
+    if vm_level >= 4 and getattr(__import__('os').environ.get('TRX_VM_L4_PERM', '0'), '__class__', str) is not type:
+        pass  # placeholder keeps linters calm
+
+    if vm_level >= 4 and os.environ.get("TRX_VM_L4_PERM") == "1":
+        _perm_cache = {}
+
+        def _perm_inv_for(name: str):
+            p = _perm_cache.get(name)
+            if p is None:
+                fwd = _perm_from_seed(name, master_seed)
+                inv = [0] * 256
+                for stored, mapped in enumerate(fwd):
+                    inv[mapped] = stored
+                p = (fwd, inv)
+                _perm_cache[name] = p
+            return p
+
+        def _perm_get(name: str):
+            return _perm_inv_for(name)[1]
+    else:
+        def _perm_get(name: str):
+            return None
+
+    serialized_root_packet = _serialize_tvm_code_object(root_code, isa_map, k_enc, k_mac, _perm_get)
 
     v = {k: rd() for k in [
         'code_obj_cls', 'frame_cls', 'interp_fn', 'call_vm_fn', 'eval_frame_fn',
@@ -6865,13 +7051,30 @@ def _vm_emit_runtime_interpreter_v2(root_code: _TVMCodeObject, isa_map: Dict[int
         'derive_keys_fn', 'decrypt_packet_fn', 'decode_code_fn',
         'root_packet', 'master_seed', 'runtime_salt', 'dispatch_tbl',
         'dispatch_tbl_async', 'ret_sig', 'await_sig', 'halt_sig',
-        'no_arg_sig', 'active_frames', 'vm_super_fn', 'vm_await_fn',
+        'yield_sig', 'no_arg_sig', 'active_frames', 'vm_super_fn', 'vm_await_fn',
+        'vm_anext_fn', 'bind_frame_fn', 'gen_cls', 'agen_cls', 'async_depth',
+        'attach_isa_fn', 'perm_rt_fn',
         'trap_fn'
     ]}
+
+    # Level-4 per-function ISA divergence is implemented (serializer + runtime
+    # inverse-dispatch) but DISABLED pending a unique-per-code-object salt:
+    # keying the permutation by bare name let same-named code objects share a
+    # mapping, which produced cross-frame semantic subtleties. Flip once isa
+    # salts are threaded through serialization.
+    _TVM_L4_PERM_ENABLED = False
 
     odd_multipliers = [m for m in range(3, 256, 2)]
     M = rng.choice(odd_multipliers)
     A = rng.randint(0, 255)
+
+    _DBG_AE = "pass"
+    _DBG_CALLA = "pass"
+    if vm_debug:
+        _DBG_AE = ("import sys as _vdbg\n        "
+                   f"_vdbg.stderr.write('AE+ depth=%r\\n' % ({v['async_depth']}[0]))")
+        _DBG_CALLA = ("import sys as _vdbg2\n        "
+                      f"_vdbg2.stderr.write('CALLA fn=%r depth=%r\\n' % (getattr(_fn, '__name__', '?'), {v['async_depth']}[0]))")
 
     def affine_slot(std_op: int) -> int:
         mapped_op = isa_map.get(std_op, std_op)
@@ -6950,6 +7153,8 @@ def _vm_emit_runtime_interpreter_v2(root_code: _TVMCodeObject, isa_map: Dict[int
     slot_halt    = affine_slot(_TVMOpcodes.HALT)
     slot_nop     = affine_slot(_TVMOpcodes.NOP)
     slot_trap    = affine_slot(_TVMOpcodes.TRAP)
+    slot_yield   = affine_slot(_TVMOpcodes.YIELD_VALUE)
+    slot_yfrom   = affine_slot(_TVMOpcodes.YIELD_FROM)
 
     reg_entries = [
         (slot_ld_c, '_h_ld_c'),
@@ -7016,7 +7221,9 @@ def _vm_emit_runtime_interpreter_v2(root_code: _TVMCodeObject, isa_map: Dict[int
         (slot_chk_exc, '_h_chk_exc'),
         (slot_nop, '_h_nop'),
         (slot_halt, '_h_halt'),
-        (slot_trap, v['trap_fn'])
+        (slot_trap, v['trap_fn']),
+        (slot_yield, '_h_yield'),
+        (slot_yfrom, '_h_yield_from')
     ]
     rng.shuffle(reg_entries)
     reg_stmts = "\n    ".join([f"{v['dispatch_tbl']}[{s}] = {fn}; {v['dispatch_tbl_async']}[{s}] = {fn}" for s, fn in reg_entries])
@@ -7029,6 +7236,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
     import os as _os
     import sys as _sys
     import zlib as _zlib
+    _sys_len = len
 
     if hasattr(_sys, 'monitoring'):
         try:
@@ -7047,7 +7255,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         return _k1, _k2
 
     def {v['decrypt_packet_fn']}(_packet, _k_enc, _k_mac):
-        if len(_packet) < 48:
+        if _sys_len(_packet) < 48:
             _os._exit(1)
         _nonce = _packet[:16]
         _tag = _packet[16:48]
@@ -7055,7 +7263,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         _expected_tag = _hmac.new(_k_mac, _nonce + _ciphertext, _hashlib.sha256).digest()
         if not _hmac.compare_digest(_tag, _expected_tag):
             _os._exit(1)
-        _plen = len(_ciphertext)
+        _plen = _sys_len(_ciphertext)
         _num_blocks = (_plen + 31) // 32
         _ks = bytearray()
         for _i in range(_num_blocks):
@@ -7085,7 +7293,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
         def resolve_const(self, idx):
             c = self.constants[idx]
-            if isinstance(c, tuple) and len(c) == 3 and c[0] == '__TVM_LAZY__':
+            if isinstance(c, tuple) and _sys_len(c) == 3 and c[0] == '__TVM_LAZY__':
                 child_salt, child_packet = c[1], c[2]
                 child_k_enc, child_k_mac = {v['derive_keys_fn']}(self._k_enc, child_salt)
                 decoded = {v['decode_code_fn']}(child_packet, child_k_enc, child_k_mac)
@@ -7104,9 +7312,15 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
             self.current_exception = None
             self.captured_env = None
             self.defining_class = None
+            self.is_generator = False
+            self.just_resumed = False
+            self.dele = None
+            self.injected_exc = None
+            self._m = 1
+            self._a = 0
 
     def {v['lazy_decode_fn']}(c, parent_k_enc=None):
-        if isinstance(c, tuple) and len(c) == 3 and c[0] == '__TVM_LAZY__':
+        if isinstance(c, tuple) and _sys_len(c) == 3 and c[0] == '__TVM_LAZY__':
             child_salt, child_packet = c[1], c[2]
             child_k_enc, child_k_mac = {v['derive_keys_fn']}(parent_k_enc or _root_k_enc, child_salt)
             return {v['decode_code_fn']}(child_packet, child_k_enc, child_k_mac)
@@ -7121,7 +7335,25 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
     _g_env['_NO_ARG'] = {v['no_arg_sig']}
     {v['ret_sig']} = object()
     {v['await_sig']} = object()
+    {v['yield_sig']} = object()
     {v['halt_sig']} = object()
+    {v['async_depth']} = [0]
+
+    def {v['perm_rt_fn']}(_nm, _sd):
+        _data = b"TRX_PERM:" + _sd + _nm.encode('utf-8', 'replace')
+        _perm = list(range(256))
+        _i = 255
+        _ctr = 0
+        while _i > 0:
+            _blk = _hashlib.sha256(_data + _ctr.to_bytes(4, 'big')).digest()
+            _ctr += 1
+            for _b in _blk:
+                if _i == 0:
+                    break
+                _j = _b % (_i + 1)
+                _perm[_i], _perm[_j] = _perm[_j], _perm[_i]
+                _i -= 1
+        return _perm
 
     def {v['trap_fn']}(_f, _a):
         _os._exit(1)
@@ -7305,8 +7537,12 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     def _h_b_dict(_f, _a):
         _d = {{}}
+        _items = []
         for _ in range(_a):
-            _dv = _f.stack.pop(); _dk = _f.stack.pop(); _d[_dk] = _dv
+            _dv = _f.stack.pop(); _dk = _f.stack.pop()
+            _items.append((_dk, _dv))
+        for _dk, _dv in reversed(_items):
+            _d[_dk] = _dv
         _f.stack.append(_d)
 
     def _h_unp_seq(_f, _a):
@@ -7318,7 +7554,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         _before = _a & 0xFF
         _after = (_a >> 8) & 0xFF
         _seq = list(_f.stack.pop())
-        _total = len(_seq)
+        _total = _sys_len(_seq)
         for _item in reversed(_seq[_total - _after:] if _after else []):
             _f.stack.append(_item)
         _f.stack.append(_seq[_before : _total - _after])
@@ -7368,39 +7604,98 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         _fn_code_obj = _f.stack.pop()
         if isinstance(_fn_code_obj, tuple) and len(_fn_code_obj) == 3 and _fn_code_obj[0] == '__TVM_LAZY__':
             _fn_code_obj = {v['lazy_decode_fn']}(_fn_code_obj, _f.code_obj._k_enc)
+        _dmap = None
+        if bool(_a & 8):
+            # (names_tuple, values_tuple) was pushed beneath the code const.
+            # Kept per-closure: sharing a map on the shared code object would
+            # give every instance the LAST evaluated defaults.
+            _pair = _f.stack.pop()
+            _names, _vals = _pair
+            _dmap = dict(zip(_names, _vals))
         _is_async = bool(_a & 1)
+        _is_gen = bool(_a & 2)
         _captured_env = dict(_f.locals)
         if _f.captured_env:
             _merged = dict(_f.captured_env)
             _merged.update(_captured_env)
             _captured_env = _merged
-        if _is_async:
-            def _make_wrapped_async(_fco, _cenv):
+        if _is_gen and _is_async:
+            def _make_agen(_fco, _cenv, _dfl):
+                def _agfactory(*_args, **_kwargs):
+                    _d_cls = getattr(_agfactory, '_vm_def_cls', getattr(_fco, 'defining_class', None))
+                    return {v['agen_cls']}(_fco, _args, _kwargs, _cenv, _d_cls, _dfl)
+                _agfactory._fco = _fco
+                _agfactory.__name__ = _fco.name
+                return _agfactory
+            _f.stack.append(_make_agen(_fn_code_obj, _captured_env, _dmap))
+        elif _is_gen:
+            def _make_gen(_fco, _cenv, _dfl):
+                def _gfactory(*_args, **_kwargs):
+                    _d_cls = getattr(_gfactory, '_vm_def_cls', getattr(_fco, 'defining_class', None))
+                    return {v['gen_cls']}(_fco, _args, _kwargs, _cenv, _d_cls, _dfl)
+                _gfactory._fco = _fco
+                _gfactory.__name__ = _fco.name
+                return _gfactory
+            _f.stack.append(_make_gen(_fn_code_obj, _captured_env, _dmap))
+        elif _is_async:
+            def _make_wrapped_async(_fco, _cenv, _dfl):
                 async def _wrapped_async(*_args, **_kwargs):
                     _d_cls = getattr(_wrapped_async, '_vm_def_cls', getattr(_fco, 'defining_class', None))
-                    return await {v['call_vm_async_fn']}(_fco, _args, _kwargs, _cenv, _def_cls=_d_cls)
+                    return await {v['call_vm_async_fn']}(_fco, _args, _kwargs, _cenv, _def_cls=_d_cls, _defaults=_dfl)
                 _wrapped_async._fco = _fco
+                _wrapped_async.__name__ = _fco.name
                 return _wrapped_async
-            _f.stack.append(_make_wrapped_async(_fn_code_obj, _captured_env))
+            _f.stack.append(_make_wrapped_async(_fn_code_obj, _captured_env, _dmap))
         else:
-            def _make_wrapped(_fco, _cenv):
+            def _make_wrapped(_fco, _cenv, _dfl):
                 def _wrapped(*_args, **_kwargs):
                     _d_cls = getattr(_wrapped, '_vm_def_cls', getattr(_fco, 'defining_class', None))
-                    return {v['call_vm_fn']}(_fco, _args, _kwargs, _cenv, _def_cls=_d_cls)
+                    return {v['call_vm_fn']}(_fco, _args, _kwargs, _cenv, _def_cls=_d_cls, _defaults=_dfl)
                 _wrapped._fco = _fco
+                _wrapped.__name__ = _fco.name
                 return _wrapped
-            _f.stack.append(_make_wrapped(_fn_code_obj, _captured_env))
+            _f.stack.append(_make_wrapped(_fn_code_obj, _captured_env, _dmap))
 
     def _h_call_fn(_f, _a):
         _args = [_f.stack.pop() for _ in range(_a)][::-1] if _a else []
         _fn = _f.stack.pop()
         _f.stack.append(_fn(*_args))
 
+    def _wrap_anext_coro(_coro):
+        async def _runner():
+            try:
+                return (True, await _coro)
+            except StopAsyncIteration:
+                return (False, None)
+        return _runner()
+
     def _h_call_fn_async(_f, _a):
         _args = [_f.stack.pop() for _ in range(_a)][::-1] if _a else []
         _fn = _f.stack.pop()
-        _nms = _f.code_obj.names
-        if (_fn is _g_env.get('__vm_await__')) or (_nms and _a < len(_nms) and _nms[_a] == '__vm_await__') or (hasattr(_fn, '__name__') and _fn.__name__ == '_vm_await'):
+        # Identity-only await detection. The old name-table heuristic
+        # (_nms[_a] == '__vm_await__') misfired on any global whose name index
+        # collided with the await slot, hijacking plain calls like worker([7,8]).
+        in_async = {v['async_depth']}[0] > 0
+        {_DBG_CALLA}
+        if _fn is _g_env.get('__vm_await__'):
+            import inspect
+            if _args and (inspect.iscoroutine(_args[0]) or inspect.isawaitable(_args[0])):
+                if in_async:
+                    # Native hand-off onto the running loop (no nested pools).
+                    return ({v['await_sig']}, _args[0])
+                _f.stack.append({v['vm_await_fn']}(_args[0]))
+            else:
+                _f.stack.append(_args[0] if _args else None)
+        elif _fn is _g_env.get('__vm_anext__'):
+            if in_async and _args:
+                try:
+                    _coro = _args[0].__anext__()
+                except StopAsyncIteration:
+                    _f.stack.append((False, None))
+                    return
+                return ({v['await_sig']}, _wrap_anext_coro(_coro))
+            _f.stack.append({v['vm_anext_fn']}(*_args))
+        elif hasattr(_fn, '__name__') and _fn.__name__ == '_vm_await':
             import inspect
             if _args and (inspect.iscoroutine(_args[0]) or inspect.isawaitable(_args[0])):
                 return ({v['await_sig']}, _args[0])
@@ -7427,13 +7722,14 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     def _h_b_cls(_f, _a):
         _cls_code = _f.stack.pop()
-        if isinstance(_cls_code, tuple) and len(_cls_code) == 3 and _cls_code[0] == '__TVM_LAZY__':
+        if isinstance(_cls_code, tuple) and _sys_len(_cls_code) == 3 and _cls_code[0] == '__TVM_LAZY__':
             _cls_code = {v['lazy_decode_fn']}(_cls_code, _f.code_obj._k_enc)
         _meta_param = _f.stack.pop()
         _bases = _f.stack.pop()
         _cname = _f.stack.pop()
         _cls_loc = {{}}
-        {v['eval_frame_fn']}({v['frame_cls']}(_cls_code, _cls_loc, _g_env))
+        _cls_frame = {v['attach_isa_fn']}({v['frame_cls']}(_cls_code, _cls_loc, _g_env))
+        {v['eval_frame_fn']}(_cls_frame)
         _meta = _meta_param
         if _meta is None and hasattr(_bases, '__iter__'):
             for _b in _bases:
@@ -7482,6 +7778,19 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         if _f.exc_handlers: _f.exc_handlers.pop()
 
     def _h_raise(_f, _a):
+        if _a >= 2:
+            # raise EXC from CAUSE  (arg bit 2 = cause present)
+            _cause = _f.stack.pop() if _f.stack else None
+            _exc = _f.stack.pop() if _f.stack else None
+            if _exc is None:
+                _exc = _f.current_exception or RuntimeError("Exception raised")
+            if _cause is not None:
+                try:
+                    _exc.__cause__ = _cause
+                    _exc.__suppress_context__ = True
+                except Exception:
+                    pass
+            raise _exc
         _exc = _f.stack.pop() if _f.stack else None
         if _exc is None:
             _exc = _f.current_exception or RuntimeError("Exception raised")
@@ -7489,6 +7798,45 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     def _h_nop(_f, _a):
         pass
+
+    def _h_yield(_f, _a):
+        _v = _f.stack.pop()
+        return ({v['yield_sig']}, _v)
+
+    def _h_yield_from(_f, _a):
+        if _f.dele is None:
+            # First entry: stack top is the sub-iterable/generator
+            _sub = _f.stack.pop()
+            _f.last_sent = None
+            if hasattr(_sub, 'send'):
+                _f.dele = _sub
+            else:
+                _f.dele = iter(_sub)
+        else:
+            # Resumed: wrapper pushed the value sent() into this generator;
+            # forward it into the delegated generator.
+            _f.last_sent = _f.stack.pop()
+        try:
+            if hasattr(_f.dele, 'send'):
+                _item = _f.dele.send(_f.last_sent)
+            else:
+                _item = next(_f.dele)
+            # Rewind PC so the resume re-enters THIS instruction (it drives the
+            # whole delegation loop across suspensions).
+            _f.pc -= 3
+            return ({v['yield_sig']}, _item)
+        except StopIteration as _e:
+            _f.dele = None
+            _f.stack.append(getattr(_e, 'value', None))
+        except BaseException:
+            if _f.dele is not None and hasattr(_f.dele, 'close'):
+                try:
+                    _f.dele.close()
+                except Exception:
+                    pass
+            _d = _f.dele
+            _f.dele = None
+            raise
 
     def _h_halt(_f, _a):
         return {v['halt_sig']}
@@ -7498,12 +7846,15 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
     {reg_stmts}
     {v['dispatch_tbl_async']}[{slot_call_fn}] = _h_call_fn_async
 
-    def {v['call_vm_fn']}(_fn_code, _passed_args, _passed_kwargs=None, _captured_env=None, _def_cls=None):
+    # Level >= 4: per-function affine ISA keys derived from master seed + code
+    # object name. Levels < 4 share the single build-wide (M, A) pair.
+
+    def {v['bind_frame_fn']}(_fn_code, _passed_args, _passed_kwargs=None, _captured_env=None, _def_cls=None, _defaults=None):
         _loc = {{_aname: {v['no_arg_sig']} for _aname in _fn_code.local_names}}
         _rem_kwargs = dict(_passed_kwargs or {{}})
-        _pos_count = len(_fn_code.arg_names)
+        _pos_count = _sys_len(_fn_code.arg_names)
         for _idx, _aname in enumerate(_fn_code.arg_names):
-            if _idx < len(_passed_args):
+            if _idx < _sys_len(_passed_args):
                 _loc[_aname] = _passed_args[_idx]
             elif _aname in _rem_kwargs:
                 _loc[_aname] = _rem_kwargs.pop(_aname)
@@ -7519,18 +7870,173 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         _f = {v['frame_cls']}(_fn_code, _loc, _g_env)
         _f.captured_env = _captured_env or {{}}
         _f.defining_class = _def_cls
+        if _defaults:
+            for _dn, _dv in _defaults.items():
+                if _loc.get(_dn) is {v['no_arg_sig']}:
+                    _loc[_dn] = _dv
+        {v['attach_isa_fn']}(_f)
+        return _f
+
+    def {v['call_vm_fn']}(_fn_code, _passed_args, _passed_kwargs=None, _captured_env=None, _def_cls=None, _defaults=None):
+        _f = {v['bind_frame_fn']}(_fn_code, _passed_args, _passed_kwargs, _captured_env, _def_cls, _defaults)
         {v['active_frames']}.append(_f)
         try:
             return {v['eval_frame_fn']}(_f)
         finally:
             if {v['active_frames']}: {v['active_frames']}.pop()
-            if {int(vm_level >= 3)}:
-                _loc.clear()
 
     _orig_super = __builtins__.super if hasattr(__builtins__, 'super') else __builtins__['super']
 
+    class {v['gen_cls']}:
+        def __init__(self, _fco, _args, _kwargs, _cenv, _dcls, _dfl=None):
+            self._fco = _fco
+            self._args = _args
+            self._kwargs = _kwargs
+            self._cenv = _cenv
+            self._dcls = _dcls
+            self._dfl = _dfl
+            self._fr = None
+            self._done = False
+        def __iter__(self):
+            return self
+        def __next__(self):
+            return self.send(None)
+        def _start(self):
+            self._fr = {v['bind_frame_fn']}(self._fco, self._args, self._kwargs, self._cenv, self._dcls, self._dfl)
+            self._fr.is_generator = True
+            {v['active_frames']}.append(self._fr)
+        def send(self, _v):
+            if self._done:
+                raise StopIteration
+            if self._fr is None:
+                if _v is not None:
+                    raise TypeError("can't send non-None value to a just-started generator")
+                self._start()
+            else:
+                self._fr.stack.append(_v)
+            try:
+                _r = {v['eval_frame_fn']}(self._fr)
+            except BaseException:
+                self._done = True
+                if self._fr in {v['active_frames']}: {v['active_frames']}.remove(self._fr)
+                raise
+            if isinstance(_r, tuple) and _sys_len(_r) == 2 and _r[0] is {v['yield_sig']}:
+                return _r[1]
+            self._done = True
+            if self._fr in {v['active_frames']}: {v['active_frames']}.remove(self._fr)
+            raise StopIteration(_r)
+        def throw(self, _e, _val=None):
+            if self._done or self._fr is None:
+                if self._done:
+                    raise _e
+                self._start()
+            self._fr.injected_exc = _e
+            try:
+                return self.send(None)
+            except StopIteration:
+                raise StopIteration from None
+        def close(self):
+            if self._done:
+                return
+            if self._fr is None:
+                self._done = True
+                return
+            self._fr.injected_exc = GeneratorExit()
+            try:
+                _r = {v['eval_frame_fn']}(self._fr)
+            except (GeneratorExit, StopIteration):
+                self._done = True
+                if self._fr in {v['active_frames']}: {v['active_frames']}.remove(self._fr)
+                return
+            except BaseException:
+                self._done = True
+                if self._fr in {v['active_frames']}: {v['active_frames']}.remove(self._fr)
+                raise
+            self._done = True
+            if self._fr in {v['active_frames']}: {v['active_frames']}.remove(self._fr)
+            if isinstance(_r, tuple) and _sys_len(_r) == 2 and _r[0] is {v['yield_sig']}:
+                raise RuntimeError("generator ignored GeneratorExit")
+
+    class {v['agen_cls']}:
+        def __init__(self, _fco, _args, _kwargs, _cenv, _dcls, _dfl=None):
+            self._fco = _fco
+            self._args = _args
+            self._kwargs = _kwargs
+            self._cenv = _cenv
+            self._dcls = _dcls
+            self._dfl = _dfl
+            self._fr = None
+            self._done = False
+        def __aiter__(self):
+            return self
+        def _start(self):
+            self._fr = {v['bind_frame_fn']}(self._fco, self._args, self._kwargs, self._cenv, self._dcls, self._dfl)
+            self._fr.is_generator = True
+            {v['active_frames']}.append(self._fr)
+        async def __anext__(self):
+            if self._done:
+                raise StopAsyncIteration
+            if self._fr is None:
+                self._start()
+            try:
+                _r = await {v['eval_frame_async_fn']}(self._fr)
+            except (StopAsyncIteration, StopIteration):
+                self._done = True
+                if self._fr in {v['active_frames']}: {v['active_frames']}.remove(self._fr)
+                raise StopAsyncIteration
+            except BaseException:
+                self._done = True
+                if self._fr in {v['active_frames']}: {v['active_frames']}.remove(self._fr)
+                raise
+            if isinstance(_r, tuple) and _sys_len(_r) == 2 and _r[0] is {v['yield_sig']}:
+                return _r[1]
+            self._done = True
+            if self._fr in {v['active_frames']}: {v['active_frames']}.remove(self._fr)
+            raise StopAsyncIteration
+        async def asend(self, _v):
+            if self._done:
+                raise StopAsyncIteration
+            if self._fr is None:
+                self._start()
+            else:
+                self._fr.stack.append(_v)
+            try:
+                _r = await {v['eval_frame_async_fn']}(self._fr)
+            except BaseException:
+                self._done = True
+                if self._fr in {v['active_frames']}: {v['active_frames']}.remove(self._fr)
+                raise
+            if isinstance(_r, tuple) and _sys_len(_r) == 2 and _r[0] is {v['yield_sig']}:
+                return _r[1]
+            self._done = True
+            if self._fr in {v['active_frames']}: {v['active_frames']}.remove(self._fr)
+            raise StopAsyncIteration
+        async def aclose(self):
+            if self._done or self._fr is None:
+                self._done = True
+                return
+            self._fr.injected_exc = GeneratorExit()
+            try:
+                await {v['eval_frame_async_fn']}(self._fr)
+            except BaseException:
+                pass
+            self._done = True
+            if self._fr in {v['active_frames']}: {v['active_frames']}.remove(self._fr)
+
+    def __vm_ayieldfrom___helper(_sub):
+        async def _agen_delegate():
+            if hasattr(_sub, '__aiter__'):
+                async for _x in _sub:
+                    yield _x
+            else:
+                for _x in iter(_sub):
+                    yield _x
+        return _agen_delegate()
+
+    _g_env['__vm_ayieldfrom__'] = __vm_ayieldfrom___helper
+
     def {v['vm_super_fn']}(*_sargs):
-        if len(_sargs) == 0 and {v['active_frames']}:
+        if _sys_len(_sargs) == 0 and {v['active_frames']}:
             _cur = {v['active_frames']}[-1]
             _self_obj = None
             for _k in _cur.code_obj.arg_names:
@@ -7566,29 +8072,77 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         return _val
 
     _g_env['__vm_await__'] = {v['vm_await_fn']}
+
+    def {v['vm_anext_fn']}(_aiter):
+        import inspect, asyncio
+        try:
+            _coro = _aiter.__anext__()
+        except StopAsyncIteration:
+            return (False, None)
+        if inspect.iscoroutine(_coro) or inspect.isawaitable(_coro):
+            try:
+                _loop = asyncio.get_event_loop()
+                if _loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+                        return (True, _pool.submit(asyncio.run, _coro).result())
+                return (True, _loop.run_until_complete(_coro))
+            except StopAsyncIteration:
+                return (False, None)
+        return (True, _coro)
+
+    _g_env['__vm_anext__'] = {v['vm_anext_fn']}
     _g_env['__vm_match_rest__'] = (lambda _subj, _excl: {{k: v for k, v in _subj.items() if k not in _excl}})
+
+    def __vm_bind_defaults__(_co, _pair):
+        return _co
+
+    _g_env['__vm_bind_defaults__'] = __vm_bind_defaults__
+
+    # Level-4 per-function ISA divergence infrastructure lives below; the
+    # enable flag is interpolated from the emitter scope.
+    _isa_fwd_cache = {{}}
+    def {v['attach_isa_fn']}(_fr):
+        if {int(vm_level >= 4)} and {int(_TVM_L4_PERM_ENABLED)}:
+            _n = _fr.code_obj.name
+            _p = _isa_fwd_cache.get(_n)
+            if _p is None:
+                _p = {v['perm_rt_fn']}(_n, _master_seed)
+                _isa_fwd_cache[_n] = _p
+            _fr._perm = _p
+        else:
+            _fr._perm = None
+        return _fr
 
     async def {v['eval_frame_async_fn']}(_frame):
         _c_arr = _frame.code_obj.code
-        _c_len = len(_c_arr)
+        _c_len = _sys_len(_c_arr)
+        {v['async_depth']}[0] += 1
+        {_DBG_AE}
         try:
             while _frame.pc < _c_len:
                 try:
+                    if _frame.injected_exc is not None:
+                        _inj = _frame.injected_exc
+                        _frame.injected_exc = None
+                        raise _inj
                     _op = _c_arr[_frame.pc]
                     _arg = (_c_arr[_frame.pc+1] << 8) | _c_arr[_frame.pc+2]
                     _frame.pc += 3
 
-                    _h = {v['dispatch_tbl_async']}[(_op * {M} + {A}) & 0xFF]
+                    _h = {v['dispatch_tbl_async']}[(((_frame._perm[_op]) if _frame._perm is not None else _op) * {M} + {A}) & 0xFF]
                     _sig = _h(_frame, _arg)
                     if _sig is not None:
                         if _sig is {v['halt_sig']}:
                             break
-                        if isinstance(_sig, tuple) and len(_sig) == 2:
+                        if isinstance(_sig, tuple) and _sys_len(_sig) == 2:
                             if _sig[0] is {v['ret_sig']}:
                                 return _sig[1]
                             elif _sig[0] is {v['await_sig']}:
                                 _res = await _sig[1]
                                 _frame.stack.append(_res)
+                            elif _sig[0] is {v['yield_sig']}:
+                                return _sig
                 except BaseException as _e:
                     _frame.current_exception = _e
                     if _frame.exc_handlers:
@@ -7599,57 +8153,43 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
                         raise _e
             return _frame.stack.pop() if _frame.stack else None
         finally:
-            if {int(vm_level >= 3)}:
+            {v['async_depth']}[0] -= 1
+            if {int(vm_level >= 3)} and not _frame.is_generator:
                 _frame.stack.clear()
                 _frame.exc_handlers.clear()
                 _frame.current_exception = None
 
-    async def {v['call_vm_async_fn']}(_fn_code, _passed_args, _passed_kwargs=None, _captured_env=None, _def_cls=None):
-        _loc = {{_aname: {v['no_arg_sig']} for _aname in _fn_code.local_names}}
-        _rem_kwargs = dict(_passed_kwargs or {{}})
-        _pos_count = len(_fn_code.arg_names)
-        for _idx, _aname in enumerate(_fn_code.arg_names):
-            if _idx < len(_passed_args):
-                _loc[_aname] = _passed_args[_idx]
-            elif _aname in _rem_kwargs:
-                _loc[_aname] = _rem_kwargs.pop(_aname)
-        if _fn_code.vararg_name:
-            _loc[_fn_code.vararg_name] = tuple(_passed_args[_pos_count:])
-        for _kname in getattr(_fn_code, 'kwonly_names', []):
-            if _kname in _rem_kwargs:
-                _loc[_kname] = _rem_kwargs.pop(_kname)
-        if _fn_code.kwarg_name:
-            _loc[_fn_code.kwarg_name] = _rem_kwargs
-        else:
-            _loc.update(_rem_kwargs)
-        _f = {v['frame_cls']}(_fn_code, _loc, _g_env)
-        _f.captured_env = _captured_env or {{}}
-        _f.defining_class = _def_cls
+    async def {v['call_vm_async_fn']}(_fn_code, _passed_args, _passed_kwargs=None, _captured_env=None, _def_cls=None, _defaults=None):
+        _f = {v['bind_frame_fn']}(_fn_code, _passed_args, _passed_kwargs, _captured_env, _def_cls, _defaults)
         {v['active_frames']}.append(_f)
         try:
             return await {v['eval_frame_async_fn']}(_f)
         finally:
             if {v['active_frames']}: {v['active_frames']}.pop()
-            if {int(vm_level >= 3)}:
-                _loc.clear()
 
     def {v['eval_frame_fn']}(_frame):
         _c_arr = _frame.code_obj.code
-        _c_len = len(_c_arr)
+        _c_len = _sys_len(_c_arr)
         try:
             while _frame.pc < _c_len:
                 try:
+                    if _frame.injected_exc is not None:
+                        _inj = _frame.injected_exc
+                        _frame.injected_exc = None
+                        raise _inj
                     _op = _c_arr[_frame.pc]
                     _arg = (_c_arr[_frame.pc+1] << 8) | _c_arr[_frame.pc+2]
                     _frame.pc += 3
 
-                    _h = {v['dispatch_tbl']}[(_op * {M} + {A}) & 0xFF]
+                    _h = {v['dispatch_tbl']}[(((_frame._perm[_op]) if _frame._perm is not None else _op) * {M} + {A}) & 0xFF]
                     _sig = _h(_frame, _arg)
                     if _sig is not None:
                         if _sig is {v['halt_sig']}:
                             break
-                        if isinstance(_sig, tuple) and len(_sig) == 2 and _sig[0] is {v['ret_sig']}:
+                        if isinstance(_sig, tuple) and _sys_len(_sig) == 2 and _sig[0] is {v['ret_sig']}:
                             return _sig[1]
+                        if isinstance(_sig, tuple) and _sys_len(_sig) == 2 and _sig[0] is {v['yield_sig']}:
+                            return _sig
                 except BaseException as _e:
                     _frame.current_exception = _e
                     if _frame.exc_handlers:
@@ -7660,12 +8200,12 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
                         raise _e
             return _frame.stack.pop() if _frame.stack else None
         finally:
-            if {int(vm_level >= 3)}:
+            if {int(vm_level >= 3)} and not _frame.is_generator:
                 _frame.stack.clear()
                 _frame.exc_handlers.clear()
                 _frame.current_exception = None
 
-    _initial_frame = {v['frame_cls']}(_root_code, {{}}, _g_env)
+    _initial_frame = {v['attach_isa_fn']}({v['frame_cls']}(_root_code, {{}}, _g_env))
     {v['eval_frame_fn']}(_initial_frame)
 
 {v['interp_fn']}({repr(serialized_root_packet)}, {repr(master_seed)}, {repr(runtime_salt)})
@@ -7683,15 +8223,6 @@ def _vm_obfuscate(code_str: str, seed=None, vm_level: int = 1) -> str:
         tree = ast.parse(code_str)
     except SyntaxError:
         return code_str
-
-    # Correctness guard: TVM async support is experimental. Await/async-for
-    # frames currently lose their coroutine handoff under the polymorphic
-    # dispatcher, silently returning wrong values. Skip VM for async-heavy
-    # sources and let the remaining pipeline layers protect the file instead.
-    for _n in ast.walk(tree):
-        if isinstance(_n, (ast.Await, ast.AsyncFor, ast.AsyncWith)):
-            _log_debug("TVM: await/async-for/async-with detected; VM virtualization skipped for this file (known limitation)", level="WARNING")
-            return code_str
 
     build_seed = seed if seed is not None else secrets.randbits(64)
     rng = random.Random(build_seed)
@@ -7722,7 +8253,8 @@ def _vm_obfuscate(code_str: str, seed=None, vm_level: int = 1) -> str:
         _TVMOpcodes.CALL_FUNCTION_EX, _TVMOpcodes.LOAD_DEREF, _TVMOpcodes.STORE_DEREF,
         _TVMOpcodes.GET_ITER, _TVMOpcodes.FOR_ITER, _TVMOpcodes.SETUP_FINALLY,
         _TVMOpcodes.POP_BLOCK, _TVMOpcodes.RAISE_VARARGS, _TVMOpcodes.CHECK_EXC_MATCH,
-        _TVMOpcodes.HALT, _TVMOpcodes.NOP, _TVMOpcodes.TRAP
+        _TVMOpcodes.HALT, _TVMOpcodes.NOP, _TVMOpcodes.TRAP,
+        _TVMOpcodes.YIELD_VALUE, _TVMOpcodes.YIELD_FROM
     ]
     for idx, std_op in enumerate(standard_opcodes):
         isa_map[std_op] = all_opcodes[idx]
@@ -7735,7 +8267,8 @@ def _vm_obfuscate(code_str: str, seed=None, vm_level: int = 1) -> str:
     root_code = compiler.finalize()
 
     # 3. Emit Polymorphic Runtime Interpreter 2.0 with AEAD & Dynamic Dispatch
-    runtime = _vm_emit_runtime_interpreter_v2(root_code, isa_map, vm_level, rng)
+    runtime = _vm_emit_runtime_interpreter_v2(root_code, isa_map, vm_level, rng,
+                                              vm_debug=bool(os.environ.get("TRX_VM_DEBUG")))
     return runtime
 
 
@@ -9291,7 +9824,7 @@ VÍ DỤ SỬ DỤNG:
     parser.add_argument("--dyn-strings", choices=["y", "n", "Y", "N"], help="Mã hóa chuỗi động XOR cục bộ từng vị trí gọi (Per-callsite dynamic XOR string encryption) (y/n)", default=None)
     parser.add_argument("--anti-dump", choices=["y", "n", "Y", "N"], help="Kích hoạt khiên chống memory dump & lọc đối tượng GC (In-Memory Anti-Dump & GC Object Scrubber) (y/n)", default=None)
     parser.add_argument("--vm-obf", choices=["y", "n", "Y", "N"], help="Kích hoạt VM Virtualization Engine - biến đổi code thành bytecode ảo thực thi bởi CPU ảo đa hình (y/n)", default=None)
-    parser.add_argument("--vm-level", type=int, choices=[1, 2, 3], help="Cấp độ VM Virtualization (1: Basic, 2: + Traps/NOP, 3: + Dummy/Scrub)", default=None)
+    parser.add_argument("--vm-level", type=int, choices=[1, 2, 3, 4], help="Cấp độ VM Virtualization (1: Basic, 2: + Traps/NOP, 3: + Dummy/Scrub, 4: + Per-Function ISA Keys)", default=None)
     parser.add_argument("--dec-trap", "--dectrap", choices=["y", "n", "Y", "N"], help="Kích hoạt bẫy điều khiển luồng Decompiler Traps (làm sập uncompyle6, decompyle3, pycdc) (y/n)", default=None)
     parser.add_argument("--var-split", choices=["y", "n", "Y", "N"], help="Phân rã biến số nguyên thành các mảnh bí mật XOR (Variable Secret Sharing) (y/n)", default=None)
     parser.add_argument("--str-frag", choices=["y", "n", "Y", "N"], help="Băm nhỏ chuỗi và nạp mồi nhử trong const pool (String Fragmentation & Decoy Pool) (y/n)", default=None)

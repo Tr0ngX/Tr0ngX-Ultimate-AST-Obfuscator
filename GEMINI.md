@@ -86,7 +86,7 @@ graph TD
 | `--velimatix` | Velimatix | Enable Velimatix ExceptionJump & AST control flow engine | `y` / `n` |
 | `--veli-level` | Velimatix | Velimatix intensity level (1: BiOpaque, 2: Exception Jump, 3: Match-Case State Machine) | `1`, `2`, `3` |
 | `--vm-obf` | Core VM | Enable VM Virtualization Engine (Polymorphic Virtual CPU + Encrypted Bytecode) | `y` / `n` |
-| `--vm-level` | Core VM | VM Virtualization intensity level (1: Basic, 2: + Traps/NOP, 3: + Dummy/Scrub) | `1`, `2`, `3` |
+| `--vm-level` | Core VM | VM Virtualization intensity level (1: Basic, 2: + Traps/NOP, 3: + Dummy/Scrub, 4: reserved - per-function ISA infra) | `1`, `2`, `3` |
 | `--double-compile` | Crypto | Package inner compiled bytecode inside outer Velimatix loader | `y` / `n` |
 | `--kramer` | Outer Shield | Wrap with Kramer Kyrie Eleison outer dynamic shield class | `y` / `n` |
 | `--matrix`, `--fused` | Outer Shield | Enable 3-Track Symbiotic Interleaved Matrix Shield (Kyrie + Emoji + Whitespace) | `y` / `n` |
@@ -141,6 +141,8 @@ graph TD
 - **Randomized Opcode Matrix**: Opcode byte assignments (`V_EXEC`, `V_HALT`, `V_NOP`, `V_TRAP`, `V_SCRUB`) are generated fresh per build across a 256-value space.
 - **Visual Camouflage Integration**: VM registers, program counters, data pools, and dispatchers utilize the repository's hostile identifier matrix (Zalgo, CJK, Homoglyph, Rare Unicode, Invisible).
 - **Anti-Analysis Trap Network**: Level 2+ injects dead traps on unassigned opcode bytes (`os._exit(1)`) and rolling NOP sequences. Level 3 injects decoy encrypted chunks and aggressive GC zeroing.
+- **Full Language Coverage (TVM 3.0)**: real resumable generators (lazy iteration, send/throw/close, multi-level yield-from with return capture), full async surface (await hand-off on the running loop, async-for via a sentinel-free `__vm_anext__` tuple protocol, async-with, async generators, async comprehensions desugared into inline awaited helpers), positional defaults evaluated once at function creation (native semantics), correct `import a.b as c` submodule binding, `raise X from Y` cause propagation, dict-literal insertion-order preservation, and interpreter-internal builtin isolation (`_sys_len`) so user shadowing of builtins cannot corrupt the VM.
+- **Level 4 Infrastructure**: deterministic per-name 256-byte ISA permutation implemented end-to-end (serializer substitution + runtime inverse dispatch), currently gated OFF pending unique per-code-object salts; at present `--vm-level 4` executes identically to level 3.
 
 ---
 

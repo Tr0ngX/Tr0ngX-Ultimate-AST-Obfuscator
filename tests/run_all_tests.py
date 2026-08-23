@@ -28,6 +28,7 @@ STANDALONE_TESTS = [
     "tests/test_08_dos_limits.py",
     "tests/test_09_antivm_antidebug.py",
     "tests/test_14_exotic_module.py",
+    "tests/test_vm_full_coverage.py",
     "tests/test_vm_oracle_semantic.py",
     "tests/test_qa_fuzz_semantic.py"
 ]

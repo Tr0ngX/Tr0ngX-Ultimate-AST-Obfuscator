@@ -92,6 +92,11 @@ graph TD
 - **Tracer & Profiler Nullification**: Intercepts `sys.settrace()`, `sys.setprofile()`, and locks `sys.monitoring` tool IDs on Python 3.12+.
 - **Meta-Path Import Interceptor (PEP 451)**: `_ImportBlocker` blocks decompiler and debugger modules (`uncompyle6`, `pycdc`, `debugpy`, `pydevd`, `xdis`, `coverage`).
 
+### 7b. TVM Full-Language Support
+- **Real generators**: lazy resumable frames with the full protocol - next/send/throw/close, nested yield-from delegation with StopIteration.value capture, infinite generators safe under islice.
+- **Full async**: await hands off on the running loop (no nested pools, no deadlocks), async-for via a sentinel-free `__vm_anext__` tuple protocol, async-with, async generators, and async comprehensions compiled into inline awaited helpers.
+- **Native-faithful semantics**: positional defaults evaluated once at function creation, `import a.b as c` binds the submodule, `raise X from Y` chains `__cause__`, dict literals preserve insertion order, and user builtin-shadowing (e.g. `len = ...`) cannot break the interpreter.
+
 ### 8. Resource Management & Diagnostic Profiling
 - **RAM & CPU Core Limits**: Built-in `--max-ram` (MB) and `--cores` limiter prevents memory exhaustion during heavy obfuscation passes.
 - **Micro-Stage Profiler & Debug Map**: High-resolution performance timer tracking and optional JSON mapping export (`--debug-map`).
@@ -202,7 +207,7 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--seed` | Integer seed for deterministic reproducible obfuscation builds | e.g. `1337` |
 | `--double-compile` | Double compile (Tr0ngX + Velimatix loader) | `y` / `n` |
 | `--vm-obf` | Enable VM Virtualization Engine (Polymorphic Virtual CPU + Encrypted Bytecode) | `y` / `n` |
-| `--vm-level` | VM Virtualization intensity level (1: Basic, 2: + Traps/NOP, 3: + Dummy/Scrub) | `1`, `2`, `3` |
+| `--vm-level` | VM Virtualization intensity level (1: Basic, 2: + Traps/NOP, 3: + Dummy/Scrub, 4: reserved - per-function ISA infra) | `1`, `2`, `3` |
 | `--velimatix` | Enable Velimatix ExceptionJump & AST spam engine | `y` / `n` |
 | `--veli-level` | Velimatix intensity level | `1`, `2`, `3` |
 | `--kramer` | Wrap with Kramer Kyrie Eleison outer dynamic shield | `y` / `n` |
