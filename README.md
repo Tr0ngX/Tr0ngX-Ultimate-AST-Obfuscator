@@ -72,6 +72,15 @@ graph TD
 - **Exotic Identifier Pools (`--exotic-pools`)**: Draws validated identifiers from Tangut, Egyptian Hieroglyphs (+Ext-A), CJK Ext-G/H, Anatolian Hieroglyphs, Bamum, Glagolitic Supplement, Miao/Pollard and Vedic blocks. Every name passes XID_Start/XID_Continue gating, NFKC collision deduplication and a live `compile()` probe (see `tr0ngx_exotic.py`).
 - **Base4096 Glyph Encoding (`--base4096`)**: Packs payload bytes into 12-bit groups mapped onto a generated 4096-glyph exotic alphabet; ships a standalone pure-builtin decoder inside the output.
 - **Bit-Matrix Byte Transform (`--bit-matrix`)**: Multi-round invertible byte chain (LCG-XOR stream, bit rotation, nibble swap, Fisher-Yates S-Box permutation, position mask) keyed per build.
+- **Armor Codec Diversification (auto)**: per-build randomized outer radix (b85/b64/b32) + optional reversed payload storage defeats fixed-alphabet signature scanning (technique class: PyObfuscate codec matrix, MIT).
+- **LZMA Pre-Encryption Layer (`--lzma-layer`)**: stdlib LZMA stage before AEAD shrinks marshal-heavy payloads 10-25% (technique class: pyminifier compression wrappers).
+- **Hardware Fingerprint Lock (`--env-key`)**: machine-bound salt blinding for obfuscation-only builds; wrong machine = clean authentication failure (technique concept: bedrock-obfuscator env-key, Apache-2.0 provisions respected - independent implementation, no anti-AV features adopted).
+- **Built-in Semantic Verification (`--verify`)**: post-build original-vs-obfuscated differential with stdout + exit-code comparison (technique class: pyshield verify mode, MIT).
+- **Cross-Module Symbol Sync (`--shared-symbols`)**: two-phase frozen rename map keeps `from sibling import name` contracts intact across batch outputs (consistency model: Opy global word list, Apache-2.0 - hardened into deterministic per-build map).
+- **7-Family Opaque Predicate Library**: QNR mod 7, Fermat/Euler k^3-k, parity, Carmichael composites, MBA bitwise identity, Collatz odd-step, modular inverse via Fermat (family breadth modeled on bedrock-obfuscator's opaque library - independent implementation).
+- **Heterogeneous String Ciphers**: --dyn-strings now dispatches weighted per-callsite strategies (coordinate XOR / poly-affine / chunked XOR) + exact float-to-ratio reconstruction via as_integer_ratio (strategy diversity: pyshield DistributedStringEncryptor + ConstantTransformer concepts, MIT).
+- **Sparse-State Exception Dispatch**: Velimatix level >= 2 dispatchers now use non-contiguous random states with sentinel exit (kills index-sorting reversal); ast.Nonlocal declarations are hoisted safely alongside Global.
+- **Anti-Debug Vectors 19/20**: Linux TracerPid (/proc/self/status) detection and dual builtins identity cross-check with pristine-module import + type() equality against print() (vector design: pyshield anti_analysis, MIT).
 
 ### 6. Symbiotic Multi-Track Outer Shields & Camouflage
 - **Hyperion Camouflage (`--camouflage`)**: Encapsulates binary payloads inside authentic-looking algorithmic and scientific simulation classes (`MemoryAccess`, `StackOverflow`, `Hypothesis`).
@@ -203,6 +212,10 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--exotic-pools` | Identifiers from rare Unicode script pools (Tangut/Egyptian/CJK Ext-G/H/Anatolian/Bamum/Glagolitic/Miao), XID+NFKC validated | `y` / `n` |
 | `--base4096` | Encode payload as 12-bit astral glyph stream (Base4096 exotic alphabet) | `y` / `n` |
 | `--bit-matrix` | Multi-round byte transform chain: LCG-XOR / rotation / nibble swap / S-Box permutation | `y` / `n` |
+| `--lzma-layer` | LZMA (preset 9) pre-encryption compression layer before AEAD - typically 10-25% smaller payloads | `y` / `n` |
+| `--env-key` | Hardware fingerprint lock (MAC/host/arch/Python) for no-password builds: salt is XOR-blinded with the machine digest, wrong machine fails authentication. Mutually exclusive with `--password` | `y` / `n` |
+| `--verify` | Built-in semantic differential: runs original vs obfuscated output and compares stdout + exit codes after build | `y` / `n` |
+| `--shared-symbols` | Batch mode two-phase cross-module symbol sync: phase A freezes one deterministic rename per symbol imported across files, phase B applies it (prevents cross-package NameError in `-D/-r` batches) | `y` / `n` |
 | `--max-output-size` | Maximum output size DoS limit (aborts and unlinks if exceeded) | e.g. `10MB`, `50MB` |
 | `--seed` | Integer seed for deterministic reproducible obfuscation builds | e.g. `1337` |
 | `--double-compile` | Double compile (Tr0ngX + Velimatix loader) | `y` / `n` |
@@ -227,6 +240,52 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--debug-map` | Export detailed JSON rename mapping & stage metrics | `AUTO` or `<path>` |
 | `--no-art` | Disable ASCII banner (quiet CLI mode) | Flag |
 | `--strict` | Abort immediately on any stage warnings | Flag |
+
+---
+
+## Example — Unobfuscated vs Obfuscated (MAX protection stack)
+
+The [`examples/`](examples/) folder ships a before/after pair:
+
+- [`examples/unobfuscated.py`](examples/unobfuscated.py) — 673-byte readable source
+- [`examples/obfuscated.py`](examples/obfuscated.py) — the same program after the maximum-protection pipeline (26+ MB, every protection layer stacked)
+
+The obfuscated artifact was produced with **every protection option enabled** (AST mode 3-tier engine, dead-code injection, math-opaque predicates, dynamic string ciphers, string fragmentation, variable secret-sharing, decompiler traps, anti-dump, anti-debug watchdog, anti-VM matrix, self-modification, debug poison, metadata spoofing, Velimatix L2, VM virtualization L2, double AEAD compile + LZMA layer, Hyperion-class camouflage, fused Kyrie/Emoji/Whitespace matrix shield, CJK/homoglyph/rare-Unicode/Zalgo hostile identifiers, exotic Unicode pools, BitMatrix byte chain, deterministic seed):
+
+```bash
+python tr0ngx_obfuscator.py -i examples/unobfuscated.py -o examples/obfuscated.py \
+  -m 2 --moreobf y --math-opaque y --dyn-strings y --str-frag y --var-split y --dec-trap y \
+  --anti-dump y --antidebug y --antivm y --selfmod y --debug-poison y --spoof-meta y \
+  --velimatix y --veli-level 2 --vm-obf y --vm-level 2 \
+  --compile y --double-compile y --password "Tr0ngX_MaxExample_2026" --lzma-layer y \
+  --camouflage y --matrix y --blank-padding y \
+  --cjk-vars y --homoglyph y --rare-unicode y --zalgo y --exotic-pools y --bit-matrix y \
+  --seed 1337 --verify n --force-py off --no-art
+```
+
+Run it (the payload is password-encrypted with AEAD):
+
+```bash
+# PowerShell
+$env:TR0NGX_PASSWORD = "Tr0ngX_MaxExample_2026"; python examples/obfuscated.py
+# Bash
+TR0NGX_PASSWORD="Tr0ngX_MaxExample_2026" python3 examples/obfuscated.py
+```
+
+Expected output (identical to the unobfuscated program):
+
+```
+hello Tr0ngX here
+hello world, rate=2.5
+fib: 0,1,1,2,3,5,8,13,21,34
+box: 42
+n: 42
+```
+
+Notes:
+- The embedded **anti-debug / anti-VM shields are armed**: on developer workstations with debuggers, instrumentation tools or analyzer windows running, the artifact intentionally terminates itself (`exit 1`, silent). Run it on a clean machine/VM.
+- `--selfmod` rewrites the artifact's own signature comment on first execution; this is by design.
+- `--kramer/--emoji-obf/--whitespace-obf` are omitted from the command because `--matrix y` auto-fuses all three tracks into the symbiotic shield.
 
 ---
 

@@ -81,6 +81,10 @@ graph TD
 | `--exotic-pools` | Identifiers | Identifiers drawn from rare Unicode script pools (Tangut, Egyptian Hieroglyphs+Ext-A, CJK Ext-G/H, Anatolian, Bamum, Glagolitic, Miao, Vedic); XID + NFKC validated via `tr0ngx_exotic.py` | `y` / `n` |
 | `--base4096` | Exotic Encoding | Pack payload into 12-bit groups mapped to a 4096-glyph exotic alphabet with standalone inline decoder | `y` / `n` |
 | `--bit-matrix` | Exotic Encoding | Multi-round invertible byte chain: LCG-XOR stream, bit rotation, nibble swap, Fisher-Yates S-Box, position mask | `y` / `n` |
+| `--lzma-layer` | Crypto | LZMA (preset 9) pre-encryption compression stage inside `_multi_layer_encrypt`; decode chain mirrors per-build armor metadata | `y` / `n` |
+| `--env-key` | Crypto | Hardware fingerprint lock for no-password builds: transmitted salt XOR-blinded with sha256(node/system/machine/impl/ver); wrong machine fails authentication. Mutually exclusive with password modes (auto-disabled with warning) | `y` / `n` |
+| `--verify` | Diagnostics | Post-build semantic differential: runs original + obfuscated outputs, compares stdout and exit codes; mismatch logged as `13_verify_semantic` stage error | `y` / `n` |
+| `--shared-symbols` | Batch | Two-phase cross-module symbol sync for `-D/-r` batches: phase A parses all targets single-threaded and freezes one deterministic rename (`sha256(seed\|name)` derived) per symbol imported across files into `tr0ngx_shared_symbols.json`; phase B workers consume the immutable map via Hyperion token renamer | `y` / `n` |
 | `--max-output-size` | Resource | Maximum output file size DoS limit (aborts and removes if exceeded) | e.g. `10MB`, `50MB` |
 | `--seed` | Core AST | Deterministic seed for reproducible builds | e.g. `1337` |
 | `--velimatix` | Velimatix | Enable Velimatix ExceptionJump & AST control flow engine | `y` / `n` |
@@ -143,6 +147,13 @@ graph TD
 - **Anti-Analysis Trap Network**: Level 2+ injects dead traps on unassigned opcode bytes (`os._exit(1)`) and rolling NOP sequences. Level 3 injects decoy encrypted chunks and aggressive GC zeroing.
 - **Full Language Coverage (TVM 3.0)**: real resumable generators (lazy iteration, send/throw/close, multi-level yield-from with return capture), full async surface (await hand-off on the running loop, async-for via a sentinel-free `__vm_anext__` tuple protocol, async-with, async generators, async comprehensions desugared into inline awaited helpers), positional defaults evaluated once at function creation (native semantics), correct `import a.b as c` submodule binding, `raise X from Y` cause propagation, dict-literal insertion-order preservation, and interpreter-internal builtin isolation (`_sys_len`) so user shadowing of builtins cannot corrupt the VM.
 - **Level 4 Infrastructure**: deterministic per-name 256-byte ISA permutation implemented end-to-end (serializer substitution + runtime inverse dispatch), currently gated OFF pending unique per-code-object salts; at present `--vm-level 4` executes identically to level 3.
+
+### 4.6 Research Hardening Wave (2026-08, sourced from research_repos analysis)
+Attribution policy: techniques are re-implemented independently; source repos credited inline as `Source:` comments. No GPL/AGPL/no-license code was copied: MIT/Apache sources are concept-level only unless noted.
+
+Fixes applied (audit P0/P1): anti-debug Vector 15 audit-canary self-defeat (real `sys.addaudithook` snapshotted before nulling); TRXH no-password MAC mismatch (loaders verify with `sha256(ke + b'__mac__')` matching the encryptor); `_double_compile` SyntaxError records `7_double_compile_syntax_error` instead of silently returning plaintext; unsupported-Python guard exits 1; copy-zeroing scrub loops removed (honest del+gc); camouflage license label corrected to EPL-2.0; Velimatix ExceptionJump sparse non-contiguous dispatcher states + sentinel exit + `ast.Nonlocal` hoisting; batch discovery case-insensitive `.py/.pyw` with venv/site-packages/node_modules/build-dir blacklist.
+
+New capabilities: armor codec diversification (b85/b64/b32 per build) + reversed payload storage mirrored by all four loader families; LZMA pre-encryption layer (`--lzma-layer`); hardware env-key salt blinding (`--env-key`); built-in `--verify` semantic differential (`13_verify_semantic` stage); two-phase batch shared-symbol map (`tr0ngx_shared_symbols.json`); seeded ASCII identifier stream via `_trx_rand/_trx_choice` with import-time symbol regeneration under seed; anti-debug Vectors 19/20 (Linux TracerPid, dual builtins identity cross-check); 7-family opaque predicates (QNR mod 7, Fermat/Euler, parity, Carmichael composites, MBA identity, Collatz odd-step, modular inverse); weighted heterogeneous string ciphers + exact float ratio reconstruction via `as_integer_ratio()`; exception-frame eligibility sniffing for decompiler traps.
 
 ---
 

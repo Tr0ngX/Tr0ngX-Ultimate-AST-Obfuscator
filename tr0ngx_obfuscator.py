@@ -23,6 +23,7 @@ import traceback
 import threading
 import string
 import tempfile
+import subprocess
 from typing import Any, List, Dict, Optional, Tuple, Union
 
 # Ensure Windows console supports Unicode / ANSI characters & Virtual Terminal Processing
@@ -67,6 +68,9 @@ class _EngineState:
     encryption_password = None
     use_math_opaque = False
     use_dyn_strings = False
+    lzma_layer = False
+    env_key_lock = False
+    verify_mode = False
     use_anti_dump = False
     use_vm_obf = False
     custom_seed = None
@@ -166,7 +170,7 @@ from getpass import getpass
 
 if sys.version_info < (3, 10):
     print("Install Python Version = 3.10 or > 3.10 To Use This Code")
-    sys.exit()
+    sys.exit(1)
 
 __import__('sys').setrecursionlimit(15000)
 
@@ -177,13 +181,108 @@ __import__('sys').setrecursionlimit(15000)
 _used_names = set()
 _used_names_lock = threading.RLock()
 _obf_execution_lock = threading.Lock()
+# Cross-module frozen rename map for batch mode (--shared-symbols).
+# Design source: Opy global word-list consistency model (Apache-2.0 research
+# note), hardened into a two-phase frozen map: phase A (single-threaded) parses
+# every batch target and pre-assigns ONE deterministic new name per symbol that
+# is imported by another batch file; phase B (per-file pipeline) consumes the
+# immutable map. Fixes the cross-package NameError class where each file's
+# independent renamer broke `from sibling import func` contracts.
+_FROZEN_NAME_MAP: Dict[str, str] = {}
+# Seeded identifier RNG (--seed): when a seed is provided the ASCII fallback
+# stream becomes reproducible instead of secrets-driven (audit fix for the
+# "deterministic build" contract). Hostile Unicode pools still draw from
+# secrets/OS entropy - full byte-reproducibility of those paths is documented
+# as best-effort, not guaranteed.
+_SEEDED_RNG = None
+
+
+def _trx_rand(n: int) -> int:
+    """Seeding-aware randbelow: honors --seed when set (reproducible identifier
+    stream), falls back to OS entropy otherwise."""
+    if _SEEDED_RNG is not None:
+        return _SEEDED_RNG.randrange(n)
+    return secrets.randbelow(n)
+
+
+def _trx_choice(seq):
+    if _SEEDED_RNG is not None:
+        return _SEEDED_RNG.choice(seq)
+    return secrets.choice(seq)
+
+
+def _module_key_from_rel(rel: str) -> str:
+    k = rel.replace("\\", "/")
+    low = k.lower()
+    if low.endswith(".pyw"):
+        k = k[:-4]
+    elif low.endswith(".py"):
+        k = k[:-3]
+    if k.endswith("/__init__"):
+        k = k[: -len("/__init__")]
+    return k.replace("/", ".")
+
+
+def _collect_shared_symbol_map(targets: list, seed=None) -> Dict[str, str]:
+    """Phase A of the batch shared-symbol feature: parse all targets, detect
+    symbols imported across module boundaries, assign one deterministic new
+    name per shared symbol so every consuming file agrees on the rename."""
+    module_exports: Dict[str, set] = {}
+    module_imports: Dict[str, set] = {}
+
+    for t in targets:
+        src = t.get("src")
+        rel = t.get("rel") or os.path.basename(src)
+        mkey = _module_key_from_rel(rel)
+        try:
+            with open(src, "r", encoding="utf-8", errors="replace") as fh:
+                tree = ast.parse(fh.read())
+        except Exception:
+            continue
+        exports = set()
+        imports_here = set()
+        parent_key = mkey.rsplit(".", 1)[0] if "." in mkey else ""
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                exports.add(node.name)
+            elif isinstance(node, ast.Assign):
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name) and not tgt.id.startswith("__"):
+                        exports.add(tgt.id)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    for alias in node.names:
+                        imports_here.add((node.module, alias.name))
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    imports_here.add((alias.name, None))
+        module_exports[mkey] = exports
+        module_imports[mkey] = imports_here
+
+    salt = str(seed).encode() if seed is not None else b"TRX_SHARED"
+    frozen: Dict[str, str] = {}
+    for mkey, imports in module_imports.items():
+        for imod, name in imports:
+            candidates = [imod]
+            if module_exports.get(imod) is None and "." in mkey:
+                base = mkey.rsplit(".", 1)[0]
+                candidates.append(f"{base}.{imod}")
+                candidates.append(base + "." + imod.replace(".", "/"))
+            resolved = next((c for c in candidates if c in module_exports), None)
+            if not resolved or name is None or name == "*":
+                continue
+            if name in module_exports[resolved] and name not in frozen and not name.startswith("__"):
+                digest = hashlib.sha256(salt + b"|" + name.encode()).hexdigest()[:12]
+                frozen[name] = "_sx" + digest
+    return frozen
+
 
 def _rd():
     alphabet = string.ascii_lowercase
     with _used_names_lock:
         while True:
-            k = secrets.randbelow(5) + 6
-            name = "".join(secrets.choice(alphabet) for _ in range(k))
+            k = _trx_rand(5) + 6
+            name = "".join(_trx_choice(alphabet) for _ in range(k))
             if name not in _used_names:
                 _used_names.add(name)
                 return name
@@ -199,27 +298,27 @@ def _gen_fused_name(scope='general'):
     """
     _init_rare_chars()
     if scope == 'state_machine':
-        return _gen_homoglyph_name(secrets.randbelow(5) + 6)
+        return _gen_homoglyph_name(_trx_rand(5) + 6)
     elif scope == 'biopaque':
-        return _gen_rare_unicode_name(secrets.randbelow(3) + 3)
+        return _gen_rare_unicode_name(_trx_rand(3) + 3)
     elif scope == 'globals':
-        return _gen_cjk_name(secrets.randbelow(5) + 6)
+        return _gen_cjk_name(_trx_rand(5) + 6)
     else:
-        picker = secrets.choice(['homo', 'rare', 'cjk', 'zalgo', 'invis'])
+        picker = _trx_choice(['homo', 'rare', 'cjk', 'zalgo', 'invis'])
         if picker == 'homo':
-            return _gen_homoglyph_name(secrets.randbelow(4) + 5)
+            return _gen_homoglyph_name(_trx_rand(4) + 5)
         elif picker == 'rare':
-            return _gen_rare_unicode_name(secrets.randbelow(3) + 3)
+            return _gen_rare_unicode_name(_trx_rand(3) + 3)
         elif picker == 'cjk':
-            return _gen_cjk_name(secrets.randbelow(3) + 6)
+            return _gen_cjk_name(_trx_rand(3) + 6)
         elif picker == 'zalgo':
-            return _gen_zalgo_name(1, secrets.randbelow(21) + 25)
+            return _gen_zalgo_name(1, _trx_rand(21) + 25)
         else:
-            return _gen_homoglyph_name(secrets.randbelow(5) + 6)
+            return _gen_homoglyph_name(_trx_rand(5) + 6)
 
 def rd(scope='general'):
     with _used_names_lock:
-        if _EngineState.use_exotic_pools and secrets.randbelow(100) < 70:
+        if _EngineState.use_exotic_pools and _trx_rand(100) < 70:
             _n = _gen_exotic_name(scope)
             if _n:
                 return _n
@@ -235,14 +334,14 @@ def rd(scope='general'):
             return _gen_cjk_name()
         alphabet = string.ascii_lowercase + string.digits
         while True:
-            k = secrets.randbelow(4) + 5
-            name = "_" + "".join(secrets.choice(alphabet) for _ in range(k))
+            k = _trx_rand(4) + 5
+            name = "_" + "".join(_trx_choice(alphabet) for _ in range(k))
             if name not in _used_names:
                 _used_names.add(name)
                 return name
 
 def randomint():
-    return str(secrets.randbelow(900000) + 100000)
+    return str(_trx_rand(900000) + 100000)
 
 def _gen_invisible_name(length=6):
     """Valid Python 3 invisible/combining mark variable names (XID_Continue)"""
@@ -900,9 +999,9 @@ class BiOpaqueTransformer():
 
 def _gen_opaque_zero_ast():
     """Generates an AST node evaluating to 0 at runtime using non-literal invariant constructs that break static AST constant folding (TRX-AST-B1)."""
-    kind = secrets.randbelow(4)
+    kind = _trx_rand(4)
     if kind == 0:
-        k_val = secrets.randbelow(300) + 12
+        k_val = _trx_rand(300) + 12
         return ast.BinOp(
             left=ast.BinOp(
                 left=ast.BinOp(left=ast.Constant(value=k_val), op=ast.Pow(), right=ast.Constant(value=3)),
@@ -923,7 +1022,7 @@ def _gen_opaque_zero_ast():
             right=ast.Constant(value=3)
         )
     elif kind == 2:
-        n_val = secrets.randbelow(300) + 15
+        n_val = _trx_rand(300) + 15
         return ast.BinOp(
             left=ast.BinOp(
                 left=ast.Constant(value=n_val),
@@ -934,7 +1033,7 @@ def _gen_opaque_zero_ast():
             right=ast.Constant(value=2)
         )
     else:
-        x_val = secrets.randbelow(0xFFFF) + 200
+        x_val = _trx_rand(0xFFFF) + 200
         return ast.BinOp(
             left=ast.Constant(value=x_val),
             op=ast.BitAnd(),
@@ -1046,6 +1145,25 @@ class ExceptionJumpUtils:
     alphabet = ""
     length = 16
 
+    @staticmethod
+    def _sparse_keys(count: int) -> list:
+        # Sparse dispatcher states - source: Tr0ngX veli-3 ControlFlowUtils scheme
+        # backported into the veli>=2 exception-jump dispatcher so state values are
+        # non-contiguous and cannot be recovered by sorting indices (research note:
+        # sequential 1..n dispatchers are trivially re-serializable by analysts,
+        # cf. ObfuXtreme ControlFlowFlattener analysis, research_repos).
+        keys = []
+        seen = set()
+        guard = 0
+        while len(keys) < count and guard < count * 200 + 1000:
+            guard += 1
+            k = _trx_rand(0xFFFFFFF) + 1024
+            if k in seen:
+                continue
+            seen.add(k)
+            keys.append(k)
+        return keys
+
     def generate_junk(ex_name: str, max_val: int):
         cases = []
         line = max_val + 1
@@ -1064,15 +1182,20 @@ class ExceptionJumpUtils:
         return cases
 
     def generate_blockV(body):
-        old_body = body
-        body = []
+        old_body = list(body)
+        if not old_body:
+            return []
         var_name = Utils.randomize_name(ExceptionJumpUtils.alphabet, ExceptionJumpUtils.length)
         ex_name = Utils.randomize_name(ExceptionJumpUtils.alphabet, ExceptionJumpUtils.length)
-        body.append(ast.Assign(targets=[ast.Name(id=var_name)], value=ast.Constant(value=0), lineno=None))
+        # NOTE: Global/Nonlocal declarations are treated as regular flow statements
+        # here (declaration semantics are scope-wide regardless of textual position),
+        # matching pre-existing behavior of this helper.
+        keys = ExceptionJumpUtils._sparse_keys(len(old_body))
+        sentinel = max(keys) + _trx_rand(0xFFFF) + 17
+        body.append(ast.Assign(targets=[ast.Name(id=var_name)], value=ast.Constant(value=keys[0]), lineno=None))
         case = ast.While(
-            test=ast.Compare(left=ast.Name(id=var_name), ops=[ast.NotEq()], comparators=[ast.Constant(value=len(old_body) + 1)]),
+            test=ast.Compare(left=ast.Name(id=var_name), ops=[ast.NotEq()], comparators=[ast.Constant(value=sentinel)]),
             body=[
-                ast.AugAssign(target=ast.Name(id=var_name), op=ast.Add(), value=ast.Constant(value=1)),
                 ast.Try(
                     body=[ast.Raise(exc=ast.Call(func=ast.Name(id='VELIMATIX'), args=[ast.Name(id=var_name)], keywords=[]))],
                     handlers=[ast.ExceptHandler(type=ast.Name(id='VELIMATIX'), name=ex_name, body=[])],
@@ -1080,20 +1203,21 @@ class ExceptionJumpUtils:
                 )
             ], orelse=[]
         )
-        line = 1
-        for body_node in old_body:
-            case.body[1].handlers[0].body.append(ast.If(
+        for idx, body_node in enumerate(old_body):
+            nxt = keys[idx + 1] if idx + 1 < len(keys) else sentinel
+            case.body[0].handlers[0].body.append(ast.If(
                 test=ast.Compare(
                     left=ast.Subscript(value=ast.Attribute(value=ast.Name(id=ex_name), attr='args'), slice=ast.Constant(value=0)),
                     ops=[ast.Eq()],
-                    comparators=[ast.Constant(value=line)]
+                    comparators=[ast.Constant(value=keys[idx])]
                 ),
-                body=[body_node], orelse=[]
+                body=[body_node,
+                      ast.Assign(targets=[ast.Name(id=var_name)], value=ast.Constant(value=nxt), lineno=None)],
+                orelse=[]
             ))
-            line += 1
-        junk = ExceptionJumpUtils.generate_junk(ex_name, len(old_body) + 1)
-        case.body[1].handlers[0].body.extend(junk)
-        random.shuffle(case.body[1].handlers[0].body)
+        junk = ExceptionJumpUtils.generate_junk(ex_name, 0xFFFFFFF)
+        case.body[0].handlers[0].body.extend(junk)
+        random.shuffle(case.body[0].handlers[0].body)
         body.append(case)
         return body
 
@@ -1102,11 +1226,9 @@ class ExceptionJumpUtils:
         node.body = []
         var_name = Utils.randomize_name(ExceptionJumpUtils.alphabet, ExceptionJumpUtils.length)
         ex_name = Utils.randomize_name(ExceptionJumpUtils.alphabet, ExceptionJumpUtils.length)
-        node.body.append(ast.Assign(targets=[ast.Name(id=var_name)], value=ast.Constant(value=0), lineno=None))
         case = ast.While(
-            test=ast.Compare(left=ast.Name(id=var_name), ops=[ast.NotEq()], comparators=[ast.Constant(value=len(old_body) + 1)]),
+            test=ast.Compare(left=ast.Name(id=var_name), ops=[ast.NotEq()], comparators=[ast.Constant(value=1)]),
             body=[
-                ast.AugAssign(target=ast.Name(id=var_name), op=ast.Add(), value=ast.Constant(value=1)),
                 ast.Try(
                     body=[ast.Raise(exc=ast.Call(func=ast.Name(id='VELIMATIX'), args=[ast.Name(id=var_name)], keywords=[]))],
                     handlers=[ast.ExceptHandler(type=ast.Name(id='VELIMATIX'), name=ex_name, body=[])],
@@ -1114,27 +1236,46 @@ class ExceptionJumpUtils:
                 )
             ], orelse=[]
         )
-        globals_list = []
-        line = 1
+        decls = []
+        flow_stmts = []
+        # FIX (correctness): ast.Nonlocal hoisted to function top alongside Global -
+        # relocating a nonlocal declaration inside try>handler>if is scoping-unsafe
+        # (lesson source: ObfuXtreme BLOCKED-set analysis, research_repos).
         for body_node in old_body:
-            if isinstance(body_node, ast.Global):
-                globals_list.append(body_node)
-                continue
-            case.body[1].handlers[0].body.append(ast.If(
+            if isinstance(body_node, (ast.Global, ast.Nonlocal)):
+                decls.append(body_node)
+            else:
+                flow_stmts.append(body_node)
+        if not flow_stmts:
+            node.body = old_body
+            return node
+        keys = ExceptionJumpUtils._sparse_keys(len(flow_stmts))
+        sentinel = max(keys) + _trx_rand(0xFFFF) + 17
+        node.body.append(ast.Assign(targets=[ast.Name(id=var_name)], value=ast.Constant(value=keys[0]), lineno=None))
+        case.body[0] = ast.Try(
+            body=[ast.Raise(exc=ast.Call(func=ast.Name(id='VELIMATIX'), args=[ast.Name(id=var_name)], keywords=[]))],
+            handlers=[ast.ExceptHandler(type=ast.Name(id='VELIMATIX'), name=ex_name, body=[])],
+            orelse=[], finalbody=[]
+        )
+        case.test = ast.Compare(left=ast.Name(id=var_name), ops=[ast.NotEq()], comparators=[ast.Constant(value=sentinel)])
+        for idx, body_node in enumerate(flow_stmts):
+            nxt = keys[idx + 1] if idx + 1 < len(keys) else sentinel
+            case.body[0].handlers[0].body.append(ast.If(
                 test=ast.Compare(
                     left=ast.Subscript(value=ast.Attribute(value=ast.Name(id=ex_name), attr='args'), slice=ast.Constant(value=0)),
                     ops=[ast.Eq()],
-                    comparators=[ast.Constant(value=line)]
+                    comparators=[ast.Constant(value=keys[idx])]
                 ),
-                body=[body_node], orelse=[]
+                body=[body_node,
+                      ast.Assign(targets=[ast.Name(id=var_name)], value=ast.Constant(value=nxt), lineno=None)],
+                orelse=[]
             ))
-            line += 1
-        junk = ExceptionJumpUtils.generate_junk(ex_name, len(old_body) + 1)
-        case.body[1].handlers[0].body.extend(junk)
-        random.shuffle(case.body[1].handlers[0].body)
+        junk = ExceptionJumpUtils.generate_junk(ex_name, 0xFFFFFFF)
+        case.body[0].handlers[0].body.extend(junk)
+        random.shuffle(case.body[0].handlers[0].body)
         node.body.append(case)
-        for global_obj in globals_list:
-            node.body.insert(0, global_obj)
+        for decl in decls:
+            node.body.insert(0, decl)
         return node
 
 
@@ -1578,7 +1719,7 @@ class BuiltinRenamerTransformer():
             if isinstance(node, ast.Name) and isinstance(getattr(node, 'ctx', None), ast.Load) and node.id in self.mapping:
                 node.id = self.mapping[node.id]
 
-        xor_key = secrets.randbelow(200) + 55
+        xor_key = _trx_rand(200) + 55
         setup_stmts = []
         for original, renamed in self.mapping.items():
             try:
@@ -1622,10 +1763,18 @@ class MathOpaqueTransformer(ast.NodeTransformer):
         self.length = length
 
     def _gen_opaque_true_test(self) -> ast.AST:
-        """Generates an expression that is mathematically proven to be ALWAYS TRUE at runtime."""
-        pick = secrets.randbelow(3)
+        """Generates an expression that is mathematically proven to be ALWAYS TRUE at runtime.
+
+        Predicate families (7): QNR mod 7, Fermat/Euler k^3-k, n(n+1) parity,
+        Carmichael composites (Fermat pseudoprime for ALL bases), MBA bitwise
+        identity (x+y == (x^y)+2(x&y)), Collatz odd-step parity, modular inverse
+        via Fermat little theorem. Family breadth modeled after the opaque-predicate
+        library in bedrock-obfuscator (Apache-2.0, research note); implementation
+        here is independent.
+        """
+        pick = _trx_rand(7)
         if pick == 0:
-            x_val = secrets.randbelow(1000) + 11
+            x_val = _trx_rand(1000) + 11
             return ast.Compare(
                 left=ast.BinOp(
                     left=ast.BinOp(left=ast.Constant(value=x_val), op=ast.Mult(), right=ast.Constant(value=x_val)),
@@ -1636,7 +1785,7 @@ class MathOpaqueTransformer(ast.NodeTransformer):
                 comparators=[ast.Constant(value=3)]
             )
         elif pick == 1:
-            k_val = secrets.randbelow(500) + 13
+            k_val = _trx_rand(500) + 13
             return ast.Compare(
                 left=ast.BinOp(
                     left=ast.BinOp(
@@ -1650,8 +1799,8 @@ class MathOpaqueTransformer(ast.NodeTransformer):
                 ops=[ast.Eq()],
                 comparators=[ast.Constant(value=0)]
             )
-        else:
-            n_val = secrets.randbelow(500) + 9
+        elif pick == 2:
+            n_val = _trx_rand(500) + 9
             return ast.Compare(
                 left=ast.BinOp(
                     left=ast.BinOp(
@@ -1665,6 +1814,74 @@ class MathOpaqueTransformer(ast.NodeTransformer):
                 ops=[ast.Eq()],
                 comparators=[ast.Constant(value=0)]
             )
+        elif pick == 3:
+            # Carmichael number: a^n ≡ a (mod n) holds for EVERY integer a when n
+            # is a Carmichael composite (561, 1105, 1729, 2465, 2821, 6601).
+            carmichael = (561, 1105, 1729, 2465, 2821, 6601)[_trx_rand(6)]
+            base = _trx_rand(97) + 2
+            return ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(
+                        left=ast.BinOp(left=ast.Constant(value=base), op=ast.Pow(), right=ast.Constant(value=carmichael)),
+                        op=ast.Sub(),
+                        right=ast.Constant(value=base)
+                    ),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=carmichael)
+                ),
+                ops=[ast.Eq()],
+                comparators=[ast.Constant(value=0)]
+            )
+        elif pick == 4:
+            # MBA identity: (x ^ y) + ((x & y) << 1) == x + y for all non-negative ints.
+            a = _trx_rand(0xFFFFF) + 7
+            b = _trx_rand(0xFFFFF) + 3
+            return ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(left=ast.Constant(value=a), op=ast.BitXor(), right=ast.Constant(value=b)),
+                    op=ast.Add(),
+                    right=ast.BinOp(
+                        left=ast.BinOp(left=ast.Constant(value=a), op=ast.BitAnd(), right=ast.Constant(value=b)),
+                        op=ast.LShift(),
+                        right=ast.Constant(value=1)
+                    )
+                ),
+                ops=[ast.Eq()],
+                comparators=[ast.BinOp(left=ast.Constant(value=a), op=ast.Add(), right=ast.Constant(value=b))]
+            )
+        elif pick == 5:
+            # Collatz odd step: for any odd m, (3m + 1) is even.
+            m = 2 * (_trx_rand(9999) + 1) + 1
+            return ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(
+                        left=ast.BinOp(left=ast.Constant(value=m), op=ast.Mult(), right=ast.Constant(value=3)),
+                        op=ast.Add(),
+                        right=ast.Constant(value=1)
+                    ),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=2)
+                ),
+                ops=[ast.Eq()],
+                comparators=[ast.Constant(value=0)]
+            )
+        else:
+            # Modular inverse via Fermat's little theorem: a * a^(p-2) ≡ 1 (mod p), p prime.
+            p = (101, 103, 107, 109, 113, 127, 131, 137, 139, 149)[_trx_rand(10)]
+            inv_a = _trx_rand(p - 2) + 2
+            return ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(
+                        left=ast.Constant(value=inv_a),
+                        op=ast.Mult(),
+                        right=ast.BinOp(left=ast.Constant(value=inv_a), op=ast.Pow(), right=ast.Constant(value=p - 2))
+                    ),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=p)
+                ),
+                ops=[ast.Eq()],
+                comparators=[ast.Constant(value=1)]
+            )
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         self.generic_visit(node)
@@ -1673,14 +1890,14 @@ class MathOpaqueTransformer(ast.NodeTransformer):
         
         new_body = []
         for stmt in node.body:
-            if secrets.randbelow(100) < 60 and not isinstance(stmt, (ast.Return, ast.Yield, ast.YieldFrom, ast.Global, ast.Nonlocal, ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef)):
+            if _trx_rand(100) < 60 and not isinstance(stmt, (ast.Return, ast.Yield, ast.YieldFrom, ast.Global, ast.Nonlocal, ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef)):
                 bogus_var = rd('biopaque')
                 bogus_stmt = ast.Assign(
                     targets=[ast.Name(id=bogus_var)],
                     value=ast.BinOp(
-                        left=ast.Constant(value=secrets.randbelow(0xFFFFFF)),
+                        left=ast.Constant(value=_trx_rand(0xFFFFFF)),
                         op=ast.BitXor(),
-                        right=ast.Constant(value=secrets.randbelow(0xFFFFFF))
+                        right=ast.Constant(value=_trx_rand(0xFFFFFF))
                     ),
                     lineno=None
                 )
@@ -1714,7 +1931,7 @@ class DynamicStringXORTransformer(ast.NodeTransformer):
     """Replaces string literals with dynamic per-callsite XOR decryption expressions derived from AST coordinates (TRX-AST-B3/FEAT-003)."""
 
     def __init__(self, master_seed: int = None):
-        self.master_seed = master_seed or (secrets.randbelow(0x7FFFFFFF) + 1000)
+        self.master_seed = master_seed or (_trx_rand(0x7FFFFFFF) + 1000)
         self.protected_ids = set()
 
     @staticmethod
@@ -1741,8 +1958,77 @@ class DynamicStringXORTransformer(ast.NodeTransformer):
         node.body = [self.visit(stmt) for stmt in node.body]
         return node
 
+    @staticmethod
+    def _make_int_algebra_expr(value: int, site_key: int) -> ast.BinOp:
+        """Exact integer reconstruction via (a ^ b) + c where c = value - (a ^ b).
+        Strategy source: pyshield passes/constants.py int tiers (MIT, research note)."""
+        a = (site_key % 0x7F) + 1
+        b = ((site_key >> 7) % 0x7F) + 1
+        c = value - (a ^ b)
+        return ast.BinOp(
+            left=ast.BinOp(left=ast.Constant(value=a), op=ast.BitXor(), right=ast.Constant(value=b)),
+            op=ast.Add(),
+            right=ast.Constant(value=c)
+        )
+
+    def _build_bytes_decode_lambda(self, payload_expr: ast.expr, elt_builder) -> ast.Call:
+        """Shared anonymous-decoder shell: lambda s: bytes(<genexp over enumerate(s)>).decode('utf-8')."""
+        v_s = _rd()
+        v_i = _rd()
+        v_b = _rd()
+        return ast.Call(
+            func=ast.Lambda(
+                args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=v_s)], kwonlyargs=[], kw_defaults=[], defaults=[]),
+                body=ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Call(
+                            func=ast.Name(id='bytes'),
+                            args=[
+                                ast.ListComp(
+                                    elt=elt_builder(v_i, v_b),
+                                    generators=[
+                                        ast.comprehension(
+                                            target=ast.Tuple(elts=[ast.Name(id=v_i), ast.Name(id=v_b)]),
+                                            iter=ast.Call(func=ast.Name(id='enumerate'), args=[ast.Name(id=v_s)], keywords=[]),
+                                            ifs=[], is_async=0
+                                        )
+                                    ]
+                                )
+                            ],
+                            keywords=[]
+                        ),
+                        attr='decode'
+                    ),
+                    args=[ast.Constant(value='utf-8')],
+                    keywords=[]
+                )
+            ),
+            args=[payload_expr],
+            keywords=[]
+        )
+
     def visit_Constant(self, node: ast.Constant):
         if id(node) in self.protected_ids:
+            return node
+        # Exact float -> integer-ratio reconstruction. Source: pyshield
+        # ConstantTransformer Fraction idea (MIT), hardened: Python floats carry an
+        # EXACT rational via as_integer_ratio(), so n / d reproduces the ORIGINAL
+        # float bit-for-bit (no limit_denominator approximation drift).
+        if isinstance(node.value, float) and not isinstance(node.value, bool):
+            try:
+                ratio_n, ratio_d = node.value.as_integer_ratio()
+            except (OverflowError, ValueError):
+                return node
+            if abs(ratio_n) < (1 << 62) and ratio_d.bit_length() <= 62 and ratio_d != 0:
+                lineno_f = getattr(node, 'lineno', 1) or 1
+                col_f = getattr(node, 'col_offset', 0) or 0
+                fkey = (self.master_seed ^ (lineno_f * 31337) ^ (col_f * 101) ^ 0xF70A7) & 0xFFFFFFFF
+                num_expr = self._make_int_algebra_expr(ratio_n, fkey)
+                den_expr = self._make_int_algebra_expr(ratio_d, (fkey ^ 0x5A5A5A) & 0xFFFFFFFF)
+                div_expr = ast.BinOp(left=num_expr, op=ast.Div(), right=den_expr)
+                ast.copy_location(div_expr, node)
+                ast.fix_missing_locations(div_expr)
+                return div_expr
             return node
         if isinstance(node.value, str) and len(node.value) > 0:
             if (node.value.startswith("__") and node.value.endswith("__")) or len(node.value) > 20000:
@@ -1753,73 +2039,155 @@ class DynamicStringXORTransformer(ast.NodeTransformer):
             col_offset = getattr(node, 'col_offset', 0) or 0
             
             site_key = (self.master_seed ^ (lineno * 31337) ^ (col_offset * 101) ^ len(val_bytes)) & 0xFFFFFFFF
-            
-            enc_bytes = bytearray()
-            for idx, b in enumerate(val_bytes):
-                k_byte = (site_key + idx * 31337 + (idx ^ 0x5A)) & 0xFF
-                enc_bytes.append(b ^ k_byte)
-            
-            enc_bytes_list = list(enc_bytes)
-            
-            v_s = _rd()
-            v_k = _rd()
-            v_i = _rd()
-            v_b = _rd()
-            
-            dec_expr = ast.Call(
-                func=ast.Lambda(
-                    args=ast.arguments(
-                        posonlyargs=[],
-                        args=[ast.arg(arg=v_s), ast.arg(arg=v_k)],
-                        kwonlyargs=[], kw_defaults=[], defaults=[]
-                    ),
-                    body=ast.Call(
-                        func=ast.Attribute(
-                            value=ast.Call(
-                                func=ast.Name(id='bytes'),
-                                args=[
-                                    ast.ListComp(
-                                        elt=ast.BinOp(
-                                            left=ast.Name(id=v_b),
-                                            op=ast.BitXor(),
-                                            right=ast.BinOp(
-                                                left=ast.BinOp(
-                                                    left=ast.BinOp(
-                                                        left=ast.Name(id=v_k),
-                                                        op=ast.Add(),
-                                                        right=ast.BinOp(left=ast.Name(id=v_i), op=ast.Mult(), right=ast.Constant(value=31337))
-                                                    ),
-                                                    op=ast.Add(),
-                                                    right=ast.BinOp(left=ast.Name(id=v_i), op=ast.BitXor(), right=ast.Constant(value=90))
-                                                ),
-                                                op=ast.BitAnd(),
-                                                right=ast.Constant(value=255)
-                                            )
-                                        ),
-                                        generators=[
-                                            ast.comprehension(
-                                                target=ast.Tuple(elts=[ast.Name(id=v_i), ast.Name(id=v_b)]),
-                                                iter=ast.Call(func=ast.Name(id='enumerate'), args=[ast.Name(id=v_s)], keywords=[]),
-                                                ifs=[],
-                                                is_async=0
-                                            )
-                                        ]
-                                    )
-                                ],
-                                keywords=[]
-                            ),
-                            attr='decode'
+
+            # Weighted per-callsite cipher heterogeneity - source: pyshield
+            # DistributedStringEncryptor dispatcher (MIT, research note): three
+            # structurally distinct inline schemes so no single deobfuscation
+            # pattern can sweep every callsite.
+            strat_pick = site_key % 100
+            if strat_pick < 50:
+                strategy = 'coord_xor'      # legacy rolling coordinate keystream
+            elif strat_pick < 75:
+                strategy = 'poly_affine'    # enc[i] = (b + salt*(i+1)) mod 256
+            else:
+                strategy = 'chunked_xor'    # single-key XOR + randomized chunk split
+
+            if strategy == 'coord_xor':
+                enc_bytes = bytearray()
+                for idx, b in enumerate(val_bytes):
+                    k_byte = (site_key + idx * 31337 + (idx ^ 0x5A)) & 0xFF
+                    enc_bytes.append(b ^ k_byte)
+                
+                enc_bytes_list = list(enc_bytes)
+                
+                v_s = _rd()
+                v_k = _rd()
+                v_i = _rd()
+                v_b = _rd()
+                
+                dec_expr = ast.Call(
+                    func=ast.Lambda(
+                        args=ast.arguments(
+                            posonlyargs=[],
+                            args=[ast.arg(arg=v_s), ast.arg(arg=v_k)],
+                            kwonlyargs=[], kw_defaults=[], defaults=[]
                         ),
-                        args=[ast.Constant(value='utf-8')],
-                        keywords=[]
+                        body=ast.Call(
+                            func=ast.Attribute(
+                                value=ast.Call(
+                                    func=ast.Name(id='bytes'),
+                                    args=[
+                                        ast.ListComp(
+                                            elt=ast.BinOp(
+                                                left=ast.Name(id=v_b),
+                                                op=ast.BitXor(),
+                                                right=ast.BinOp(
+                                                    left=ast.BinOp(
+                                                        left=ast.BinOp(
+                                                            left=ast.Name(id=v_k),
+                                                            op=ast.Add(),
+                                                            right=ast.BinOp(left=ast.Name(id=v_i), op=ast.Mult(), right=ast.Constant(value=31337))
+                                                        ),
+                                                        op=ast.Add(),
+                                                        right=ast.BinOp(left=ast.Name(id=v_i), op=ast.BitXor(), right=ast.Constant(value=90))
+                                                    ),
+                                                    op=ast.BitAnd(),
+                                                    right=ast.Constant(value=255)
+                                                )
+                                            ),
+                                            generators=[
+                                                ast.comprehension(
+                                                    target=ast.Tuple(elts=[ast.Name(id=v_i), ast.Name(id=v_b)]),
+                                                    iter=ast.Call(func=ast.Name(id='enumerate'), args=[ast.Name(id=v_s)], keywords=[]),
+                                                    ifs=[],
+                                                    is_async=0
+                                                )
+                                            ]
+                                        )
+                                    ],
+                                    keywords=[]
+                                ),
+                                attr='decode'
+                            ),
+                            args=[ast.Constant(value='utf-8')],
+                            keywords=[]
+                        )
+                    ),
+                    args=[
+                        ast.Call(func=ast.Name(id='bytes'), args=[ast.List(elts=[ast.Constant(value=x) for x in enc_bytes_list])], keywords=[]),
+                        ast.Constant(value=site_key)
+                    ],
+                    keywords=[]
+                )
+                ast.copy_location(dec_expr, node)
+                ast.fix_missing_locations(dec_expr)
+                return dec_expr
+
+            if strategy == 'poly_affine':
+                salt = (site_key % 127) + 1
+                enc_list = [(b + salt * (i + 1)) % 256 for i, b in enumerate(val_bytes)]
+                payload = ast.Call(func=ast.Name(id='bytes'),
+                                   args=[ast.List(elts=[ast.Constant(value=x) for x in enc_list])],
+                                   keywords=[])
+
+                def _unshift(i_name, b_name):
+                    return ast.BinOp(
+                        left=ast.BinOp(
+                            left=ast.Name(id=b_name),
+                            op=ast.Sub(),
+                            right=ast.BinOp(
+                                left=ast.Constant(value=salt),
+                                op=ast.Mult(),
+                                right=ast.BinOp(left=ast.Name(id=i_name), op=ast.Add(), right=ast.Constant(value=1))
+                            )
+                        ),
+                        op=ast.Mod(),
+                        right=ast.Constant(value=256)
                     )
-                ),
-                args=[
-                    ast.Call(func=ast.Name(id='bytes'), args=[ast.List(elts=[ast.Constant(value=x) for x in enc_bytes_list])], keywords=[]),
-                    ast.Constant(value=site_key)
-                ],
-                keywords=[]
-            )
+
+                dec_expr = self._build_bytes_decode_lambda(payload, _unshift)
+                ast.copy_location(dec_expr, node)
+                ast.fix_missing_locations(dec_expr)
+                return dec_expr
+
+            # chunked_xor
+            kb = ((site_key >> 7) & 0xFF) or 0x5B
+            enc_full = bytes(b ^ kb for b in val_bytes)
+            n_chunks = 2 + (site_key % 4)
+            if len(enc_full) <= n_chunks:
+                chunks = [enc_full]
+            else:
+                bounds = set()
+                lcg = site_key | 1
+                attempts = 0
+                while len(bounds) < n_chunks - 1 and attempts < 64:
+                    attempts += 1
+                    lcg = (lcg * 6364136223846793005 + 1442695040888963407) & 0xFFFFFFFFFFFFFFFF
+                    bounds.add((lcg >> 33) % (len(enc_full) - 1) + 1)
+                cuts = [0] + sorted(bounds) + [len(enc_full)]
+                chunks = [enc_full[cuts[k]:cuts[k + 1]] for k in range(len(cuts) - 1)]
+            chunk_nodes = []
+            for ch in chunks:
+                if not ch:
+                    continue
+                chunk_nodes.append(ast.Call(func=ast.Name(id='bytes'),
+                                            args=[ast.List(elts=[ast.Constant(value=x) for x in ch])],
+                                            keywords=[]))
+            if not chunk_nodes:
+                chunk_nodes.append(ast.Call(func=ast.Name(id='bytes'),
+                                            args=[ast.List(elts=[])], keywords=[]))
+            joined = chunk_nodes[0]
+            for extra in chunk_nodes[1:]:
+                joined = ast.BinOp(left=joined, op=ast.Add(), right=extra)
+
+            def _unxor(i_name, b_name):
+                return ast.BinOp(
+                    left=ast.Name(id=b_name),
+                    op=ast.BitXor(),
+                    right=ast.Constant(value=kb)
+                )
+
+            dec_expr = self._build_bytes_decode_lambda(joined, _unxor)
             ast.copy_location(dec_expr, node)
             ast.fix_missing_locations(dec_expr)
             return dec_expr
@@ -1839,12 +2207,25 @@ def _dyn_strings_obf(code_str: str, seed: int = None) -> str:
 # BEDROCK-GRADE DECOMPILER TRAP & SECRET SHARING ENGINES
 # ═══════════════════════════════════════════════════════════════
 
+def _ast_touches_exception_frames(node: ast.AST) -> bool:
+    """Eligibility sniff (source: bedrock-obfuscator UnsupportedOpcode gates,
+    Apache-2.0 research note): True when the subtree produces CPython exception
+    tables / frame setup at bytecode level. Conservative transforms skip these
+    units - silent wrong output is strictly worse than skipping a transform."""
+    for child in ast.walk(node):
+        if isinstance(child, (ast.Try, ast.With, ast.AsyncFor, ast.AsyncWith)):
+            return True
+        if hasattr(ast, 'TryStar') and isinstance(child, ast.TryStar):
+            return True
+    return False
+
+
 class DecompilerTrapTransformer(ast.NodeTransformer):
     """Wraps AST statement blocks in opaque mathematical predicates and overlapping trap structures that break decompilers (uncompyle6/decompyle3/pycdc)."""
 
     def __init__(self, density: float = 0.5, seed: int = None):
         self.density = density
-        self.rng = random.Random(seed or secrets.randbelow(0x7FFFFFFF))
+        self.rng = random.Random(seed or _trx_rand(0x7FFFFFFF))
 
     def _make_opaque_true(self):
         n_val = self.rng.randint(2, 9999)
@@ -1920,10 +2301,15 @@ class DecompilerTrapTransformer(ast.NodeTransformer):
         return new_stmts
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
+        # Eligibility gate: leave exception-table-producing functions untouched.
+        if _ast_touches_exception_frames(node):
+            return node
         node.body = self._wrap_stmts(node.body)
         return node
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        if _ast_touches_exception_frames(node):
+            return node
         node.body = self._wrap_stmts(node.body)
         return node
 
@@ -1944,7 +2330,7 @@ class VariableSplittingTransformer(ast.NodeTransformer):
     """Splits local integer assignments into XOR secret shares (s1 ^ s2) dynamically inside functions."""
 
     def __init__(self, seed: int = None):
-        self.rng = random.Random(seed or secrets.randbelow(0x7FFFFFFF))
+        self.rng = random.Random(seed or _trx_rand(0x7FFFFFFF))
 
     def visit_Assign(self, node: ast.Assign):
         if (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) 
@@ -1991,7 +2377,7 @@ class StringFragmentationTransformer(ast.NodeTransformer):
     """Fragments string literals >= 6 chars into XOR-encrypted pools with decoys and dynamic assembly (strfrag2)."""
 
     def __init__(self, seed: int = None):
-        self.rng = random.Random(seed or secrets.randbelow(0x7FFFFFFF))
+        self.rng = random.Random(seed or _trx_rand(0x7FFFFFFF))
         self.key1 = self.rng.randint(1, 254)
         self.key2 = self.rng.randint(1, 254)
         self.fn_name = rd('biopaque')
@@ -2685,16 +3071,16 @@ def obfstr(v, _depth=0):
     elif strategy == 4:
         # XOR with random magic
         keys = []
-        magic = secrets.randbelow(9000000) + 1000000
+        magic = _trx_rand(9000000) + 1000000
         for char in v:
-            logic = secrets.randbelow(5) + 1
+            logic = _trx_rand(5) + 1
             key = ord(char)
             key2 = magic
             if logic == 1:
                 key3 = key ^ magic
                 keys.append(f"(lambda: chr({key3} ^ {key2}))()")
             elif logic == 2:
-                shift = secrets.randbelow(12) + 1
+                shift = _trx_rand(12) + 1
                 key3 = key << shift
                 keys.append(f"(lambda: chr({key3} >> {shift}))()")
             elif logic == 3:
@@ -2713,7 +3099,11 @@ def obfstr(v, _depth=0):
         # Bytewise encoding with shuffled indices
         indices = list(range(len(v)))
         shuffled = indices[:]
-        secrets.SystemRandom().shuffle(shuffled)
+        # seeding-aware shuffle (SystemRandom ignored --seed; audit fix)
+        if _SEEDED_RNG is not None:
+            _SEEDED_RNG.shuffle(shuffled)
+        else:
+            secrets.SystemRandom().shuffle(shuffled)
         encoded = [(shuffled[i], ord(v[shuffled[i]]) + 0xFF78FF) for i in range(len(v))]
         pairs_str = str(encoded)
         return f"(lambda: ''.join(globals()['{_hexrun}'](c) for _, c in sorted({pairs_str})))()"
@@ -2722,7 +3112,7 @@ def obfstr(v, _depth=0):
         # Multi-base encoding
         encoded_bytes = v.encode('utf-8')
         nums = [b for b in encoded_bytes]
-        xor_val = secrets.randbelow(255) + 1
+        xor_val = _trx_rand(255) + 1
         xored = [n ^ xor_val for n in nums]
         return f"(lambda: bytes([x ^ {xor_val} for x in {xored}]).decode('utf-8'))()"
 
@@ -2744,7 +3134,7 @@ def obfint(v):
         else:
             return f'(lambda: (lambda {n}: {n} - (lambda: H2SbF7(({(1 + 0x7777)})))())(0) == 1)()'
     else:
-        strategy = secrets.randbelow(8) + 1
+        strategy = _trx_rand(8) + 1
         val = int(v)
 
         # Strategy 1 (_byte) only works for non-negative integers
@@ -2753,19 +3143,19 @@ def obfint(v):
                 return f'(lambda: c2h6({_byte(val)}))()'
             else:
                 # Fallback for negative numbers: use XOR strategy
-                xor_key = secrets.randbelow(0xFFFFF - 0x1000) + 0x1000
+                xor_key = _trx_rand(0xFFFFF - 0x1000) + 0x1000
                 return f'(lambda: (lambda: {val ^ xor_key} ^ {xor_key})())()'
 
         elif strategy == 2:
-            offset = secrets.randbelow(0xFFFFF - 0x5000) + 0x5000
+            offset = _trx_rand(0xFFFFF - 0x5000) + 0x5000
             return f'(lambda: (lambda: {val + offset} - {offset})())()'
 
         elif strategy == 3:
-            xor_key = secrets.randbelow(0xFFFFF - 0x1000) + 0x1000
+            xor_key = _trx_rand(0xFFFFF - 0x1000) + 0x1000
             return f'(lambda: (lambda: {val ^ xor_key} ^ {xor_key})())()'
 
         elif strategy == 4:
-            mult = secrets.choice([2, 3, 5, 7, 11, 13])
+            mult = _trx_choice([2, 3, 5, 7, 11, 13])
             remainder = val % mult
             base = val // mult
             return f'(lambda: (lambda: {base} * {mult} + {remainder})())()'
@@ -2777,7 +3167,7 @@ def obfint(v):
             return f'(lambda: ~~{val})()'
 
         elif strategy == 7:
-            a = secrets.randbelow(10000) + 1
+            a = _trx_rand(10000) + 1
             b = val + a
             _p = rd()
             return f'(lambda: (lambda {_p}: {_p} - {a})({b}))()'
@@ -3055,7 +3445,11 @@ def _refresh_runtime_symbols():
     _exp = rd()
     _generate_var_block()
 
-_generate_var_block()
+# NOTE (determinism fix): the legacy module-import-time call above made the var
+# block bake OS entropy into a template BEFORE --seed could influence it, so two
+# seeded processes produced different artifacts. The block is now regenerated
+# inside obfuscate_single_target() AFTER per-file seeding; import-time call kept
+# only as fallback for direct-API users that skip the pipeline entry.
 
 # ═══════════════════════════════════════════════════════════════
 # ANTI-PYCDC ENHANCED (COMPACT & FAST DECOMPILER KILLER)
@@ -3211,6 +3605,9 @@ try:
     if hasattr(sys, 'audit'):
         sys.audit = lambda *a, **k: None
     if hasattr(sys, 'addaudithook'):
+        # FIX (audit P0): snapshot the REAL builtin before nulling so Vector 15
+        # canary can still register through it (previously self-defeated).
+        globals()['_trx_real_addaudithook'] = sys.addaudithook
         sys.addaudithook = lambda *a, **k: None
 except Exception:
     pass
@@ -3503,7 +3900,8 @@ def _anti_debugger():
             _g['_trx_audit_count'] = [0]
             def _trx_audit_hook(event, args):
                 _g['_trx_audit_count'][0] += 1
-            sys.addaudithook(_trx_audit_hook)
+            # FIX (audit P0): register through the preserved real builtin, not the nulled attr.
+            (_g.get('_trx_real_addaudithook') or sys.addaudithook)(_trx_audit_hook)
         else:
             _c_before = _g['_trx_audit_count'][0]
             try:
@@ -3562,6 +3960,42 @@ def _anti_debugger():
             globals()['_trx_trace_latch'] = True
         else:
             globals()['_trx_trace_latch'] = False
+    except Exception:
+        pass
+
+    # Vector 19: Linux TracerPid detection (/proc/self/status).
+    # Source: pyshield protection/anti_analysis.py TracerPid vector (MIT, research
+    # note) - closes the native-gdb-attach gap in the previous matrix.
+    try:
+        if sys.platform.startswith('linux'):
+            with open('/proc/self/status', 'r') as _tps:
+                for _tp_line in _tps:
+                    if _tp_line.startswith('TracerPid:'):
+                        if int(_tp_line.split(':', 1)[1].strip() or '0') != 0:
+                            _obliterate()
+                        break
+    except Exception:
+        pass
+
+    # Vector 20: Dual builtins identity cross-check. Fresh import gives a pristine
+    # namespace; id() equality catches attribute replacement while the type()
+    # equality against print() catches proxy objects spoofing __name__.
+    # Source: pyshield anti_analysis.py builtins identity check (MIT, research note).
+    try:
+        import builtins as _trx_bi2
+        import importlib as _trx_il2
+        _trx_pristine = _trx_il2.import_module('builtins')
+        if id(_trx_bi2.exec) != id(_trx_pristine.exec):
+            _obliterate()
+        if id(_trx_bi2.compile) != id(_trx_pristine.compile):
+            _obliterate()
+        if type(_trx_bi2.exec) is not type(_trx_bi2.print):
+            _obliterate()
+        if type(_trx_bi2.compile) is not type(_trx_bi2.print):
+            _obliterate()
+        del _trx_pristine
+    except SystemExit:
+        raise
     except Exception:
         pass
 
@@ -4473,7 +4907,14 @@ def _derive_keys_argon2_or_pbkdf2(password: bytes, salt: bytes) -> tuple[bytes, 
         return ke, None
 
 def _derive_runtime_keys(salt: bytes):
-    """Derive encryption and MAC keys from salt + runtime environment (for obfuscation-only mode)."""
+    """Derive encryption key from salt + runtime environment (obfuscation-only mode).
+
+    FIX (crypto P0): returns km=None so TRXH tags always use the SAME derivation
+    formula as every emitted loader (sha256(ke + b'__mac__')). Previously this
+    function derived km via pbkdf2 while loaders verified with sha256(ke|__mac__),
+    producing artifacts that always failed HMAC verification when built on a
+    machine without 'cryptography'.
+    """
     import platform
     parts = []
     parts.append(sys.version[:5].encode())
@@ -4483,10 +4924,8 @@ def _derive_runtime_keys(salt: bytes):
     parts.append(sys.byteorder.encode())
     combined = b''.join(parts)
     enc_k = hashlib.sha256(combined + b'__enc__').digest()
-    mac_k = hashlib.sha256(combined + b'__mac__').digest()
     ke = hashlib.pbkdf2_hmac('sha256', salt, enc_k, 50000, 32)
-    km = hashlib.pbkdf2_hmac('sha256', salt, mac_k, 50000, 32)
-    return ke, km
+    return ke, None
 
 def _auth_stream_encrypt(data: bytes, salt: bytes, ke: bytes, km: bytes = None):
     """AEAD v3 encryption. Primary path: ChaCha20-Poly1305 (cryptography lib).
@@ -4517,8 +4956,59 @@ def _auth_stream_encrypt(data: bytes, salt: bytes, ke: bytes, km: bytes = None):
     tag = hmac.new(km_eff, salt + nonce + ciphertext, hashlib.sha256).digest()
     return b'TRXH' + salt + nonce + tag + ciphertext, nonce
 
+def _select_armor_codec() -> tuple:
+    """Per-build outer radix diversification.
+
+    Source: PyObfuscate layered-encoder matrix (MIT, research note) - rotating the
+    outermost codec among RFC4648 alphabets defeats fixed-alphabet YARA rules that
+    key on a single b85 charset. Weighted toward b85 (25% size overhead vs b64's
+    33%); b32 (+60%) and exotic radials stay opt-in via --base4096.
+    """
+    r = random.random()
+    if r < 0.70:
+        return 'b85encode', 'b85decode'
+    if r < 0.90:
+        return 'b64encode', 'b64decode'
+    return 'b32encode', 'b32decode'
+
+
+def _hw_fingerprint() -> bytes:
+    """Machine fingerprint for optional env-key hardware lock.
+
+    Source: bedrock-obfuscator --env-key fingerprint collector concept
+    (Apache-2.0 + provisions, research note; independent implementation).
+    NOTE: informational-strength binding - MAC/hostname/arch are spoofable.
+    Wrong machine yields wrong keys -> authenticated decrypt failure (fail-closed).
+    """
+    try:
+        import uuid as _uuid
+        node = _uuid.getnode()
+    except Exception:
+        node = 0
+    import platform as _plat
+    parts = "|".join([
+        str(node),
+        _plat.system(),
+        _plat.machine(),
+        _plat.python_implementation(),
+        f"{sys.version_info.major}.{sys.version_info.minor}",
+    ])
+    return hashlib.sha256(parts.encode('utf-8', 'replace')).digest()
+
+
 def _multi_layer_encrypt(data: bytes, password: str = None):
-    """Apply AEAD v3 encryption with Argon2id/PBKDF2 (if password provided) or environment-derived keys."""
+    """Apply AEAD v3 encryption with Argon2id/PBKDF2 (if password provided) or environment-derived keys.
+
+    Returns (armored_string, salt, armor_meta) where armor_meta describes the
+    per-build outer codec + optional transforms so emitted loaders can mirror
+    the exact decode chain:
+      {'dec': 'b85decode'|'b64decode'|'b32decode', 'rev': bool, 'lzma': bool}
+    Optional stages (research adoptions):
+      - LZMA pre-encryption layer  (source: pyminifier compression.py lzma wrapper
+        concept, GPL research note; stdlib lzma, safe for 3.10-3.14)
+      - reversed payload storage   (source: PyObfuscate [::-1] trick, MIT)
+      - randomized outer radix     (source: PyObfuscate codec matrix, MIT)
+    """
     if password:
         try:
             from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305  # noqa: F401
@@ -4527,17 +5017,41 @@ def _multi_layer_encrypt(data: bytes, password: str = None):
                 "Password-protected builds require the 'cryptography' package for "
                 "ChaCha20-Poly1305 AEAD. Install it with: pip install cryptography"
             )
+    lzma_on = bool(_EngineState.lzma_layer)
+    if lzma_on:
+        try:
+            import lzma as _lzma
+            data = _lzma.compress(data, preset=9)
+        except Exception:
+            lzma_on = False
     data = zlib.compress(data, 6)
     salt = secrets.token_bytes(16)
+    if _EngineState.env_key_lock and not password:
+        # Hardware-lock blinding: stored salt is XOR-masked with the machine
+        # fingerprint; loader re-derives the fingerprint and unmasks before KDF
+        # (bedrock --env-key concept; wrong machine -> garbage keys -> auth fail).
+        fp = _hw_fingerprint()
+        salt_stored = bytes(salt[i] ^ fp[i] for i in range(16))
+    else:
+        salt_stored = salt
     if password:
         ke, km = _derive_keys_argon2_or_pbkdf2(password.encode('utf-8'), salt)
     else:
         ke, km = _derive_runtime_keys(salt)
 
     packed, nonce = _auth_stream_encrypt(data, salt, ke, km)
+    if not password and _EngineState.env_key_lock:
+        # Re-blind the transmitted salt so the artifact never carries it plain.
+        # Keep magic prefix intact: [magic4][blinded salt16][nonce12][ciphertext...]
+        packed = packed[:4] + salt_stored + nonce + packed[4 + 16 + 12:]
     payload_packed = bz2.compress(packed, 6)
     payload_packed = zlib.compress(payload_packed, 6)
-    return base64.b85encode(payload_packed).decode('ascii'), salt
+    enc_name, dec_name = _select_armor_codec()
+    armored = getattr(base64, enc_name)(payload_packed).decode('ascii')
+    rev = bool(random.random() < 0.35)
+    if rev:
+        armored = armored[::-1]
+    return armored, salt, {'dec': dec_name, 'rev': rev, 'lzma': lzma_on}
 
 
 def _velimatix_compile(code_str):
@@ -4735,14 +5249,48 @@ def _double_compile(code_str, target_ver=None, password=None):
         target_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
     try:
         compiled = marshal.dumps(compile(code_str, "<tr0ngx>", "exec"))
-    except SyntaxError:
+    except SyntaxError as _syn_err:
+        # FIX (crypto P0): previously returned plaintext SILENTLY - a silent crypto
+        # bypass. Now the failure is tracked as a real stage error (respected by
+        # --strict) and loudly warned so downstream packaging never mistakes an
+        # unencrypted payload for a protected one.
+        try:
+            _log_stage_error("7_double_compile_syntax_error", _syn_err,
+                             {"detail": "double-compile marshal failed; payload left unencrypted"})
+        except Exception:
+            pass
+        print("[TR0NGX] [WARNING] double-compile failed at marshal stage; output is NOT encrypted.", flush=True)
         return code_str
 
-    enc_b85, salt = _multi_layer_encrypt(compiled, password=password)
+    enc_b85, salt, _armor = _multi_layer_encrypt(compiled, password=password)
+    _armor_dec = _armor['dec']
+    _armor_rev = "[::-1]" if _armor['rev'] else ""
+    if _armor['lzma']:
+        _lzma_step = "_s6 = lzma.decompress(_s5)" + chr(10) + "_s5 = _s6"
+        _lzma_import = ", lzma"
+    else:
+        _lzma_step = ""
+        _lzma_import = ""
+    if not _lzma_step:
+        # collapse: no extra stage
+        _lzma_step = ""
+    if _EngineState.env_key_lock and not password:
+        # Env-key unmask snippet: loader re-derives the machine fingerprint and
+        # unmasks the transmitted salt before KDF (bedrock --env-key concept).
+        _envkey_unmask = chr(10).join([
+            "    try:",
+            "        import uuid as _trx_u",
+            "        _trx_fp = hashlib.sha256(('|'.join([str(_trx_u.getnode()), platform.system(), platform.machine(), platform.python_implementation(), str(sys.version_info.major) + '.' + str(sys.version_info.minor)])).encode()).digest()",
+            "        salt = bytes(salt[i] ^ _trx_fp[i] for i in range(16))",
+            "    except Exception:",
+            "        raise SystemExit(1)",
+        ])
+    else:
+        _envkey_unmask = "# portable build: no hardware binding"
 
     if password:
         inner_loader = f"""
-import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, os, getpass, gc
+import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, os, getpass, gc{_lzma_import}
 
 sys.dont_write_bytecode = True
 {_generate_strict_version_guard(target_ver)}
@@ -4793,25 +5341,21 @@ if not _pwd:
     _pwd = getpass.getpass("[TR0NGX] Enter decryption password: ")
 
 _payload_b85 = {enc_b85!r}
-_s1 = base64.b85decode(_payload_b85)
+_s1 = getattr(base64, {_armor_dec!r})(_payload_b85{_armor_rev})
 _s2 = zlib.decompress(_s1)
 _s3 = bz2.decompress(_s2)
 _s4 = _auth_decrypt(_s3, _pwd)
-_s5 = zlib.decompress(_s4)
+_s5 = zlib.decompress(_s4){chr(10)}{_lzma_step}
 exec(marshal.loads(_s5), globals(), globals())
-try:
-    for _b_item in [_s1, _s2, _s3, _s4, _s5]:
-        if isinstance(_b_item, (bytearray, bytes)):
-            _ba = bytearray(_b_item)
-            for _zi in range(len(_ba)): _ba[_zi] = 0
-except Exception:
-    pass
+# FIX (audit): previous scrub loop zeroed a bytearray COPY of immutable bytes -
+# a no-op. Honest cleanup is reference deletion + gc; in-place wiping of
+# immutable bytes is impossible from pure Python (documented limitation).
 del _payload_b85, _s1, _s2, _s3, _s4, _s5, _pwd
 gc.collect()
 """
     else:
         inner_loader = f"""
-import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, platform, gc
+import base64, zlib, bz2, marshal, hashlib, hmac, types, sys, platform, gc{_lzma_import}
 
 sys.dont_write_bytecode = True
 {_generate_strict_version_guard(target_ver)}
@@ -4831,6 +5375,7 @@ def _derive_runtime_keys(salt):
 def _auth_decrypt(raw_bytes):
     magic = raw_bytes[:4]
     salt = raw_bytes[4:20]
+{_envkey_unmask}
     enc_k, mac_k = _derive_runtime_keys(salt)
     ke = hashlib.pbkdf2_hmac('sha256', salt, enc_k, 50000, 32)
     body = raw_bytes[20:]
@@ -4857,19 +5402,13 @@ def _auth_decrypt(raw_bytes):
     raise SystemExit(1)
 
 _payload_b85 = {enc_b85!r}
-_s1 = base64.b85decode(_payload_b85)
+_s1 = getattr(base64, {_armor_dec!r})(_payload_b85{_armor_rev})
 _s2 = zlib.decompress(_s1)
 _s3 = bz2.decompress(_s2)
 _s4 = _auth_decrypt(_s3)
-_s5 = zlib.decompress(_s4)
+_s5 = zlib.decompress(_s4){chr(10)}{_lzma_step}
 exec(marshal.loads(_s5), globals(), globals())
-try:
-    for _b_item in [_s1, _s2, _s3, _s4, _s5]:
-        if isinstance(_b_item, (bytearray, bytes)):
-            _ba = bytearray(_b_item)
-            for _zi in range(len(_ba)): _ba[_zi] = 0
-except Exception:
-    pass
+# FIX (audit): honest cleanup - see note in password variant above.
 del _payload_b85, _s1, _s2, _s3, _s4, _s5
 gc.collect()
 """
@@ -8652,14 +9191,18 @@ class HyperionEngine:
                     prev_tok != '.' and
                     t_str not in self.imports):
                     if prev_tok in ('def', 'class') or next_tok == '=':
-                        if t_str not in renamed:
+                        if t_str in _FROZEN_NAME_MAP:
+                            renamed[t_str] = _FROZEN_NAME_MAP[t_str]
+                        elif t_str not in renamed:
                             renamed[t_str] = rd()
                         t_str = renamed[t_str]
                     elif t_str in renamed:
                         t_str = renamed[t_str]
                 elif prev_tok in ('def', 'class'):
                     if t_str not in skip_keywords and not t_str.startswith('__'):
-                        if t_str not in renamed:
+                        if t_str in _FROZEN_NAME_MAP:
+                            renamed[t_str] = _FROZEN_NAME_MAP[t_str]
+                        elif t_str not in renamed:
                             renamed[t_str] = rd()
                         t_str = renamed[t_str]
 
@@ -8846,7 +9389,7 @@ from math import prod as {gen[5]}
 __obfuscator__ = 'Tr0ngX x Hyperion Ultimate'
 __authors__ = ('Tr0ngX', 'billythegoat356', 'BlueRed')
 __github__ = 'https://github.com/Tr0ngX/Tr0ngX-Ultimate-AST-Obfuscator'
-__license__ = 'MIT / EPL-2.0'
+__license__ = 'EPL-2.0'
 __code__ = 'None'
 
 {exec_alias}, {str_alias}, {tuple_alias}, {map_alias}, {ord_alias}, {glob_alias}, {type_alias} = exec, str, tuple, map, ord, globals, type
@@ -8924,7 +9467,7 @@ def _fused_matrix_wrap(payload_code: str, key: int = None) -> str:
     """Fuses Kramer Kyrie Caesar + Emoji Stream + Whitespace Bitfields
     into an interwoven symbiotic matrix loader. 100% Polymorphic & Disguised."""
     if key is None:
-        key = secrets.randbelow(2**60 - 2**30) + 2**30
+        key = _trx_rand(2**60 - 2**30) + 2**30
     try:
         compiled = marshal.dumps(compile(payload_code, '<fused_payload>', 'exec'))
     except SyntaxError:
@@ -9107,7 +9650,7 @@ def _kramer_wrap(payload_code: str, key: int = None) -> str:
     """Wrap final payload into Kramer dynamic class with Kyrie encryption + fake type annotations + anti-dump."""
     from binascii import hexlify
     if key is None:
-        key = secrets.randbelow(999000) + 1000
+        key = _trx_rand(999000) + 1000
 
     _content_ = Kyrie.encrypt_v2(payload_code, key=key)
     content = hexlify(_content_.encode('utf-8')).decode('ascii')
@@ -9629,12 +10172,28 @@ def _resolve_input_files(inputs=None, directory=None, recursive=False):
     found = []
     seen = set()
 
+    # Directory-name blacklist for batch walks. Source: Opy skip_path_fragments
+    # rationale (Apache-2.0 research note) + pyminifier analyze.py unfiltered-walk
+    # defect lesson - vendored/virtualenv trees must never enter the batch.
+    _BATCH_DIR_BLACKLIST = frozenset({
+        "__pycache__", "tr0ngx_dist", ".git", ".hg", ".svn",
+        "venv", ".venv", "env", ".env", "virtualenv",
+        "site-packages", "node_modules", ".tox", ".mypy_cache", ".pytest_cache",
+        "dist", "build", "research_repos",
+    })
+
+    def _is_source_file(name: str) -> bool:
+        # Case-insensitive extension match + .pyw support (audit fix: .PY was
+        # silently skipped on case-sensitive comparison).
+        low = name.lower()
+        return low.endswith(".py") or low.endswith(".pyw")
+
     def _excluded(f_abs: str) -> bool:
         base = os.path.basename(f_abs)
         if base.startswith("tr0ngx-"):
             return True
         parts = f_abs.replace("/", os.sep).split(os.sep)
-        return any(p in ("__pycache__", "tr0ngx_dist") for p in parts[:-1])
+        return any(p.lower() in _BATCH_DIR_BLACKLIST for p in parts[:-1])
 
     def _add(f_path: str, rel_hint: str = None):
         f_abs = os.path.abspath(f_path)
@@ -9656,7 +10215,7 @@ def _resolve_input_files(inputs=None, directory=None, recursive=False):
         if recursive:
             for root, _, files in os.walk(d_abs):
                 for f in files:
-                    if f.endswith(".py"):
+                    if _is_source_file(f):
                         f_abs = os.path.abspath(os.path.join(root, f))
                         rel = os.path.relpath(f_abs, d_abs)
                         if f_abs not in seen and not _excluded(f_abs):
@@ -9664,7 +10223,7 @@ def _resolve_input_files(inputs=None, directory=None, recursive=False):
                             found.append({"src": f_abs, "rel": rel})
         else:
             for f in os.listdir(d_abs):
-                if f.endswith(".py"):
+                if _is_source_file(f):
                     f_abs = os.path.abspath(os.path.join(d_abs, f))
                     if os.path.isfile(f_abs) and f_abs not in seen and not _excluded(f_abs):
                         seen.add(f_abs)
@@ -9692,7 +10251,7 @@ def _resolve_input_files(inputs=None, directory=None, recursive=False):
                 globbed = glob.glob(item_str, recursive=recursive)
                 pattern_dir = os.path.dirname(os.path.abspath(item_str)) or os.getcwd()
                 for g in sorted(globbed):
-                    if g.endswith(".py") and os.path.isfile(g):
+                    if _is_source_file(g) and os.path.isfile(g):
                         g_abs = os.path.abspath(g)
                         try:
                             rel_hint = os.path.relpath(g_abs, pattern_dir)
@@ -9833,6 +10392,10 @@ VÍ DỤ SỬ DỤNG:
     parser.add_argument("--exotic-pools", choices=["y", "n", "Y", "N"], help="Identifier từ các pool Unicode cực hiếm (Tangut, Egyptian Hieroglyphs, CJK Ext G/H, Anatolian, Bamum, Glagolitic, Miao) - XID + NFKC validated (y/n)", default=None)
     parser.add_argument("--base4096", choices=["y", "n", "Y", "N"], help="Encode payload thanh stream glyph 12-bit tu block Unicode hiem (Base4096 exotic alphabet) (y/n)", default=None)
     parser.add_argument("--bit-matrix", choices=["y", "n", "Y", "N"], help="Bien doi byte da vong: LCG-XOR / bit rotation / nibble swap / S-Box permutation (y/n)", default=None)
+    parser.add_argument("--lzma-layer", choices=["y", "n", "Y", "N"], help="Them lop nen LZMA (preset 9) truoc ma hoa AEAD - giam 10-25%% kich thuoc payload (y/n)", default=None)
+    parser.add_argument("--env-key", choices=["y", "n", "Y", "N"], help="Khoa payload theo fingerprint phan cung (MAC/host/arch) - che do khong mat khau; sai may = that bai xac thuc (y/n)", default=None)
+    parser.add_argument("--verify", choices=["y", "n", "Y", "N"], help="Chay song song file goc vs file obfuscated va so sanh stdout sau khi build (y/n)", default=None)
+    parser.add_argument("--shared-symbols", choices=["y", "n", "Y", "N"], help="Batch mode: dong bo rename symbol xuyen module (two-phase shared map, Opy-style) (y/n)", default=None)
 
     cli_args, unknown = parser.parse_known_args()
     if unknown:
@@ -10024,6 +10587,11 @@ VÍ DỤ SỬ DỤNG:
     # Resource capping and workers
     max_ram = cli_args.max_ram
     max_cores = cli_args.cores
+    # FIX (audit P1): -w 0 previously fell through the falsy-or chain to auto;
+    # zero is now rejected exactly like negative values.
+    if cli_args.workers is not None and cli_args.workers < 1:
+        print(f"[-] ERROR: --workers must be a positive integer (got: {cli_args.workers}).", file=sys.stderr)
+        sys.exit(2)
     workers = cli_args.workers or max_cores or max(2, min(8, (os.cpu_count() or 4)))
     if not isinstance(workers, int) or workers < 1:
         print(f"[-] ERROR: --workers must be a positive integer (got: {workers}).", file=sys.stderr)
@@ -10104,6 +10672,12 @@ VÍ DỤ SỬ DỤNG:
     exotic_pools_choice = getattr(cli_args, 'exotic_pools', None) or ("N" if is_cli_mode else _prompt_input(" EXOTIC UNICODE POOLS (Tangut/Egyptian/CJK-ExtG identifiers)? (y/n): "))
     base4096_choice = getattr(cli_args, 'base4096', None) or ("N" if is_cli_mode else _prompt_input(" BASE4096 GLYPH ENCODING (12-bit astral stream)? (y/n): "))
     bit_matrix_choice = getattr(cli_args, 'bit_matrix', None) or ("N" if is_cli_mode else _prompt_input(" BIT-MATRIX BYTE TRANSFORM (SBox/rotation/LCG)? (y/n): "))
+    lzma_layer_choice = getattr(cli_args, 'lzma_layer', None) or "N"
+    env_key_choice = getattr(cli_args, 'env_key', None) or "N"
+    verify_mode_choice = getattr(cli_args, 'verify', None) or "N"
+    _EngineState.lzma_layer = lzma_layer_choice.upper() == "Y"
+    _EngineState.env_key_lock = env_key_choice.upper() == "Y"
+    _EngineState.verify_mode = verify_mode_choice.upper() == "Y"
 
     # Force Python version
     if cli_args.force_py is not None:
@@ -10111,6 +10685,12 @@ VÍ DỤ SỬ DỤNG:
             force_py_choice = "N"
             forced_py_ver = ""
         else:
+            # FIX (audit P1): invalid versions like 'banana' previously passed
+            # through and made every runtime guard vacuously true.
+            import re as _re_fp
+            if not _re_fp.fullmatch(r"\d+\.\d+(\.\d+)?", cli_args.force_py.strip()):
+                print(f"[-] ERROR: --force-py expects a version like 3.10 / 3.11.4 (got: {cli_args.force_py!r}).", file=sys.stderr)
+                sys.exit(2)
             force_py_choice = "Y"
             forced_py_ver = cli_args.force_py.strip()
     else:
@@ -10171,6 +10751,12 @@ VÍ DỤ SỬ DỤNG:
         if pwd_inp:
             password = pwd_inp
     _EngineState.encryption_password = password
+    if _EngineState.env_key_lock and password:
+        # Mutually exclusive trust roots: password = portable secret, env-key =
+        # machine-bound. Combining them silently would weaken the documented
+        # semantics of both; prefer the stronger portable mode.
+        print("[TR0NGX] [WARN] --env-key is incompatible with --password; hardware lock disabled.", flush=True)
+        _EngineState.env_key_lock = False
 
     if cli_args.seed is not None:
         _EngineState.custom_seed = cli_args.seed
@@ -10220,6 +10806,10 @@ VÍ DỤ SỬ DỤNG:
         "exotic_pools": exotic_pools_choice,
         "base4096": base4096_choice,
         "bit_matrix": bit_matrix_choice,
+        "lzma_layer": lzma_layer_choice,
+        "env_key": env_key_choice,
+        "verify": verify_mode_choice,
+        "shared_symbols": getattr(cli_args, 'shared_symbols', None) or "N",
         "force_py_choice": force_py_choice,
         "forced_py_ver": forced_py_ver,
         "debug_map": debug_map_arg,
@@ -10283,7 +10873,7 @@ def _gen_exotic_name(scope='general'):
     for _ in range(64):
         if not _EXOTIC_POOL_CACHE:
             kinds = _tex.pool_kinds()
-            kind = secrets.choice(kinds)
+            kind = _trx_choice(kinds)
             _EXOTIC_POOL_CACHE.extend(_tex.build_identifier_pool(kind, 128, random))
         name = _EXOTIC_POOL_CACHE.pop()
         norm = _ud.normalize("NFKC", name)
@@ -10300,6 +10890,7 @@ def obfuscate_single_target(src_file: str, output_file: str, options: dict, quie
     Core transformation engine that executes the entire Tr0ngX pipeline on a single file.
     Returns metrics dict with status, file sizes, ratio, and timing.
     """
+    global _SEEDED_RNG
     with _obf_execution_lock:
         # Per-target isolation: reset cross-file global state so batch debug maps,
         # used-name pools and stage errors never contaminate between files.
@@ -10313,9 +10904,28 @@ def obfuscate_single_target(src_file: str, output_file: str, options: dict, quie
             _STAGE_ERRORS.pop()
         with _used_names_lock:
             _used_names.clear()
+        # Cross-module shared-symbol contract (--shared-symbols): install the
+        # frozen map for this target while holding the pipeline lock.
+        _FROZEN_NAME_MAP.clear()
+        _frozen = options.get("shared_symbol_map")
+        if isinstance(_frozen, dict):
+            _FROZEN_NAME_MAP.update(_frozen)
         if options.get("seed") is not None:
             # Deterministic per-file seeding (independent of worker scheduling)
-            random.seed(options["seed"] + sum(src_file.encode("utf-8")))
+            _s_seed = options["seed"] + sum(src_file.encode("utf-8"))
+            random.seed(_s_seed)
+            _SEEDED_RNG = random.Random(_s_seed ^ 0x5EED5EED)
+            # Regenerate import-time helper names + global var-block template
+            # under this file's seed so artifacts are reproducible (audit fix:
+            # previously both baked OS entropy captured at module import).
+            try:
+                _refresh_runtime_symbols()
+                _generate_var_block()
+            except Exception:
+                pass
+        else:
+            _SEEDED_RNG = None
+        return _obfuscate_single_target_core(src_file, output_file, options, quiet_progress=quiet_progress)
         return _obfuscate_single_target_core(src_file, output_file, options, quiet_progress=quiet_progress)
 
 def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict, quiet_progress: bool = False) -> dict:
@@ -10374,6 +10984,8 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
     exotic_pools_choice = options.get("exotic_pools", "N")
     base4096_choice = options.get("base4096", "N")
     bit_matrix_choice = options.get("bit_matrix", "N")
+    _EngineState.lzma_layer = str(options.get("lzma_layer", "N")).upper() == "Y"
+    _EngineState.env_key_lock = str(options.get("env_key", "N")).upper() == "Y" and not options.get("password")
     force_py_choice = options.get("force_py_choice", "N")
     forced_py_ver = options.get("forced_py_ver", "")
     _debug_map_choice = options.get("debug_map")
@@ -10615,7 +11227,27 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
                 _safe_atomic_write(output_file, str(code), input_file=src_file)
                 return {"success": True, "src": src_file, "out": output_file, "original_size": original_size, "output_size": len(code.encode('utf-8')), "ratio": 1.0, "elapsed": round(time.time()-start_time, 4), "error": None}
 
-            encrypted_data, _salt = _multi_layer_encrypt(compiled_bytes, password=encryption_password)
+            encrypted_data, _salt, _armor = _multi_layer_encrypt(compiled_bytes, password=encryption_password)
+            _armor_dec = _armor['dec']
+            _armor_rev = "[::-1]" if _armor['rev'] else ""
+            if _armor['lzma']:
+                _lzma_import = ", lzma"
+                _lzma_var = rd()
+                _lzma_extra = f"{_lzma_var} = getattr({___import__}({obfstr('lzma')}), {obfstr('decompress')})" + chr(10) + f"    _step5 = {_lzma_var}(_step5)"
+            else:
+                _lzma_import = ""
+                _lzma_extra = ""
+            if _EngineState.env_key_lock and not encryption_password:
+                _envkey_unmask_std = chr(10).join([
+                    "    try:",
+                    "        import uuid as _trx_u",
+                    "        _trx_fp = hashlib.sha256(('|'.join([str(_trx_u.getnode()), _platform.system(), _platform.machine(), _platform.python_implementation(), str(sys.version_info.major) + '.' + str(sys.version_info.minor)])).encode()).digest()",
+                    "        salt = bytes(salt[i] ^ _trx_fp[i] for i in range(16))",
+                    "    except Exception:",
+                    "        raise SystemExit(1)",
+                ])
+            else:
+                _envkey_unmask_std = "# portable build: no hardware binding"
             l = len(encrypted_data)
             num_parts = 8
             parts = [repr(encrypted_data[(l*k)//num_parts : (l*(k+1))//num_parts]) for k in range(num_parts)]
@@ -10674,7 +11306,7 @@ if not _pwd:
 """
                 _auth_dec_call = "_auth_decrypt(_step3, _pwd)"
             else:
-                _auth_dec_section = """
+                _auth_dec_section = f"""
 def _derive_runtime_keys(salt):
     _parts = []
     _parts.append(sys.version[:5].encode())
@@ -10684,13 +11316,13 @@ def _derive_runtime_keys(salt):
     _parts.append(sys.byteorder.encode())
     _combined = b''.join(_parts)
     _enc_k = hashlib.sha256(_combined + b'__enc__').digest()
-    _mac_k = hashlib.sha256(_combined + b'__mac__').digest()
-    return _enc_k, _mac_k
+    return _enc_k
 
 def _auth_decrypt(raw_bytes):
     magic = raw_bytes[:4]
     salt = raw_bytes[4:20]
-    _enc_k, _mac_k = _derive_runtime_keys(salt)
+{_envkey_unmask_std}
+    _enc_k = _derive_runtime_keys(salt)
     ke = hashlib.pbkdf2_hmac('sha256', salt, _enc_k, 50000, 32)
     body = raw_bytes[20:]
     if magic == b'TRXA':
@@ -10718,7 +11350,7 @@ def _auth_decrypt(raw_bytes):
                 _auth_dec_call = "_auth_decrypt(_step3)"
 
             code = author + var + f"""
-import hashlib, hmac, platform as _platform, sys, os
+import hashlib, hmac, platform as _platform, sys, os{_lzma_import}
 sys.dont_write_bytecode = True
 {_generate_strict_version_guard(target_ver_str)}
 
@@ -10727,17 +11359,18 @@ sys.dont_write_bytecode = True
 {_en_var} = getattr({___import__}({obfstr("marshal")}), {obfstr("loads")})
 {_july_var} = getattr({___import__}({obfstr("zlib")}), {obfstr("decompress")})
 {_birth_var} = getattr({___import__}({obfstr("bz2")}), {obfstr("decompress")})
-{_b85_var} = getattr({___import__}({obfstr("base64")}), {obfstr("b85decode")})
+{_b85_var} = getattr({___import__}({obfstr("base64")}), {obfstr(_armor_dec)})
 
 {part_assignments}
 
 try:
     _payload = {part_concat}
-    _step1 = {_b85_var}(_payload)
+    _step1 = {_b85_var}(_payload{_armor_rev})
     _step2 = {_july_var}(_step1)
     _step3 = {_birth_var}(_step2)
     _step4 = {_auth_dec_call}
     _step5 = {_july_var}(_step4)
+    {_lzma_extra}
     exec({_en_var}(_step5), globals(), globals())
     del _payload, _step1, _step2, _step3, _step4, _step5
 except Exception as _e:
@@ -10849,6 +11482,22 @@ except Exception as _e:
         except Exception as de:
             _log_stage_error("debug_map_export", de)
 
+    # Built-in semantic verification (--verify y)
+    if _EngineState.verify_mode:
+        if not quiet_progress: _v(" [VERIFY] Semantic differential: original vs obfuscated...")
+        t_v0 = time.time()
+        vres = _verify_semantics(src_file, output_file)
+        try:
+            _track_debug_stage("13_verify_semantic", time.time() - t_v0, original_size, file_size, details=vres)
+        except Exception:
+            pass
+        if not vres.get('ok'):
+            try:
+                _log_stage_error("13_verify_semantic", RuntimeError("obfuscated output diverged from original"), {"result": vres})
+            except Exception:
+                pass
+            print("[TR0NGX] [WARNING] VERIFY FAILED: obfuscated output differs from original.", flush=True)
+
     return {
         "success": True,
         "src": src_file,
@@ -10859,6 +11508,19 @@ except Exception as _e:
         "elapsed": round(elapsed, 4),
         "error": None
     }
+
+def _verify_semantics(src_file: str, out_file: str, timeout: int = 60) -> dict:
+    """Built-in semantic differential check (source: pyshield --verify mode, MIT
+    research note; hardened to compare exit codes in addition to stdout)."""
+    try:
+        r1 = subprocess.run([sys.executable, src_file], capture_output=True, timeout=timeout)
+        r2 = subprocess.run([sys.executable, out_file], capture_output=True, timeout=timeout)
+        ok = (r1.stdout.strip() == r2.stdout.strip()) and (r1.returncode == r2.returncode)
+        return {'ok': ok, 'rc_original': r1.returncode, 'rc_obfuscated': r2.returncode,
+                'stdout_match': r1.stdout.strip() == r2.stdout.strip()}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
 
 def run_batch_obfuscation(targets: list, custom_out: str, options: dict):
     """
@@ -10876,7 +11538,26 @@ def run_batch_obfuscation(targets: list, custom_out: str, options: dict):
         out_dir = os.path.join(first_dir, "tr0ngx_dist")
     
     os.makedirs(out_dir, exist_ok=True)
-    
+
+    # Phase A: cross-module shared-symbol map (--shared-symbols y). Single-threaded
+    # parse of all targets BEFORE any worker starts; workers consume the frozen
+    # immutable map (Opy consistency model, hardened two-phase design).
+    if str(options.get("shared_symbols", "N")).upper() == "Y" and len(targets) > 1:
+        try:
+            options["shared_symbol_map"] = _collect_shared_symbol_map(targets, seed=options.get("seed"))
+            _v(f"  [SHARED-SYMBOLS] Frozen {len(options['shared_symbol_map'])} cross-module symbol(s)")
+            try:
+                import json as _json
+                _safe_atomic_write(os.path.join(out_dir, "tr0ngx_shared_symbols.json"),
+                                   _json.dumps(options["shared_symbol_map"], indent=2))
+            except Exception:
+                pass
+        except Exception as _ss_err:
+            _log_stage_error("shared_symbols_phase_a", _ss_err)
+            options["shared_symbol_map"] = {}
+    else:
+        options.pop("shared_symbol_map", None)
+
     _v(_gradient_text(" ══════════════════════════════════════════════════════════════════════════════", (80, 180, 255), (200, 80, 255)))
     _v(f"  [TR0NGX BATCH ENGINE] Starting parallel batch obfuscation ({total_files} files, {workers} workers)")
     _v(f"  Destination Dir : {os.path.abspath(out_dir)}")
