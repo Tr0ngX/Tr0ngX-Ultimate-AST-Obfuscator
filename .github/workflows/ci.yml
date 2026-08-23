@@ -44,7 +44,7 @@ jobs:
 
       - name: Syntax Check Engine
         run: |
-          python -m py_compile tr0ngx_obfuscator.py tr0ngx_exotic.py benchmark_all_modes.py
+          python -m py_compile tr0ngx_obfuscator.py tr0ngx_exotic.py benchmarks/benchmark_all_modes.py
 
       - name: Run Native Test Suites
         run: |

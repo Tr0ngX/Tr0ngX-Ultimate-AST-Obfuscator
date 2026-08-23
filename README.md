@@ -236,7 +236,7 @@ Tr0ngX includes comprehensive native test suites and end-to-end multi-configurat
 
 ```bash
 # Run comprehensive mode-by-mode benchmark & performance profiler (Single-Threaded)
-python benchmark_all_modes.py
+python benchmarks/benchmark_all_modes.py
 
 # Run individual functional validation suites
 python tests/test_01_core_features.py

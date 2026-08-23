@@ -71,3 +71,7 @@ qa_report.txt
 examples/obfuscated.py
 _smoke_*.py
 _t_*.py
+
+# Benchmark harness generated outputs (stay local)
+benchmarks/benchmark_report.json
+benchmarks/qa_report.txt
