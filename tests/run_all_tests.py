@@ -17,15 +17,24 @@ TEST_FILES = [
     "tests/test_04_dynamic_reflection.py",
     "tests/test_05_edge_cases.py",
     "tests/test_10_complex_realworld.py",
-    "complex_benchmark.py"
+    "tests/test_11_negative_inputs.py",
+    "tests/test_12_combo_matrix.py",
+    "tests/test_13_debugmap_roundtrip.py"
 ]
 
 STANDALONE_TESTS = [
     "tests/test_06_crypto_password.py",
     "tests/test_07_reproducible.py",
     "tests/test_08_dos_limits.py",
-    "tests/test_09_antivm_antidebug.py"
+    "tests/test_09_antivm_antidebug.py",
+    "tests/test_14_exotic_module.py",
+    "tests/test_vm_oracle_semantic.py",
+    "tests/test_qa_fuzz_semantic.py"
 ]
+
+OBF_BUILD_TIMEOUT = 420
+OBF_RUN_TIMEOUT = 120
+NATIVE_TIMEOUT = 600
 
 OBF_CONFIGS = [
     {
@@ -53,6 +62,11 @@ OBF_CONFIGS = [
         "id": "cfg5",
         "name": "MAXIMUM POWER Mode 3 + Anti-Debug + Anti-VM + Anti-Dump + SelfMod + Math-Opaque + Dyn-Strings + Double Compile + Fused Matrix + Unicode",
         "args": ["-m", "3", "--moreobf", "y", "--antidebug", "y", "--antivm", "y", "--anti-dump", "y", "--selfmod", "y", "--math-opaque", "y", "--dyn-strings", "y", "--compile", "y", "--velimatix", "y", "--veli-level", "3", "--double-compile", "y", "--matrix", "y", "--kramer", "y", "--emoji-obf", "y", "--whitespace-obf", "y", "--cjk-vars", "y", "--rare-unicode", "y", "--homoglyph", "y", "--force-py", "off", "--no-art", "--max-ram", "2048", "--cores", "2"]
+    },
+    {
+        "id": "cfg6",
+        "name": "EXOTIC Mode 2: Rare Unicode Pools + Base4096 Glyphs + BitMatrix Bytes + Kramer",
+        "args": ["-m", "2", "--exotic-pools", "y", "--base4096", "y", "--bit-matrix", "y", "--kramer", "y", "--force-py", "off", "--no-art"]
     }
 ]
 
@@ -68,6 +82,7 @@ def run_single_obf_test(task):
     cfg = task["cfg"]
     task_num = task["num"]
     total_tasks = task["total"]
+    expected_stdout = task.get("expected_stdout")
     obf_script = "tr0ngx_obfuscator.py"
 
     with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as tmp_out:
@@ -77,7 +92,8 @@ def run_single_obf_test(task):
         # Step 1: Obfuscation
         t_obf0 = time.time()
         cmd = [sys.executable, obf_script, "-i", tf, "-o", out_path] + cfg["args"]
-        p_obf = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        p_obf = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                               timeout=OBF_BUILD_TIMEOUT)
         obf_dur = time.time() - t_obf0
 
         if p_obf.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
@@ -101,10 +117,23 @@ def run_single_obf_test(task):
         run_env = os.environ.copy()
         if "env" in cfg:
             run_env.update(cfg["env"])
-        p_run = subprocess.run([sys.executable, out_path], env=run_env, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        p_run = subprocess.run([sys.executable, out_path], env=run_env, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                               timeout=OBF_RUN_TIMEOUT)
         run_dur = time.time() - t_run0
 
         if p_run.returncode == 0:
+            if expected_stdout is not None and expected_stdout != "" and p_run.stdout.strip() != expected_stdout:
+                return {
+                    "success": False,
+                    "file": tf,
+                    "cfg": cfg["name"],
+                    "task_num": task_num,
+                    "stage": "SEMANTIC_DIFF",
+                    "error": f"Native stdout != obfuscated stdout\n--- NATIVE ---\n{expected_stdout}\n--- OBFUSCATED ---\n{p_run.stdout.strip()}",
+                    "obf_dur": obf_dur,
+                    "run_dur": run_dur,
+                    "size": out_size
+                }
             return {
                 "success": True,
                 "file": tf,
@@ -149,12 +178,12 @@ def run_single_obf_test(task):
 
 def main():
     parser = argparse.ArgumentParser(description="Tr0ngX Multi-Threaded Test Runner")
-    parser.add_argument("-w", "--workers", type=int, default=max(2, min(8, (os.cpu_count() or 4))), help="Number of concurrent worker threads")
-    parser.add_argument("--config", type=str, default="all", help="Target config (1-5 or all)")
+    parser.add_argument("-w", "--workers", type=int, default=1, help="Number of concurrent worker threads (default 1 per repo policy)")
+    parser.add_argument("--config", type=str, default="all", help="Target config (1-6 or all)")
     parser.add_argument("--file", type=str, default="all", help="Target test file substring filter")
     args = parser.parse_args()
 
-    num_workers = args.workers
+    num_workers = max(1, args.workers)
     selected_configs = OBF_CONFIGS
     if args.config != "all":
         try:
@@ -178,21 +207,26 @@ def main():
 
     # 1. Native Execution Verification (Concurrent)
     safe_print(f"\n[PHASE 1] Concurrently Verifying Native Test Suites ({len(selected_files)} suites)...")
+    native_outputs = {}
     def run_native(tf):
         t0 = time.time()
-        p = subprocess.run([sys.executable, tf], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        p = subprocess.run([sys.executable, tf], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=NATIVE_TIMEOUT)
         dur = time.time() - t0
-        return tf, p.returncode == 0, dur, p.stderr.strip()
+        return tf, p.returncode == 0, dur, p.stderr.strip(), p.stdout.strip()
 
-    with ThreadPoolExecutor(max_workers=min(num_workers, len(selected_files))) as executor:
+    native_failures = {}
+    with ThreadPoolExecutor(max_workers=max(1, min(num_workers, len(selected_files)))) as executor:
         futures = [executor.submit(run_native, tf) for tf in selected_files]
         for f in as_completed(futures):
-            tf, ok, dur, err = f.result()
+            tf, ok, dur, err, out = f.result()
+            native_outputs[tf] = out
             if ok:
                 safe_print(f"  [PASS] Native: {tf:<38} ({dur:.3f}s)")
                 total_passed += 1
             else:
                 safe_print(f"  [FAIL] Native: {tf}\n    [STDERR]: {err}")
+                native_failures[tf] = err
                 total_failed += 1
 
     # 2. Obfuscation and Post-Obfuscation Execution Verification (Multi-Threaded)
@@ -200,19 +234,22 @@ def main():
     task_counter = 0
     for cfg in selected_configs:
         for tf in selected_files:
+            if tf in native_failures:
+                continue
             task_counter += 1
             task_list.append({
                 "num": task_counter,
                 "total": 0,
                 "file": tf,
-                "cfg": cfg
+                "cfg": cfg,
+                "expected_stdout": native_outputs.get(tf, "")
             })
     for t in task_list:
         t["total"] = len(task_list)
 
     safe_print(f"\n[PHASE 2] Concurrently Obfuscating & Verifying {len(task_list)} Tasks across {num_workers} Workers...")
 
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+    with ThreadPoolExecutor(max_workers=max(1, num_workers)) as executor:
         future_to_task = {executor.submit(run_single_obf_test, t): t for t in task_list}
         completed_count = 0
 
@@ -232,17 +269,18 @@ def main():
     # 3. Standalone Security & Resilience Test Suites (Concurrent)
     standalone_files = [st for st in STANDALONE_TESTS if os.path.exists(st)]
     safe_print(f"\n[PHASE 3] Concurrently Running {len(standalone_files)} Standalone Security Suites...")
-    
-    with ThreadPoolExecutor(max_workers=min(num_workers, len(standalone_files))) as executor:
-        futures = [executor.submit(run_native, st) for st in standalone_files]
-        for f in as_completed(futures):
-            st, ok, dur, err = f.result()
-            if ok:
-                safe_print(f"  [PASS] Standalone Suite: {st:<36} ({dur:.3f}s)")
-                total_passed += 1
-            else:
-                safe_print(f"  [FAIL] Standalone Suite: {st}\n    [STDERR]: {err}")
-                total_failed += 1
+
+    if standalone_files:
+        with ThreadPoolExecutor(max_workers=max(1, min(num_workers, len(standalone_files)))) as executor:
+            futures = [executor.submit(run_native, st) for st in standalone_files]
+            for f in as_completed(futures):
+                st, ok, dur, err, _out = f.result()
+                if ok:
+                    safe_print(f"  [PASS] Standalone Suite: {st:<36} ({dur:.3f}s)")
+                    total_passed += 1
+                else:
+                    safe_print(f"  [FAIL] Standalone Suite: {st}\n    [STDERR]: {err}")
+                    total_failed += 1
 
     total_dur = time.time() - start_total
     safe_print("\n" + "=" * 85)

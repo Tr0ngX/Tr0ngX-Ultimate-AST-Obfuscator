@@ -64,3 +64,10 @@ scratch/
 .system_generated/
 research_repos/
 external_repos/
+
+# Generated benchmark/QA artifacts
+benchmark_report.json
+qa_report.txt
+examples/obfuscated.py
+_smoke_*.py
+_t_*.py

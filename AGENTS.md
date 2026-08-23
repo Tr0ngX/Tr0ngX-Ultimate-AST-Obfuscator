@@ -76,8 +76,11 @@ graph TD
 | `--debug-poison` | Protection | Deceptive debug poison state machine (silent key degradation on debugger/sandbox detection) | `y` / `n` |
 | `--spoof-meta` | Protection | Metadata & `co_filename` spoofing (camouflages stack traces to stdlib modules) | `y` / `n` |
 | `--compile` | Crypto | Multi-layer authenticated AEAD compilation (Marshal + XOR + Zlib + Bz2) | `y` / `n` |
-| `--password` | Crypto | Password for Argon2id + ChaCha20Poly1305 / PBKDF2 authenticated payload encryption | `<string>` |
-| `--password-file` | Crypto | Path to external file containing encryption password | `<filepath>` |
+| `--password` | Crypto | Password for Argon2id + ChaCha20-Poly1305 AEAD / PBKDF2 (600k) payload encryption. Password mode REQUIRES the `cryptography` package and hard-fails otherwise (no silent downgrade) | `<string>` |
+| `--password-file` | Crypto | Path to external file containing encryption password (missing/empty file aborts with exit 2) | `<filepath>` |
+| `--exotic-pools` | Identifiers | Identifiers drawn from rare Unicode script pools (Tangut, Egyptian Hieroglyphs+Ext-A, CJK Ext-G/H, Anatolian, Bamum, Glagolitic, Miao, Vedic); XID + NFKC validated via `tr0ngx_exotic.py` | `y` / `n` |
+| `--base4096` | Exotic Encoding | Pack payload into 12-bit groups mapped to a 4096-glyph exotic alphabet with standalone inline decoder | `y` / `n` |
+| `--bit-matrix` | Exotic Encoding | Multi-round invertible byte chain: LCG-XOR stream, bit rotation, nibble swap, Fisher-Yates S-Box, position mask | `y` / `n` |
 | `--max-output-size` | Resource | Maximum output file size DoS limit (aborts and removes if exceeded) | e.g. `10MB`, `50MB` |
 | `--seed` | Core AST | Deterministic seed for reproducible builds | e.g. `1337` |
 | `--velimatix` | Velimatix | Enable Velimatix ExceptionJump & AST control flow engine | `y` / `n` |
@@ -157,6 +160,18 @@ python test_full_matrix.py
 # 4. Clean up generated test artifacts
 powershell -Command "Remove-Item -Force -ErrorAction SilentlyContinue test_full_matrix.py"
 ```
+
+### 5.1 Test Harness Contract (tests/run_all_tests.py)
+- Default worker count is **1** (repo policy). `-w N>1` remains available but requires explicit opt-in.
+- Phase 2 performs a real **semantic differential**: native stdout (captured in Phase 1) must byte-match obfuscated output (`SEMANTIC_DIFF` failure otherwise).
+- Every subprocess carries a hard timeout: build 420s, runtime 120s, native suites 600s.
+- Suites wired into the harness: `test_01..test_05`, `test_10`, `test_11_negative_inputs`, `test_12_combo_matrix`, `test_13_debugmap_roundtrip` (Phase 1/2); `test_06..test_09`, `test_14_exotic_module`, `test_vm_oracle_semantic`, `test_qa_fuzz_semantic` (Phase 3 standalone).
+- `test_qa_fuzz_semantic.py` runs a REAL mutation fuzzer (>=300 malformed VM packets per run, seeded) and FAILS the suite on any unhandled crash.
+
+### 5.2 Crypto Reality Check (post-hardening)
+- `TRXA` payload magic = ChaCha20-Poly1305 AEAD; `TRXH` = legacy HMAC-SHA256-CTR fallback (obfuscation-only, no-password builds without `cryptography`).
+- Argon2id t=3 m=64MiB p=2; PBKDF2-HMAC-SHA256 600,000 iterations.
+- No-password mode derives keys from interpreter environment: tamper-resistance, NOT confidentiality.
 
 ---
 

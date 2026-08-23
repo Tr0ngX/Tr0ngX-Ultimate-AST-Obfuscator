@@ -1,1 +1,3 @@
-python -m pip install pystyle==0.6
+@echo off
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt

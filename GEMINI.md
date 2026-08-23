@@ -75,9 +75,12 @@ graph TD
 | `--str-frag` | Core AST | String fragmentation v2 with decoy chunks and dynamic runtime assembly | `y` / `n` |
 | `--debug-poison` | Protection | Deceptive debug poison state machine (silent key degradation on debugger/sandbox detection) | `y` / `n` |
 | `--spoof-meta` | Protection | Metadata & `co_filename` spoofing (camouflages stack traces to stdlib modules) | `y` / `n` |
-| `--compile` | Crypto | Multi-layer authenticated AEAD compilation (Marshal + XOR + Zlib + Bz2) | `y` / `n` |
-| `--password` | Crypto | Password for Argon2id + ChaCha20Poly1305 / PBKDF2 authenticated payload encryption | `<string>` |
-| `--password-file` | Crypto | Path to external file containing encryption password | `<filepath>` |
+| `--compile` | Crypto | Multi-layer authenticated AEAD v3 compilation (Marshal + Zlib + Bz2 + ChaCha20-Poly1305) | `y` / `n` |
+| `--password` | Crypto | Password for Argon2id + ChaCha20-Poly1305 AEAD / PBKDF2 (600k) payload encryption. Password mode REQUIRES the `cryptography` package and hard-fails otherwise | `<string>` |
+| `--password-file` | Crypto | Path to external file containing encryption password (missing/empty file aborts with exit 2) | `<filepath>` |
+| `--exotic-pools` | Identifiers | Identifiers drawn from rare Unicode script pools (Tangut, Egyptian Hieroglyphs+Ext-A, CJK Ext-G/H, Anatolian, Bamum, Glagolitic, Miao, Vedic); XID + NFKC validated via `tr0ngx_exotic.py` | `y` / `n` |
+| `--base4096` | Exotic Encoding | Pack payload into 12-bit groups mapped to a 4096-glyph exotic alphabet with standalone inline decoder | `y` / `n` |
+| `--bit-matrix` | Exotic Encoding | Multi-round invertible byte chain: LCG-XOR stream, bit rotation, nibble swap, Fisher-Yates S-Box, position mask | `y` / `n` |
 | `--max-output-size` | Resource | Maximum output file size DoS limit (aborts and removes if exceeded) | e.g. `10MB`, `50MB` |
 | `--seed` | Core AST | Deterministic seed for reproducible builds | e.g. `1337` |
 | `--velimatix` | Velimatix | Enable Velimatix ExceptionJump & AST control flow engine | `y` / `n` |

@@ -64,8 +64,14 @@ graph TD
 
 ### 5. Dynamic Cryptography & Environment-Bound Key Derivation
 - **Cryptographic Randomness**: Employs Python `secrets` CSPRNG for all keys, salts, and nonces.
-- **Multi-Layer AEAD Encryption**: Combines zlib/bz2 compression with authenticated stream encryption and HMAC-SHA256 message authentication codes.
-- **Runtime Environment Key Derivation (`_derive_runtime_keys`)**: Keys are derived dynamically at runtime from cryptographic salt and interpreter environment (`sys.version`, `platform`, `sys.maxsize`, `sys.byteorder`).
+- **Real AEAD Encryption (v3)**: `--compile y --password ...` now uses genuine **ChaCha20-Poly1305** (via the `cryptography` package) with fresh 12-byte nonces and 16-byte salts per build. Payload format: `TRXA` magic + salt + nonce + ciphertext||Poly1305 tag. Legacy HMAC-SHA256-CTR (`TRXH` magic) remains only as a no-password obfuscation fallback when `cryptography` is unavailable; password-protected builds hard-fail without it (no silent downgrades).
+- **Hardened KDF Parameters**: Argon2id t=3 / m=64 MiB / p=2 (RFC 9106 baseline) or PBKDF2-HMAC-SHA256 at 600,000 iterations (OWASP 2024 minimum). Decryption prompts use `getpass` (never plaintext echo).
+- **Runtime Environment Key Derivation (`_derive_runtime_keys`)**: For obfuscation-only builds, keys are derived at runtime from salt + interpreter environment. This mode is documented as tamper-resistance/obfuscation - not confidentiality; use `--password` for real secrecy.
+
+### 5b. Exotic Unicode & Byte-Matrix Layers
+- **Exotic Identifier Pools (`--exotic-pools`)**: Draws validated identifiers from Tangut, Egyptian Hieroglyphs (+Ext-A), CJK Ext-G/H, Anatolian Hieroglyphs, Bamum, Glagolitic Supplement, Miao/Pollard and Vedic blocks. Every name passes XID_Start/XID_Continue gating, NFKC collision deduplication and a live `compile()` probe (see `tr0ngx_exotic.py`).
+- **Base4096 Glyph Encoding (`--base4096`)**: Packs payload bytes into 12-bit groups mapped onto a generated 4096-glyph exotic alphabet; ships a standalone pure-builtin decoder inside the output.
+- **Bit-Matrix Byte Transform (`--bit-matrix`)**: Multi-round invertible byte chain (LCG-XOR stream, bit rotation, nibble swap, Fisher-Yates S-Box permutation, position mask) keyed per build.
 
 ### 6. Symbiotic Multi-Track Outer Shields & Camouflage
 - **Hyperion Camouflage (`--camouflage`)**: Encapsulates binary payloads inside authentic-looking algorithmic and scientific simulation classes (`MemoryAccess`, `StackOverflow`, `Hypothesis`).
@@ -76,6 +82,10 @@ graph TD
 
 ### 7. Enterprise Anti-Tamper & Anti-Analysis Matrix
 - **Anti-Debug Watchdog Daemon**: Continuous background patrol verifying builtin integrity, PEB debugger flags, and anti-monkey-patching.
+- **Audit-Hook Liveness Canary (Vector 15)**: Installs a CSPRNG-seeded `sys.addaudithook` counter and forces audited syscalls each patrol cycle; a frozen counter means the hook was stripped -> immediate response.
+- **sys.monitoring Tool-Slot Ownership (Vector 16)**: Registers a canary tool on Python 3.12+ and detects any override of its slot.
+- **Builtin Identity Watchdog (Vector 17)**: Snapshots `id()` of core builtins (`__import__`, `open`, `exec`, `eval`, `compile`, `__build_class__`) and obliterates on any monkeypatch.
+- **Deferred Trace Escalation (Vector 18)**: A one-cycle silent latch defeats breakpoint-and-inspect workflows before the kill triggers.
 - **Anti-VM & Sandbox Detection (`--antivm`)**: Deep hardware and hypervisor probing checking MAC OUIs, SCSI virtual disks, system uptime, and VM driver devices.
 - **In-Memory Anti-Dump & GC Object Scrubber (`--anti-dump`)**: Neutralizes reflection inspection, purges `linecache`, and zeros bytearrays post-execution.
 - **Self-Modifying Signature Morphing (`--selfmod`)**: Dynamically recalculates source hashes and injects zero-width Unicode signatures to invalidate static forensic dumps.
@@ -182,9 +192,12 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--str-frag` | String fragmentation v2 with decoy chunks and dynamic runtime assembly | `y` / `n` |
 | `--debug-poison` | Deceptive debug poison state machine (silent key degradation on debugger/sandbox detection) | `y` / `n` |
 | `--spoof-meta` | Metadata & `co_filename` spoofing (camouflages stack traces to stdlib modules) | `y` / `n` |
-| `--compile` | Authenticated AEAD bytecode compilation | `y` / `n` |
-| `--password` | Password for Argon2id + ChaCha20Poly1305 / PBKDF2 authenticated payload encryption | `<string>` |
-| `--password-file` | File path containing encryption password (avoids process table snooping) | `<filepath>` |
+| `--compile` | Authenticated AEAD v3 bytecode compilation (ChaCha20-Poly1305) | `y` / `n` |
+| `--password` | Password for Argon2id + ChaCha20-Poly1305 / PBKDF2 authenticated payload encryption (required for real AEAD; `cryptography` package mandatory, no silent downgrade) | `<string>` |
+| `--password-file` | File path containing encryption password (missing/empty file now hard-fails with exit 2) | `<filepath>` |
+| `--exotic-pools` | Identifiers from rare Unicode script pools (Tangut/Egyptian/CJK Ext-G/H/Anatolian/Bamum/Glagolitic/Miao), XID+NFKC validated | `y` / `n` |
+| `--base4096` | Encode payload as 12-bit astral glyph stream (Base4096 exotic alphabet) | `y` / `n` |
+| `--bit-matrix` | Multi-round byte transform chain: LCG-XOR / rotation / nibble swap / S-Box permutation | `y` / `n` |
 | `--max-output-size` | Maximum output size DoS limit (aborts and unlinks if exceeded) | e.g. `10MB`, `50MB` |
 | `--seed` | Integer seed for deterministic reproducible obfuscation builds | e.g. `1337` |
 | `--double-compile` | Double compile (Tr0ngX + Velimatix loader) | `y` / `n` |
