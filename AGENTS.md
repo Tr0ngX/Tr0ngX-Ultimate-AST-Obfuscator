@@ -151,17 +151,19 @@ graph TD
 - **Level 4 Infrastructure**: deterministic per-name 256-byte ISA permutation implemented end-to-end (serializer substitution + runtime inverse dispatch), currently gated OFF pending unique per-code-object salts; at present `--vm-level 4` executes identically to level 3.
 
 ### 4.7 TVM Correctness Wave (2026-08, VM upgrade plan Phase 0/1 partial)
-Fixes landed (all verified by test_vm_oracle_semantic 31/31 + test_vm_full_coverage 156/156):
+All fixes verified: oracle 31/31 + coverage 156/156 + syntax_parity 66/66 + fuzz 38/38.
 - `visit_AsyncFunctionDef` never finalized/stored its code object -> UnboundLocalError on EVERY async def under `--vm-obf`. Now mirrors visit_FunctionDef (kwonly-default preamble included).
-- Positional-only params (`/`) concatenated into signatures everywhere (FunctionDef/AsyncFunctionDef/Lambda); binding order fixed. NOTE: `/` keyword-rejection is NOT yet enforced at runtime.
+- Positional-only params (`/`) concatenated into signatures everywhere; binding order fixed; runtime keyword-rejection enforced via serialized `posonly_count` field.
 - `emit()` raises typed `TVMEmitError` on args outside 16-bit range (was silent truncation corrupting jumps).
-- `_vm_obfuscate` parse failure no longer silently returns plaintext: records `6.5_vm_parse_failed` stage error (respected by `--strict`) + loud warning.
-- Stale-handler fix: compiler tracks `exc_frame_depth`; break/continue crossing try/with boundaries now emit matching POP_BLOCK so the frame's handler stack cannot retain stale entries that hijack later exceptions (GAP-01/03).
-- Import forms fixed (GAP-29/30/31): `from pkg.sub import name` re-imports with fromlist via a `__tvmfl__<mod>\x00<csv>` sentinel handled in `_h_imp_n` (submodule returned, not root); `import a.b as c` binds the SUBMODULE directly through the same sentinel; star/relative imports now fail LOUD at compile time with `TVMEmitError`.
-- Arity enforcement (GAP-26/27): binder raises native-shaped TypeError on surplus positionals / unknown kwargs / missing required args after default application. Exemptions: synthetic names (`<listcomp>` etc.) and kwonly-with-default params (serialized via new code-object field `kwonly_default_names`, late-bound by body preamble).
-- except* (PEP 654) now fails LOUD at compile time instead of silently compiling as plain try (GAP-38).
-- Match-case hardening (GAP-33/34/35/36): sequence patterns accept any sequence protocol object excluding str/bytes/bytearray AND mappings (`__tvm_is_seq`); mapping patterns accept any mapping (`__tvm_is_map`); kwd-attr misses fail the pattern via getattr+sentinel instead of raising AttributeError; positional index beyond `__match_args__` fails cleanly (`__tvm_margs`); MatchOr snapshots/restores capture slots across alternatives (`__tvm_snap`/`__tvm_restore`) so failed alternatives no longer leak partial captures.
-- Known deferred (documented honestly): TVM crypto-envelope v4 (password-derived packet keys, tag cascade, TVM1 header, meta-packet ISA hiding) was prototyped but rolled back pending a clean re-land; current envelope remains v3 embedded-seed = tamper-resistance only. Closure cell boxing (late-binding), finally-execution-on-return/break splicing, `/` keyword-rejection at runtime: tracked for next wave.
+- `_vm_obfuscate` parse failure records `6.5_optimization_pass` stage error (respected by `--strict`) + loud warning.
+- Stale-handler fix: compiler tracks `exc_frame_depth`; break/continue crossing try/with boundaries emit matching POP_BLOCK.
+- Import forms fixed (GAP-29/30/31): from-imports return SUBMODULE via tokenized sentinel in `_h_imp_n`; dotted-as binds submodule; star imports via `__tvmstar__` sentinel + `__tvm_star_load__` helper respecting `__all__`; relative imports via level-aware package resolution through caller `__package__`.
+- Arity enforcement (GAP-26/27): binder raises native-shaped TypeError on surplus positionals / unknown kwargs / missing required args after default application. Exemptions: synthetic names and kwonly-with-default params (serialized via `kwonly_default_names` code-object field).
+- except* (PEP 654) fully implemented via `__tvm_excg_split__` runtime helper calling `ExceptionGroup.split()`; remainder chains across handlers; compile-time prohibitions enforced.
+- Match-case hardening (GAP-33/34/35/36): sequence/mapping protocol checks (`__tvm_is_seq`/`__tvm_is_map`); kwd-attr miss = pattern-fail; positional index beyond `__match_args__` clean-fail; MatchOr capture snapshot/rollback.
+- Finally-splice on return/break/continue (GAP-02): compiler `_fin_stack` deep-copies finalbody before RETURN/JUMP so cleanup always runs.
+- Closure late-binding fix (GAP-19/20): `_h_ld_drf`/`_h_ld_g` prioritize active frame walk over captured_env stale snapshot.
+- Known deferred: TVM crypto-envelope v4 rolled back pending clean re-land; closure cell boxing; module-level annotations GET_ITEM edge case.
 
 ### 4.7.1 TVM Anti-Fingerprint Hardening (2026-08, Phase G/R)
 Landed (verified: oracle 31/31 + coverage 156/156 + fuzz 38/38 + reproducibility):

@@ -10657,10 +10657,10 @@ VÍ DỤ SỬ DỤNG:
     parser.add_argument("--bit-matrix", choices=["y", "n", "Y", "N"], help="Bien doi byte da vong: LCG-XOR / bit rotation / nibble swap / S-Box permutation (y/n)", default=None)
     parser.add_argument("--lzma-layer", choices=["y", "n", "Y", "N"], help="Them lop nen LZMA (preset 9) truoc ma hoa AEAD - giam 10-25%% kich thuoc payload (y/n)", default=None)
     parser.add_argument("--env-key", choices=["y", "n", "Y", "N"], help="Khoa payload theo fingerprint phan cung (MAC/host/arch) - che do khong mat khau; sai may = that bai xac thuc (y/n)", default=None)
-    parser.add_argument("--verify", choices=["y", "n", "Y", "N"], help="Chay song song file goc vs file obfuscated va so sanh stdout sau khi build (y/n)", default=None)
-    parser.add_argument("--shared-symbols", choices=["y", "n", "Y", "N"], help="Batch mode: dong bo rename symbol xuyen module (two-phase shared map, Opy-style) (y/n)", default=None)
-    parser.add_argument("--vm-annotations", choices=["y", "n", "Y", "N"], help="Bao toan type annotations trong VM - giup dataclasses/pydantic/FastAPI (y/n)", default=None)
-    parser.add_argument("--anti-intercept", choices=["y", "n", "Y", "N"], help="Chong doc network/memory: MITM/sniffer/socket tamper/CA injection (y/n)", default=None)
+    parser.add_argument("--verify", choices=["y", "n", "Y", "N", "off"], help="Post-build semantic differential: runs original vs obfuscated output and compares stdout + exit codes (y/n)", default=None)
+    parser.add_argument("--shared-symbols", choices=["y", "n", "Y", "N"], help="Batch mode: two-phase cross-module symbol sync with frozen deterministic rename map (y/n)", default=None)
+    parser.add_argument("--vm-annotations", choices=["y", "n", "Y", "N"], help="Preserve type annotations in VM bytecode: enables dataclasses/pydantic/FastAPI under virtualization. Default off to reduce size (y/n)", default=None)
+    parser.add_argument("--anti-intercept", choices=["y", "n", "Y", "N"], help="Deep Anti-Read Shield: 5-layer network/memory/introspection protection - module import block, socket encrypted I/O, SSL CA pinning, GC scrub, process watchdog (y/n)", default=None)
 
     cli_args, unknown = parser.parse_known_args()
     if unknown:

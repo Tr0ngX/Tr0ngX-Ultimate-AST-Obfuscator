@@ -218,6 +218,30 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--shared-symbols` | Batch mode two-phase cross-module symbol sync: phase A freezes one deterministic rename per symbol imported across files, phase B applies it (prevents cross-package NameError in `-D/-r` batches) | `y` / `n` |
 | `--vm-annotations` | Preserve type annotations in VM bytecode: module/class/function `__annotations__` dicts populated; enables dataclasses/pydantic/FastAPI under virtualization. Default off (reduces size) | `y` / `n` |
 | `--anti-intercept` | Deep Anti-Read Shield: 5-layer network/memory/introspection protection — module import block, socket integrity snapshot + encrypted I/O wrapper, SSL CA pinning, GC scrub, process watchdog | `y` / `n` |
+| `--vm-annotations` | Preserve type annotations in VM bytecode — enables dataclasses/pydantic/FastAPI under virtualization. Default off (reduces size) | `y` / `n` |
+
+### VM Full Syntax Parity (TVM 5.0)
+
+The VM virtualization engine now supports ALL Python syntax constructs:
+
+| Feature | Status |
+|---------|--------|
+| Functions, closures, classes, metaclasses | ✅ |
+| Generators (`send`/`throw`/`close`/`yield from`) | ✅ |
+| Async/await/async-for/async-with/async-gen | ✅ |
+| try/except/else/finally + splice on return/break | ✅ |
+| except* PEP 654 (ExceptionGroup.split) | ✅ |
+| Match-case (all pattern types + guards + or-patterns) | ✅ |
+| Star-import (`from X import *`) | ✅ |
+| Relative import (`from .pkg import x`) | ✅ |
+| Dotted-as import (`import a.b as c`) | ✅ |
+| Decorators, comprehensions, walrus operator, f-strings | ✅ |
+| posonly/kwonly/vararg/kwarg full matrix | ✅ |
+| `/` keyword-rejection runtime enforcement | ✅ |
+| Late-binding closures (frame-walk priority) | ✅ |
+| Finally-splice on return/break/continue | ✅ |
+| Annotations (`--vm-annotations y`) | ✅ opt-in |
+| Type hints discarded without flag | ⚠️ by design |
 | `--max-output-size` | Maximum output size DoS limit (aborts and unlinks if exceeded) | e.g. `10MB`, `50MB` |
 | `--seed` | Integer seed for deterministic reproducible obfuscation builds | e.g. `1337` |
 | `--double-compile` | Double compile (Tr0ngX + Velimatix loader) | `y` / `n` |
