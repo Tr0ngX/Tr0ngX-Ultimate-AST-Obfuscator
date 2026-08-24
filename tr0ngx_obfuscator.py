@@ -10638,6 +10638,8 @@ VÍ DỤ SỬ DỤNG:
     parser.add_argument("--env-key", choices=["y", "n", "Y", "N"], help="Khoa payload theo fingerprint phan cung (MAC/host/arch) - che do khong mat khau; sai may = that bai xac thuc (y/n)", default=None)
     parser.add_argument("--verify", choices=["y", "n", "Y", "N"], help="Chay song song file goc vs file obfuscated va so sanh stdout sau khi build (y/n)", default=None)
     parser.add_argument("--shared-symbols", choices=["y", "n", "Y", "N"], help="Batch mode: dong bo rename symbol xuyen module (two-phase shared map, Opy-style) (y/n)", default=None)
+    parser.add_argument("--vm-annotations", choices=["y", "n", "Y", "N"], help="Bao toan type annotations trong VM - giup dataclasses/pydantic/FastAPI (y/n)", default=None)
+    parser.add_argument("--anti-intercept", choices=["y", "n", "Y", "N"], help="Chong doc network/memory: MITM/sniffer/socket tamper/CA injection (y/n)", default=None)
 
     cli_args, unknown = parser.parse_known_args()
     if unknown:
@@ -10920,6 +10922,10 @@ VÍ DỤ SỬ DỤNG:
     _EngineState.lzma_layer = lzma_layer_choice.upper() == "Y"
     _EngineState.env_key_lock = env_key_choice.upper() == "Y"
     _EngineState.verify_mode = verify_mode_choice.upper() == "Y"
+    vm_annotations_choice = getattr(cli_args, 'vm_annotations', None) or "N"
+    anti_intercept_choice = getattr(cli_args, 'anti_intercept', None) or "N"
+    _EngineState.vm_annotations = vm_annotations_choice.upper() == "Y"
+    _EngineState.anti_intercept = anti_intercept_choice.upper() == "Y"
 
     # Force Python version
     if cli_args.force_py is not None:

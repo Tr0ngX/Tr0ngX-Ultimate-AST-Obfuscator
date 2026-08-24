@@ -216,6 +216,8 @@ python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
 | `--env-key` | Hardware fingerprint lock (MAC/host/arch/Python) for no-password builds: salt is XOR-blinded with the machine digest, wrong machine fails authentication. Mutually exclusive with `--password` | `y` / `n` |
 | `--verify` | Built-in semantic differential: runs original vs obfuscated output and compares stdout + exit codes after build | `y` / `n` |
 | `--shared-symbols` | Batch mode two-phase cross-module symbol sync: phase A freezes one deterministic rename per symbol imported across files, phase B applies it (prevents cross-package NameError in `-D/-r` batches) | `y` / `n` |
+| `--vm-annotations` | Preserve type annotations in VM bytecode: module/class/function `__annotations__` dicts populated; enables dataclasses/pydantic/FastAPI under virtualization. Default off (reduces size) | `y` / `n` |
+| `--anti-intercept` | Deep Anti-Read Shield: 5-layer network/memory/introspection protection — module import block, socket integrity snapshot + encrypted I/O wrapper, SSL CA pinning, GC scrub, process watchdog | `y` / `n` |
 | `--max-output-size` | Maximum output size DoS limit (aborts and unlinks if exceeded) | e.g. `10MB`, `50MB` |
 | `--seed` | Integer seed for deterministic reproducible obfuscation builds | e.g. `1337` |
 | `--double-compile` | Double compile (Tr0ngX + Velimatix loader) | `y` / `n` |
