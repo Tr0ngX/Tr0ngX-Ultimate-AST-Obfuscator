@@ -5821,6 +5821,7 @@ class _TVMCodeObject:
         # serialized so the runtime binder can exempt them from the strict
         # missing-argument check (TVM 4.0 GAP-27 refinement).
         self.kwonly_default_names: Tuple[str, ...] = ()
+        self.posonly_count: int = 0
 
     def get_const_idx(self, val: Any) -> int:
         for idx, c in enumerate(self.constants):
@@ -5858,6 +5859,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
         # unrelated exception (TVM GAP-01/03).
         self.exc_frame_depth = 0
         self.loop_depth = 0
+        self._fin_stack: List[List[ast.stmt]] = []
         self.explicit_globals: Set[str] = set()
         self.explicit_nonlocals: Set[str] = set()
 
@@ -6492,6 +6494,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
             a.arg for a, d in zip(getattr(node.args, 'kwonlyargs', []), getattr(node.args, 'kw_defaults', []))
             if d is not None
         )
+        sub_compiler.code_obj.posonly_count = len(getattr(node.args, 'posonlyargs', []))
 
         # Handle default arguments
         # Positional defaults are evaluated ONCE at function-creation time
@@ -6553,6 +6556,11 @@ class _TVMASTCompiler(ast.NodeVisitor):
         sub_compiler = _TVMASTCompiler(name=node.name, arg_names=arg_names, kwonly_names=kwonly_names, kwarg_name=kwarg_name, vararg_name=vararg_name, is_function=True, vm_level=self.vm_level, rng=self.rng)
         sub_compiler._scan_scope(node.body)
         sub_compiler.is_async = True
+        sub_compiler.code_obj.kwonly_default_names = tuple(
+            a.arg for a, d in zip(getattr(node.args, 'kwonlyargs', []), getattr(node.args, 'kw_defaults', []))
+            if d is not None
+        )
+        sub_compiler.code_obj.posonly_count = len(getattr(node.args, 'posonlyargs', []))
         # Detect async-generator BEFORE compiling so visit_Yield emits suspends.
         is_agen_pre = self._contains_yield_in_scope(node.body)
         if is_agen_pre:
@@ -7183,6 +7191,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
             fin_exc_slot = self.code_obj.get_local_idx(f'_$fin_exc_{self.new_label()}')
             self.emit_jump(_TVMOpcodes.SETUP_FINALLY, lbl_fin_handler)
             self.exc_frame_depth += 1
+            self._fin_stack.append(node.finalbody)
 
         if has_handlers:
             lbl_exc_dispatcher = self.new_label()
@@ -7233,6 +7242,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
         if has_finally:
             self.emit(_TVMOpcodes.POP_BLOCK)
             self.exc_frame_depth -= 1
+            self._fin_stack.pop()
             for stmt in node.finalbody:
                 self.visit(stmt)
             self.emit_jump(_TVMOpcodes.JUMP, lbl_fin_end)
@@ -7249,6 +7259,11 @@ class _TVMASTCompiler(ast.NodeVisitor):
     def visit_Break(self, node: ast.Break):
         if self.loop_stack:
             _, lbl_break = self.loop_stack[-1]
+            # Splice finally bodies for try-finally frames being exited
+            import copy as _copy_mod
+            for _fin_body in reversed(self._fin_stack):
+                for _fs in _fin_body:
+                    self.visit(_copy_mod.deepcopy(_fs))
             for _ in range(self.exc_frame_depth):
                 self.emit(_TVMOpcodes.POP_BLOCK)
             self.emit_jump(_TVMOpcodes.JUMP, lbl_break)
@@ -7256,6 +7271,10 @@ class _TVMASTCompiler(ast.NodeVisitor):
     def visit_Continue(self, node: ast.Continue):
         if self.loop_stack:
             lbl_head, _ = self.loop_stack[-1]
+            import copy as _copy_mod
+            for _fin_body in reversed(self._fin_stack):
+                for _fs in _fin_body:
+                    self.visit(_copy_mod.deepcopy(_fs))
             for _ in range(self.exc_frame_depth):
                 self.emit(_TVMOpcodes.POP_BLOCK)
             self.emit_jump(_TVMOpcodes.JUMP, lbl_head)
@@ -7497,10 +7516,26 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.mark_label(lbl_match_end)
 
     def visit_Return(self, node: ast.Return):
-        if node.value:
-            self.visit(node.value)
+        if self._fin_stack:
+            # GAP-02 fix: return inside try-finally must execute finalbody
+            # before actually returning. Store value → splice finallys (inner
+            # to outer) → load value → return.
+            ret_slot = self.code_obj.get_local_idx(f'_$ret_val_{self.new_label()}')
+            if node.value:
+                self.visit(node.value)
+            else:
+                self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self.emit(_TVMOpcodes.STORE_FAST, ret_slot)
+            import copy as _copy_mod
+            for _fin_body in reversed(self._fin_stack):
+                for _fs in _fin_body:
+                    self.visit(_copy_mod.deepcopy(_fs))
+            self.emit(_TVMOpcodes.LOAD_FAST, ret_slot)
         else:
-            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            if node.value:
+                self.visit(node.value)
+            else:
+                self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
         self.emit(_TVMOpcodes.RETURN_VALUE)
 
     def visit_Import(self, node: ast.Import):
@@ -7663,7 +7698,8 @@ def _serialize_tvm_code_object(code: _TVMCodeObject, isa_map: Dict[int, int], k_
         bytes(bytecode_ba),
         tuple(serialized_consts),
         tuple(code.names),
-        tuple(getattr(code, 'kwonly_default_names', ()))
+        tuple(getattr(code, 'kwonly_default_names', ())),
+        getattr(code, 'posonly_count', 0),
     ))
 
     import zlib as _zlib_mod
@@ -7971,6 +8007,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
             self.constants = list(data[7])
             self.names = data[8]
             self.kwonly_default_names = tuple(data[9]) if _sys_len(data) > 9 else ()
+            self.posonly_count = data[10] if _sys_len(data) > 10 else 0
             self.defining_class = None
             self._k_enc = parent_k_enc
 
@@ -8049,14 +8086,15 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     def _h_ld_g(_f, _a):
         _n = _f.code_obj.names[_a]
-        if _f.captured_env and _n in _f.captured_env:
-            _f.stack.append(_f.captured_env[_n])
-            return
+        # FIX (GAP-19/20): frame walk FIRST (current values), then captured_env
         if {v['active_frames']}:
             for _pf in reversed({v['active_frames']}[:-1]):
                 if _n in _pf.locals and _pf.locals[_n] is not {v['no_arg_sig']}:
                     _f.stack.append(_pf.locals[_n])
                     return
+        if _f.captured_env and _n in _f.captured_env:
+            _f.stack.append(_f.captured_env[_n])
+            return
         if _n in _f.global_env:
             _f.stack.append(_f.global_env[_n])
         elif hasattr(__builtins__, _n):
@@ -8252,14 +8290,18 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     def _h_ld_drf(_f, _a):
         _n = _f.code_obj.names[_a]
+        # FIX (GAP-19/20): prioritize frame walk over captured_env snapshot.
+        # The captured_env is a stale dict copy; the active frame walk always
+        # finds the CURRENT value in the owning scope. This enables proper
+        # late-binding for closures and nonlocal mutations across levels.
+        if {v['active_frames']}:
+            for _pf in reversed({v['active_frames']}[:-1]):
+                if _n in _pf.locals and _pf.locals[_n] is not {v['no_arg_sig']}:
+                    _f.stack.append(_pf.locals[_n])
+                    return
         if _f.captured_env and _n in _f.captured_env:
             _f.stack.append(_f.captured_env[_n])
             return
-        if {v['active_frames']}:
-            for _pf in reversed({v['active_frames']}[:-1]):
-                if _n in _pf.locals:
-                    _f.stack.append(_pf.locals[_n])
-                    return
         if _n in _f.global_env:
             _f.stack.append(_f.global_env[_n])
         elif hasattr(__builtins__, _n):
@@ -8550,6 +8592,10 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
             if _idx < _sys_len(_passed_args):
                 _loc[_aname] = _passed_args[_idx]
             elif _aname in _rem_kwargs:
+                # FIX (GAP-25): `/` keyword-rejection — pos-only params cannot
+                # be passed as keyword arguments (native CPython TypeError).
+                if _idx < getattr(_fn_code, 'posonly_count', 0) and not _fn_code.name.startswith('<'):
+                    raise TypeError(f"{{_fn_code.name}}() got some positional-only arguments passed as keyword arguments: '{{_aname}}'")
                 _loc[_aname] = _rem_kwargs.pop(_aname)
         if _fn_code.vararg_name:
             _loc[_fn_code.vararg_name] = tuple(_passed_args[_pos_count:])
