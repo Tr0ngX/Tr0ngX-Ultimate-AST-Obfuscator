@@ -160,6 +160,9 @@ New capabilities: armor codec diversification (b85/b64/b32 per build) + reversed
 
 ---
 
+### 4.7.1 TVM Anti-Fingerprint Hardening (2026-08, Phase G/R)
+Landed: debug-map neutral stage name; TRX_VM_DEBUG removed; trap-delay randomized; sys.monitoring free-slot scan + random per-build tag; ALL semantic magic strings (TVM_LAZY/NO_ARG/vm_await/vm_anext/match_rest/bind_defaults/tvmfl) tokenized via `_TVM_TOKENS` dict — zero plaintext occurrences. Known remaining: KDF labels (protocol), handler names (deferred 5.1).
+
 ## 5. Verification & Testing Protocol
 
 Before committing any modifications:

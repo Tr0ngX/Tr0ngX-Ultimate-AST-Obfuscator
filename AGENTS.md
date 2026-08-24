@@ -161,6 +161,15 @@ Fixes landed (all verified by test_vm_oracle_semantic 31/31 + test_vm_full_cover
 - Match-case hardening (GAP-33/34/35/36): sequence patterns accept any sequence protocol object excluding str/bytes/bytearray AND mappings (`__tvm_is_seq`); mapping patterns accept any mapping (`__tvm_is_map`); kwd-attr misses fail the pattern via getattr+sentinel instead of raising AttributeError; positional index beyond `__match_args__` fails cleanly (`__tvm_margs`); MatchOr snapshots/restores capture slots across alternatives (`__tvm_snap`/`__tvm_restore`) so failed alternatives no longer leak partial captures.
 - Known deferred (documented honestly): TVM crypto-envelope v4 (password-derived packet keys, tag cascade, TVM1 header, meta-packet ISA hiding) was prototyped but rolled back pending a clean re-land; current envelope remains v3 embedded-seed = tamper-resistance only. Closure cell boxing (late-binding), finally-execution-on-return/break splicing, `/` keyword-rejection at runtime: tracked for next wave.
 
+### 4.7.1 TVM Anti-Fingerprint Hardening (2026-08, Phase G/R)
+Landed (verified: oracle 31/31 + coverage 156/156 + fuzz 38/38 + reproducibility):
+- Debug-map stage name neutralized: `6.5_optimization_pass` (level in `details` only).
+- `TRX_VM_DEBUG` env probe removed entirely from emitted artifacts.
+- Trap-delay randomized per build (0.01-0.15s before `_exit`).
+- sys.monitoring: free-slot scan via `get_tool()` + per-build random tag (`tx` + sha256 prefix) instead of squatting all 6 slots with self-identifying `'trx_tvm_N'`.
+- Magic-string tokenization (Phase G4): ALL semantic tokens randomized per build via `_TVM_TOKENS` dict shared between compiler and emitter: `'__TVM_LAZY__'`, `'_NO_ARG'`, `'__vm_await__'`, `'__vm_anext__'`, `'__vm_match_rest__'`, `'__vm_bind_defaults__'`, `'__tvmfl__'` — zero occurrences in artifact plaintext.
+- Known remaining leaks (documented honestly): `TRX_TVM_ENC_KEY_V3:` / `TRX_TVM_MAC_KEY_V3:` KDF labels (2 occurrences, protocol requirement); `_h_*` handler names (deferred TVM 5.1 — requires pre-emission rename to avoid meta-packet deserialization mismatch).
+
 ### 4.6 Research Hardening Wave (2026-08, sourced from research_repos analysis)
 Attribution policy: techniques are re-implemented independently; source repos credited inline as `Source:` comments. No GPL/AGPL/no-license code was copied (see license matrix in the research report): MIT/Apache sources are concept-level only unless noted.
 

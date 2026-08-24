@@ -5703,6 +5703,9 @@ class TVMEmitError(Exception):
     """Typed error for TVM compiler emission violations (16-bit arg range etc.)."""
 
 
+_TVM_TOKENS: Dict[str, str] = {}
+
+
 class _TVMOpcodes:
     # Stack & Data
     LOAD_CONST       = 1
@@ -6145,7 +6148,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
         tmp_slot = self.code_obj.get_local_idx(f'_$await_tmp_{self.new_label()}')
         self.visit(node.value)
         self.emit(_TVMOpcodes.STORE_FAST, tmp_slot)
-        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx(_TVM_TOKENS['await_fn']))
         self.emit(_TVMOpcodes.LOAD_FAST, tmp_slot)
         self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
 
@@ -6508,7 +6511,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
                 if def_node is not None:
                     arg_idx = sub_compiler.code_obj.get_local_idx(arg_node.arg)
                     sub_compiler.emit(_TVMOpcodes.LOAD_FAST, arg_idx)
-                    sub_compiler.emit(_TVMOpcodes.LOAD_GLOBAL, sub_compiler.code_obj.get_name_idx('_NO_ARG'))
+                    sub_compiler.emit(_TVMOpcodes.LOAD_GLOBAL, sub_compiler.code_obj.get_name_idx(_TVM_TOKENS['no_arg']))
                     sub_compiler.emit(_TVMOpcodes.COMPARE_OP, 8)
                     lbl_has_val = sub_compiler.new_label()
                     sub_compiler.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_has_val)
@@ -6570,7 +6573,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
                 if def_node is not None:
                     arg_idx = sub_compiler.code_obj.get_local_idx(arg_node.arg)
                     sub_compiler.emit(_TVMOpcodes.LOAD_FAST, arg_idx)
-                    sub_compiler.emit(_TVMOpcodes.LOAD_GLOBAL, sub_compiler.code_obj.get_name_idx('_NO_ARG'))
+                    sub_compiler.emit(_TVMOpcodes.LOAD_GLOBAL, sub_compiler.code_obj.get_name_idx(_TVM_TOKENS['no_arg']))
                     sub_compiler.emit(_TVMOpcodes.COMPARE_OP, 8)
                     lbl_has_val_a = sub_compiler.new_label()
                     sub_compiler.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_has_val_a)
@@ -6617,7 +6620,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
             for arg_node, def_node in zip(default_args, node.args.defaults):
                 arg_idx = sub_compiler.code_obj.get_local_idx(arg_node.arg)
                 sub_compiler.emit(_TVMOpcodes.LOAD_FAST, arg_idx)
-                sub_compiler.emit(_TVMOpcodes.LOAD_GLOBAL, sub_compiler.code_obj.get_name_idx('_NO_ARG'))
+                sub_compiler.emit(_TVMOpcodes.LOAD_GLOBAL, sub_compiler.code_obj.get_name_idx(_TVM_TOKENS['no_arg']))
                 sub_compiler.emit(_TVMOpcodes.COMPARE_OP, 8)
                 lbl_has = sub_compiler.new_label()
                 sub_compiler.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_has)
@@ -6630,7 +6633,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
                 if def_node is not None:
                     arg_idx = sub_compiler.code_obj.get_local_idx(arg_node.arg)
                     sub_compiler.emit(_TVMOpcodes.LOAD_FAST, arg_idx)
-                    sub_compiler.emit(_TVMOpcodes.LOAD_GLOBAL, sub_compiler.code_obj.get_name_idx('_NO_ARG'))
+                    sub_compiler.emit(_TVMOpcodes.LOAD_GLOBAL, sub_compiler.code_obj.get_name_idx(_TVM_TOKENS['no_arg']))
                     sub_compiler.emit(_TVMOpcodes.COMPARE_OP, 8)
                     lbl_has = sub_compiler.new_label()
                     sub_compiler.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_has)
@@ -6757,7 +6760,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(sub_code))
         self.emit(_TVMOpcodes.MAKE_FUNCTION, 1)          # async
         self.emit(_TVMOpcodes.CALL_FUNCTION, 0)          # -> coroutine
-        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx(_TVM_TOKENS['await_fn']))
         self.emit(_TVMOpcodes.ROT_TWO)
         self.emit(_TVMOpcodes.CALL_FUNCTION, 1)          # -> resolved iterable
 
@@ -6971,14 +6974,14 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__aiter__'))
         self.emit(_TVMOpcodes.CALL_FUNCTION, 0)
         self.emit(_TVMOpcodes.STORE_FAST, iter_slot)
-        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx(_TVM_TOKENS['await_fn']))
         self.emit(_TVMOpcodes.LOAD_FAST, iter_slot)
         self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
         self.emit(_TVMOpcodes.STORE_FAST, iter_slot)
 
         self.mark_label(lbl_head)
         # (ok, value) = __vm_anext__(aiter)  -- sentinel-free async iteration
-        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_anext__'))
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx(_TVM_TOKENS['anext_fn']))
         self.emit(_TVMOpcodes.LOAD_FAST, iter_slot)
         self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
         self.emit(_TVMOpcodes.STORE_FAST, pair_slot)
@@ -7101,7 +7104,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
         self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx('__aenter__'))
         self.emit(_TVMOpcodes.CALL_FUNCTION, 0)
-        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx(_TVM_TOKENS['await_fn']))
         self.emit(_TVMOpcodes.ROT_TWO)
         self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
         if item.optional_vars:
@@ -7127,7 +7130,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
         self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
         self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
-        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx(_TVM_TOKENS['await_fn']))
         self.emit(_TVMOpcodes.ROT_TWO)
         self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
         self.emit(_TVMOpcodes.POP_TOP)
@@ -7157,7 +7160,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
 
         self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
-        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_await__'))
+        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx(_TVM_TOKENS['await_fn']))
         self.emit(_TVMOpcodes.ROT_TWO)
         self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
 
@@ -7333,7 +7336,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
             # FIX (GAP-35): missing kwd attr must FAIL the pattern (CPython),
             # not raise AttributeError through user code. getattr-3-arg +
             # _NO_ARG sentinel comparison.
-            _no_arg_gi = self.code_obj.get_name_idx('_NO_ARG')
+            _no_arg_gi = self.code_obj.get_name_idx(_TVM_TOKENS['no_arg'])
             for attr_name, kp_node in zip(pat.kwd_attrs, pat.kwd_patterns):
                 self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('getattr'))
                 self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
@@ -7389,7 +7392,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
                 self.emit(_TVMOpcodes.STORE_FAST, tmp_slot)
                 self._match_pattern(pat_node, tmp_slot, lbl_fail)
             if pat.rest is not None:
-                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__vm_match_rest__'))
+                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx(_TVM_TOKENS['match_rest']))
                 self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
                 for key_node in pat.keys:
                     self.visit(key_node)
@@ -7512,7 +7515,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
                 # and bound the root package to the alias.
                 if '.' in alias.name:
                     last_part = alias.name.split('.')[-1]
-                    fl_sentinel = '__tvmfl__' + alias.name + '\x00' + last_part
+                    fl_sentinel = _TVM_TOKENS['fl_prefix'] + alias.name + '\x00' + last_part
                     idx = self.code_obj.get_name_idx(fl_sentinel)
                     self.emit(_TVMOpcodes.IMPORT_NAME, idx)
                 target_name = alias.asname
@@ -7535,7 +7538,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
         # -> getattr failed. The handler recognizes this sentinel name form
         # and re-imports with fromlist so the SUBMODULE is returned.
         names_csv = ','.join(a.name for a in node.names)
-        sentinel = '__tvmfl__' + (node.module or '') + '\x00' + names_csv
+        sentinel = _TVM_TOKENS['fl_prefix'] + (node.module or '') + '\x00' + names_csv
         mod_idx = self.code_obj.get_name_idx(sentinel)
         self.emit(_TVMOpcodes.IMPORT_NAME, mod_idx)
         for alias in node.names:
@@ -7646,7 +7649,7 @@ def _serialize_tvm_code_object(code: _TVMCodeObject, isa_map: Dict[int, int], k_
             child_salt = secrets.token_bytes(16)
             child_k_enc, child_k_mac = _tvm_derive_runtime_keys(k_enc, child_salt)
             child_encrypted = _serialize_tvm_code_object(c, isa_map, child_k_enc, child_k_mac, perm_get)
-            serialized_consts.append(('__TVM_LAZY__', child_salt, child_encrypted))
+            serialized_consts.append((_TVM_TOKENS['lazy'], child_salt, child_encrypted))
         else:
             serialized_consts.append(c)
 
@@ -7738,7 +7741,9 @@ def _vm_emit_runtime_interpreter_v2(root_code: _TVMCodeObject, isa_map: Dict[int
 
     odd_multipliers = [m for m in range(3, 256, 2)]
     M = rng.choice(odd_multipliers)
+    _trap_delay = round(rng.uniform(0.01, 0.15), 4)
     A = rng.randint(0, 255)
+    tok = _TVM_TOKENS
 
     _DBG_AE = "pass"
     _DBG_CALLA = "pass"
@@ -7912,10 +7917,15 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     if hasattr(_sys, 'monitoring'):
         try:
+            _ttag = 'tx' + _hashlib.sha256(_root_packet[:9]).hexdigest()[:6]
             for _tool_id in range(6):
                 try:
-                    _sys.monitoring.use_tool_id(_tool_id, f"trx_tvm_{{_tool_id}}")
-                    _sys.monitoring.set_events(_tool_id, 0)
+                    if _sys.monitoring.get_tool(_tool_id) is None:
+                        try:
+                            _sys.monitoring.use_tool_id(_tool_id, _ttag)
+                            _sys.monitoring.set_events(_tool_id, 0)
+                        except Exception:
+                            pass
                 except Exception:
                     pass
         except Exception:
@@ -7966,7 +7976,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
         def resolve_const(self, idx):
             c = self.constants[idx]
-            if isinstance(c, tuple) and _sys_len(c) == 3 and c[0] == '__TVM_LAZY__':
+            if isinstance(c, tuple) and _sys_len(c) == 3 and c[0] == {repr(tok['lazy'])}:
                 child_salt, child_packet = c[1], c[2]
                 child_k_enc, child_k_mac = {v['derive_keys_fn']}(self._k_enc, child_salt)
                 decoded = {v['decode_code_fn']}(child_packet, child_k_enc, child_k_mac)
@@ -7993,7 +8003,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
             self._a = 0
 
     def {v['lazy_decode_fn']}(c, parent_k_enc=None):
-        if isinstance(c, tuple) and _sys_len(c) == 3 and c[0] == '__TVM_LAZY__':
+        if isinstance(c, tuple) and _sys_len(c) == 3 and c[0] == {repr(tok['lazy'])}:
             child_salt, child_packet = c[1], c[2]
             child_k_enc, child_k_mac = {v['derive_keys_fn']}(parent_k_enc or _root_k_enc, child_salt)
             return {v['decode_code_fn']}(child_packet, child_k_enc, child_k_mac)
@@ -8005,7 +8015,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
     _g_env = globals()
     {v['active_frames']} = []
     {v['no_arg_sig']} = object()
-    _g_env['_NO_ARG'] = {v['no_arg_sig']}
+    _g_env[{repr(tok['no_arg'])}] = {v['no_arg_sig']}
     {v['ret_sig']} = object()
     {v['await_sig']} = object()
     {v['yield_sig']} = object()
@@ -8029,6 +8039,8 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         return _perm
 
     def {v['trap_fn']}(_f, _a):
+        import time as _time_mod
+        _time_mod.sleep({_trap_delay})
         _os._exit(1)
 
     # Dynamic Opcode Handlers
@@ -8275,7 +8287,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     def _h_mk_fn(_f, _a):
         _fn_code_obj = _f.stack.pop()
-        if isinstance(_fn_code_obj, tuple) and len(_fn_code_obj) == 3 and _fn_code_obj[0] == '__TVM_LAZY__':
+        if isinstance(_fn_code_obj, tuple) and len(_fn_code_obj) == 3 and _fn_code_obj[0] == {repr(tok['lazy'])}:
             _fn_code_obj = {v['lazy_decode_fn']}(_fn_code_obj, _f.code_obj._k_enc)
         _dmap = None
         if bool(_a & 8):
@@ -8346,11 +8358,11 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         _args = [_f.stack.pop() for _ in range(_a)][::-1] if _a else []
         _fn = _f.stack.pop()
         # Identity-only await detection. The old name-table heuristic
-        # (_nms[_a] == '__vm_await__') misfired on any global whose name index
+        # legacy detection misfired on any global whose name index
         # collided with the await slot, hijacking plain calls like worker([7,8]).
         in_async = {v['async_depth']}[0] > 0
         {_DBG_CALLA}
-        if _fn is _g_env.get('__vm_await__'):
+        if _fn is _g_env.get({repr(tok['await_fn'])}):
             import inspect
             if _args and (inspect.iscoroutine(_args[0]) or inspect.isawaitable(_args[0])):
                 if in_async:
@@ -8359,7 +8371,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
                 _f.stack.append({v['vm_await_fn']}(_args[0]))
             else:
                 _f.stack.append(_args[0] if _args else None)
-        elif _fn is _g_env.get('__vm_anext__'):
+        elif _fn is _g_env.get({repr(tok['anext_fn'])}):
             if in_async and _args:
                 try:
                     _coro = _args[0].__anext__()
@@ -8395,7 +8407,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     def _h_b_cls(_f, _a):
         _cls_code = _f.stack.pop()
-        if isinstance(_cls_code, tuple) and _sys_len(_cls_code) == 3 and _cls_code[0] == '__TVM_LAZY__':
+        if isinstance(_cls_code, tuple) and _sys_len(_cls_code) == 3 and _cls_code[0] == {repr(tok['lazy'])}:
             _cls_code = {v['lazy_decode_fn']}(_cls_code, _f.code_obj._k_enc)
         _meta_param = _f.stack.pop()
         _bases = _f.stack.pop()
@@ -8428,10 +8440,10 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     def _h_imp_n(_f, _a):
         _n = _f.code_obj.names[_a]
-        if _n.startswith('__tvmfl__'):
+        if _n.startswith({repr(tok['fl_prefix'])}):
             # fromlist sentinel emitted by visit_ImportFrom:
-            # '__tvmfl__' + module + SEP + csv(names) -> return SUBMODULE.
-            _rest = _n[len('__tvmfl__'):]
+            # sentinel-prefix lookup -> return SUBMODULE.
+            _rest = _n[len({repr(tok['fl_prefix'])}):]
             _mod, _, _csv = _rest.partition(chr(0))
             _f.stack.append(__import__(_mod, fromlist=tuple(_csv.split(','))))
         else:
@@ -8767,7 +8779,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
                 return asyncio.run(_val)
         return _val
 
-    _g_env['__vm_await__'] = {v['vm_await_fn']}
+    _g_env[{repr(tok['await_fn'])}] = {v['vm_await_fn']}
 
     def {v['vm_anext_fn']}(_aiter):
         import inspect, asyncio
@@ -8787,8 +8799,8 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
                 return (False, None)
         return (True, _coro)
 
-    _g_env['__vm_anext__'] = {v['vm_anext_fn']}
-    _g_env['__vm_match_rest__'] = (lambda _subj, _excl: {{k: v for k, v in _subj.items() if k not in _excl}})
+    _g_env[{repr(tok['anext_fn'])}] = {v['vm_anext_fn']}
+    _g_env[{repr(tok['match_rest'])}] = (lambda _subj, _excl: {{k: v for k, v in _subj.items() if k not in _excl}})
     # Match-case protocol helpers (TVM 4.0 GAP-33/35):
     def __tvm_is_seq__(_o):
         if isinstance(_o, (str, bytes, bytearray)):
@@ -8815,24 +8827,24 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
     def __tvm_snap__(_names):
         # Captures may be frame LOCALS (function scope) or module globals;
         # resolve against the innermost active frame first.
-        _sent = _g_env.get('_NO_ARG')
+        _sent = _g_env.get({repr(tok['no_arg'])})
         _src = {v['active_frames']}[-1].locals if {v['active_frames']} else _g_env
         return {{_n: _src.get(_n, _sent) for _n in _names}}
     def __tvm_restore__(_names, _snap):
         _tgt = {v['active_frames']}[-1].locals if {v['active_frames']} else _g_env
         for _n in _names:
             _v = _snap.get(_n)
-            if _v is _g_env.get('_NO_ARG'):
+            if _v is _g_env.get({repr(tok['no_arg'])}):
                 _tgt.pop(_n, None)
             else:
                 _tgt[_n] = _v
     _g_env['__tvm_snap'] = __tvm_snap__
     _g_env['__tvm_restore'] = __tvm_restore__
 
-    def __vm_bind_defaults__(_co, _pair):
+    def {tok['bind_defaults']}(_co, _pair):
         return _co
 
-    _g_env['__vm_bind_defaults__'] = __vm_bind_defaults__
+    _g_env[{repr(tok['bind_defaults'])}] = {tok['bind_defaults']}
 
     # Level-4 per-function ISA divergence infrastructure lives below; the
     # enable flag is interpolated from the emitter scope.
@@ -8995,6 +9007,16 @@ def _vm_obfuscate(code_str: str, seed=None, vm_level: int = 1) -> str:
         isa_map[std_op] = all_opcodes[idx]
 
     # 2. Lower AST into Custom TVM Instructions with VM-level hardening
+    _TVM_TOKENS.clear()
+    _TVM_TOKENS.update({
+        'lazy': '__' + rd()[:14],
+        'no_arg': '_' + rd()[:12],
+        'await_fn': '__' + rd()[:14],
+        'anext_fn': '__' + rd()[:14],
+        'match_rest': '__' + rd()[:14],
+        'bind_defaults': '__' + rd()[:14],
+        'fl_prefix': '__' + rd()[:14],
+    })
     compiler = _TVMASTCompiler(name='<module>', is_function=False, vm_level=vm_level, rng=rng)
     compiler._scan_scope(tree.body)
     for stmt in tree.body:
@@ -9003,7 +9025,7 @@ def _vm_obfuscate(code_str: str, seed=None, vm_level: int = 1) -> str:
 
     # 3. Emit Polymorphic Runtime Interpreter 2.0 with AEAD & Dynamic Dispatch
     runtime = _vm_emit_runtime_interpreter_v2(root_code, isa_map, vm_level, rng,
-                                              vm_debug=bool(os.environ.get("TRX_VM_DEBUG")))
+                                              vm_debug=False)
     return runtime
 
 
@@ -11379,9 +11401,9 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
             t0 = time.time()
             sz0 = len(code)
             code = _vm_obfuscate(code, seed=custom_seed, vm_level=int(vm_level_choice))
-            _track_debug_stage(f"6.5_vm_virtualization_level_{vm_level_choice}", time.time() - t0, sz0, len(code))
+            _track_debug_stage("6.5_optimization_pass", time.time() - t0, sz0, len(code), details={"tier": vm_level_choice})
         except Exception as e:
-            _log_stage_error(f"6.5_vm_virtualization_level_{vm_level_choice}", e)
+            _log_stage_error("6.5_optimization_pass", e)
 
     # Step 8: Packaging & Compilation
     if method.upper() != "Y":
