@@ -144,9 +144,17 @@ graph TD
 - **Virtual CPU & Polymorphic ISA**: Compiles AST statement chunks into encrypted bytecode blocks (`marshal` + rolling XOR + Base85), executed by a lightweight runtime virtual interpreter.
 - **Randomized Opcode Matrix**: Opcode byte assignments (`V_EXEC`, `V_HALT`, `V_NOP`, `V_TRAP`, `V_SCRUB`) are generated fresh per build across a 256-value space.
 - **Visual Camouflage Integration**: VM registers, program counters, data pools, and dispatchers utilize the repository's hostile identifier matrix (Zalgo, CJK, Homoglyph, Rare Unicode, Invisible).
-- **Anti-Analysis Trap Network**: Level 2+ injects dead traps on unassigned opcode bytes (`os._exit(1)`) and rolling NOP sequences. Level 3 injects decoy encrypted chunks and aggressive GC zeroing.
+- **Anti-Analysis Trap Network**: Level 2+ injects rolling NOP sequences (p=0.15) and unreachable dead traps (1-3x, random 16-bit args) after RETURN/HALT/RAISE. Level 3 adds dummy LOAD_CONST/POP_TOP cycles (p=0.10) plus post-frame scrub (`stack/exc_handlers.clear()`). NOTE: "decoy encrypted chunks" and "GC zeroing" are NOT implemented - scrub is dict/list `.clear()` only; docs corrected 2026-08 after audit.
 - **Full Language Coverage (TVM 3.0)**: real resumable generators (lazy iteration, send/throw/close, multi-level yield-from with return capture), full async surface (await hand-off on the running loop, async-for via a sentinel-free `__vm_anext__` tuple protocol, async-with, async generators, async comprehensions desugared into inline awaited helpers), positional defaults evaluated once at function creation (native semantics), correct `import a.b as c` submodule binding, `raise X from Y` cause propagation, dict-literal insertion-order preservation, and interpreter-internal builtin isolation (`_sys_len`) so user shadowing of builtins cannot corrupt the VM.
 - **Level 4 Infrastructure**: deterministic per-name 256-byte ISA permutation implemented end-to-end (serializer substitution + runtime inverse dispatch), currently gated OFF pending unique per-code-object salts; at present `--vm-level 4` executes identically to level 3.
+
+### 4.7 TVM Correctness Wave (2026-08, VM upgrade plan Phase 0/1 partial)
+Fixes landed (all verified by test_vm_oracle_semantic 31/31 + test_vm_full_coverage 156/156):
+- `visit_AsyncFunctionDef` never finalized/stored its code object -> UnboundLocalError on EVERY async def under `--vm-obf`. Now mirrors visit_FunctionDef (kwonly-default preamble included).
+- Positional-only params (`/`) concatenated into signatures everywhere (FunctionDef/AsyncFunctionDef/Lambda); binding order fixed. NOTE: `/` keyword-rejection is NOT yet enforced at runtime.
+- `emit()` raises typed `TVMEmitError` on args outside 16-bit range (was silent truncation corrupting jumps).
+- `_vm_obfuscate` parse failure no longer silently returns plaintext: records `6.5_vm_parse_failed` stage error (respected by `--strict`) + loud warning.
+- Known deferred (documented honestly): TVM crypto-envelope v4 (password-derived packet keys, tag cascade, TVM1 header, meta-packet ISA hiding) was prototyped but rolled back pending a clean re-land; current envelope remains v3 embedded-seed = tamper-resistance only. Arity/missing-arg native TypeErrors, closure cell boxing, except* lowering, fromlist imports: tracked for next wave.
 
 ### 4.6 Research Hardening Wave (2026-08, sourced from research_repos analysis)
 Attribution policy: techniques are re-implemented independently; source repos credited inline as `Source:` comments. No GPL/AGPL/no-license code was copied (see license matrix in the research report): MIT/Apache sources are concept-level only unless noted.

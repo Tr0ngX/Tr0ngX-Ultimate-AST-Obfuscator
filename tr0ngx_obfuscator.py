@@ -5699,6 +5699,10 @@ except Exception:
 # Loops, Closures, and Slices are fully virtualized.
 # ═══════════════════════════════════════════════════════════════
 
+class TVMEmitError(Exception):
+    """Typed error for TVM compiler emission violations (16-bit arg range etc.)."""
+
+
 class _TVMOpcodes:
     # Stack & Data
     LOAD_CONST       = 1
@@ -5710,6 +5714,10 @@ class _TVMOpcodes:
     POP_TOP          = 7
     ROT_TWO          = 8
     ROT_THREE        = 9
+
+    # Exception block management (TVM 4.0): explicit handler-pop so
+    # break/continue/return leaving a try frame cannot strand stale handlers.
+    POP_EXC_HANDLER  = 250
 
     # Arithmetic & Bitwise
     BINARY_ADD       = 10
@@ -5850,6 +5858,10 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.labels[label_id] = len(self.code_obj.instructions)
 
     def emit(self, op: int, arg: int = 0):
+        # FIX (TVM P0): the 3-byte serializer silently truncated args > 0xFFFF,
+        # corrupting jump targets / pool indices in large functions.
+        if not isinstance(arg, int) or arg < 0 or arg > 0xFFFF:
+            raise TVMEmitError(f"opcode {op}: argument out of 16-bit range: {arg!r}")
         self.code_obj.instructions.append((op, arg))
 
     def emit_jump(self, op: int, target_label_id: int):
@@ -6451,7 +6463,9 @@ class _TVMASTCompiler(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         is_gen = self._contains_yield_in_scope(node.body)
-        arg_names = [a.arg for a in node.args.args]
+        # FIX (TVM GAP-25): positional-only params were silently dropped from the
+        # signature, misrouting positional binding and voiding the '/' constraint.
+        arg_names = [a.arg for a in getattr(node.args, 'posonlyargs', [])] + [a.arg for a in node.args.args]
         kwonly_names = [a.arg for a in node.args.kwonlyargs] if hasattr(node.args, 'kwonlyargs') else []
         vararg_name = node.args.vararg.arg if node.args.vararg else None
         kwarg_name = node.args.kwarg.arg if node.args.kwarg else None
@@ -6508,7 +6522,10 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self._store_target(ast.Name(id=node.name, ctx=ast.Store()))
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
-        arg_names = [a.arg for a in node.args.args]
+        # FIX (TVM P0): this visitor previously never finalized the sub compiler
+        # nor stored the code object into constants -> UnboundLocalError on `idx`
+        # for EVERY async def compiled under --vm-obf. Mirrors visit_FunctionDef.
+        arg_names = [a.arg for a in getattr(node.args, 'posonlyargs', [])] + [a.arg for a in node.args.args]
         kwonly_names = [a.arg for a in node.args.kwonlyargs] if hasattr(node.args, 'kwonlyargs') else []
         vararg_name = node.args.vararg.arg if node.args.vararg else None
         kwarg_name = node.args.kwarg.arg if node.args.kwarg else None
@@ -6530,18 +6547,25 @@ class _TVMASTCompiler(ast.NodeVisitor):
             self.emit(_TVMOpcodes.BUILD_TUPLE, 2)
             self.emit(_TVMOpcodes.STORE_FAST, dfl_slot)
 
+        if hasattr(node.args, 'kw_defaults') and node.args.kw_defaults:
+            for arg_node, def_node in zip(node.args.kwonlyargs, node.args.kw_defaults):
+                if def_node is not None:
+                    arg_idx = sub_compiler.code_obj.get_local_idx(arg_node.arg)
+                    sub_compiler.emit(_TVMOpcodes.LOAD_FAST, arg_idx)
+                    sub_compiler.emit(_TVMOpcodes.LOAD_GLOBAL, sub_compiler.code_obj.get_name_idx('_NO_ARG'))
+                    sub_compiler.emit(_TVMOpcodes.COMPARE_OP, 8)
+                    lbl_has_val_a = sub_compiler.new_label()
+                    sub_compiler.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_has_val_a)
+                    sub_compiler.visit(def_node)
+                    sub_compiler.emit(_TVMOpcodes.STORE_FAST, arg_idx)
+                    sub_compiler.mark_label(lbl_has_val_a)
+
         for stmt in node.body:
             sub_compiler.visit(stmt)
         sub_code = sub_compiler.finalize()
 
-        is_agen = is_agen_pre
-        if is_agen:
-            sub_compiler.is_generator = True
-            sub_compiler.is_async = True
-            mk_flags = 1 | 2  # async + generator
-        else:
-            mk_flags = 1      # async
-
+        idx = self.code_obj.get_const_idx(sub_code)
+        mk_flags = (1 | 2) if is_agen_pre else 1
         if node.args.defaults:
             self.emit(_TVMOpcodes.LOAD_FAST, dfl_slot)
         self.emit(_TVMOpcodes.LOAD_CONST, idx)
@@ -6555,7 +6579,8 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self._store_target(ast.Name(id=node.name, ctx=ast.Store()))
 
     def visit_Lambda(self, node: ast.Lambda):
-        arg_names = [a.arg for a in node.args.args]
+        # FIX (TVM GAP-25): positional-only params included.
+        arg_names = [a.arg for a in getattr(node.args, 'posonlyargs', [])] + [a.arg for a in node.args.args]
         kwonly_names = [a.arg for a in node.args.kwonlyargs] if hasattr(node.args, 'kwonlyargs') else []
         vararg_name = node.args.vararg.arg if node.args.vararg else None
         kwarg_name = node.args.kwarg.arg if node.args.kwarg else None
@@ -7462,6 +7487,15 @@ class _TVMASTCompiler(ast.NodeVisitor):
                 op, _ = self.code_obj.instructions[fix_idx]
                 self.code_obj.instructions[fix_idx] = (op, target_ip)
         return self.code_obj
+
+
+_TVM_MAGIC = b"TVM1"
+_TVM_VERSION = 4
+
+# Tamper response modes for the emitted runtime.
+#   'exit'   - process terminates on any integrity failure (default)
+#   'poison' - keys are silently degraded and execution continues inert
+_TVM_TAMPER_MODES = ("exit", "poison")
 
 
 def _tvm_derive_runtime_keys(seed_bytes: bytes, salt_bytes: bytes = b'') -> Tuple[bytes, bytes]:
@@ -8812,9 +8846,9 @@ def _vm_obfuscate(code_str: str, seed=None, vm_level: int = 1) -> str:
 
 
 
-# ═══════════════════════════════════════════════════════════════
+# ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 # KRAMER ENGINE - KYRIE ELEISON & OBFUSCATED CLASS WRAPPER
-# ═══════════════════════════════════════════════════════════════
+# ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 
 _kramer_alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
 Kyrie_ROT_FWD = str.maketrans(_kramer_alphabet, _kramer_alphabet[1:] + _kramer_alphabet[:1])
