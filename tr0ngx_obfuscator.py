@@ -71,6 +71,8 @@ class _EngineState:
     lzma_layer = False
     env_key_lock = False
     verify_mode = False
+    vm_annotations = False
+    anti_intercept = False
     use_anti_dump = False
     use_vm_obf = False
     custom_seed = None
@@ -5857,6 +5859,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
         # exc_handlers stack retains a stale entry that hijacks a later,
         # unrelated exception (TVM GAP-01/03).
         self.exc_frame_depth = 0
+        self.vm_annotations = False
         self._fin_stack: List[List[ast.stmt]] = []
         self.loop_depth = 0
         self.explicit_globals: Set[str] = set()
@@ -6359,6 +6362,19 @@ class _TVMASTCompiler(ast.NodeVisitor):
         if node.value:
             self.visit(node.value)
             self._store_target(node.target)
+        elif isinstance(node.target, ast.Name):
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
+            self._store_target(node.target)
+
+        # Annotation storage (--vm-annotations y): emit __annotations__[name] = type
+        if self.vm_annotations and node.annotation:
+            self.visit(node.annotation)
+            self.emit(_TVMOpcodes.LOAD_GLOBAL,
+                      self.code_obj.get_name_idx('__annotations__'))
+            tgt_name = getattr(node.target, 'id',
+                               getattr(node.target, 'attr', ''))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(tgt_name))
+            self.emit(_TVMOpcodes.STORE_SUBSCR)
 
     def visit_AugAssign(self, node: ast.AugAssign):
         op_map = {
@@ -9042,7 +9058,12 @@ def _vm_obfuscate(code_str: str, seed=None, vm_level: int = 1) -> str:
         'fl_prefix': '__' + rd()[:14],
     })
     compiler = _TVMASTCompiler(name='<module>', is_function=False, vm_level=vm_level, rng=rng)
+    compiler.vm_annotations = _EngineState.vm_annotations
     compiler._scan_scope(tree.body)
+    if compiler.vm_annotations:
+        compiler.emit(_TVMOpcodes.BUILD_MAP, 0)
+        compiler.emit(_TVMOpcodes.STORE_GLOBAL,
+                      compiler.code_obj.get_name_idx('__annotations__'))
     for stmt in tree.body:
         compiler.visit(stmt)
     root_code = compiler.finalize()
