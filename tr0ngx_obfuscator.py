@@ -5814,6 +5814,10 @@ class _TVMCodeObject:
         if kwarg_name and kwarg_name not in locs:
             locs.append(kwarg_name)
         self.local_names: List[str] = locs
+        # Kwonly params that carry defaults (late-bound via body preamble);
+        # serialized so the runtime binder can exempt them from the strict
+        # missing-argument check (TVM 4.0 GAP-27 refinement).
+        self.kwonly_default_names: Tuple[str, ...] = ()
 
     def get_const_idx(self, val: Any) -> int:
         for idx, c in enumerate(self.constants):
@@ -5845,6 +5849,11 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.label_fixups: Dict[int, List[int]] = {}
         self.next_label_id = 0
         self.loop_stack: List[Tuple[int, int]] = []
+        # Depth of enclosing SETUP_FINALLY frames (try / with). break/continue
+        # crossing these boundaries MUST pop the handler first or the frame's
+        # exc_handlers stack retains a stale entry that hijacks a later,
+        # unrelated exception (TVM GAP-01/03).
+        self.exc_frame_depth = 0
         self.loop_depth = 0
         self.explicit_globals: Set[str] = set()
         self.explicit_nonlocals: Set[str] = set()
@@ -6022,7 +6031,10 @@ class _TVMASTCompiler(ast.NodeVisitor):
                 self.emit(_TVMOpcodes.POP_TOP)
 
     def visit_TryStar(self, node: ast.AST):
-        self.visit_Try(node)
+        # FIX (GAP-38): except* was silently compiled as a plain try, destroying
+        # PEP 654 semantics (ExceptionGroup never split). Fail LOUD instead of
+        # silent-wrong-output; stage wrapper logs it and --strict aborts.
+        raise TVMEmitError("except* (PEP 654) is not supported by TVM virtualization")
 
     def visit_BoolOp(self, node: ast.BoolOp):
         # Short-circuiting boolean operations (And / Or)
@@ -6471,6 +6483,12 @@ class _TVMASTCompiler(ast.NodeVisitor):
         kwarg_name = node.args.kwarg.arg if node.args.kwarg else None
         sub_compiler = _TVMASTCompiler(name=node.name, arg_names=arg_names, kwonly_names=kwonly_names, kwarg_name=kwarg_name, vararg_name=vararg_name, is_function=True, vm_level=self.vm_level, rng=self.rng)
         sub_compiler._scan_scope(node.body)
+        # Kwonly params WITH defaults: sentinel replaced by body preamble at
+        # call time; the runtime binder must not treat them as missing.
+        sub_compiler.code_obj.kwonly_default_names = tuple(
+            a.arg for a, d in zip(getattr(node.args, 'kwonlyargs', []), getattr(node.args, 'kw_defaults', []))
+            if d is not None
+        )
 
         # Handle default arguments
         # Positional defaults are evaluated ONCE at function-creation time
@@ -6560,6 +6578,13 @@ class _TVMASTCompiler(ast.NodeVisitor):
                     sub_compiler.emit(_TVMOpcodes.STORE_FAST, arg_idx)
                     sub_compiler.mark_label(lbl_has_val_a)
 
+        # Record which kwonly params carry defaults: their sentinel is replaced
+        # by the body preamble (late-bound channel), so the binder's strict
+        # missing-arg check must skip them (TVM 4.0 GAP-27 refinement).
+        _fn_code.kwonly_default_names = tuple(
+            a.arg for a, d in zip(getattr(node.args, 'kwonlyargs', []), getattr(node.args, 'kw_defaults', []))
+            if d is not None
+        )
         for stmt in node.body:
             sub_compiler.visit(stmt)
         sub_code = sub_compiler.finalize()
@@ -7013,6 +7038,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
         lbl_suppressed = self.new_label()
 
         self.emit_jump(_TVMOpcodes.SETUP_FINALLY, lbl_handler)
+        self.exc_frame_depth += 1
         for stmt in node.body:
             self.visit(stmt)
         self.emit(_TVMOpcodes.POP_BLOCK)
@@ -7088,9 +7114,11 @@ class _TVMASTCompiler(ast.NodeVisitor):
         lbl_suppressed = self.new_label()
 
         self.emit_jump(_TVMOpcodes.SETUP_FINALLY, lbl_handler)
+        self.exc_frame_depth += 1
         for stmt in node.body:
             self.visit(stmt)
         self.emit(_TVMOpcodes.POP_BLOCK)
+        self.exc_frame_depth -= 1
 
         # Normal exit: __aexit__(None, None, None)
         self.emit(_TVMOpcodes.LOAD_FAST, ctx_slot)
@@ -7151,15 +7179,18 @@ class _TVMASTCompiler(ast.NodeVisitor):
             lbl_fin_end = self.new_label()
             fin_exc_slot = self.code_obj.get_local_idx(f'_$fin_exc_{self.new_label()}')
             self.emit_jump(_TVMOpcodes.SETUP_FINALLY, lbl_fin_handler)
+            self.exc_frame_depth += 1
 
         if has_handlers:
             lbl_exc_dispatcher = self.new_label()
             lbl_try_end = self.new_label()
 
             self.emit_jump(_TVMOpcodes.SETUP_FINALLY, lbl_exc_dispatcher)
+            self.exc_frame_depth += 1
             for stmt in node.body:
                 self.visit(stmt)
             self.emit(_TVMOpcodes.POP_BLOCK)
+            self.exc_frame_depth -= 1
 
             # Try body succeeded with no exception -> execute orelse
             if node.orelse:
@@ -7198,6 +7229,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
 
         if has_finally:
             self.emit(_TVMOpcodes.POP_BLOCK)
+            self.exc_frame_depth -= 1
             for stmt in node.finalbody:
                 self.visit(stmt)
             self.emit_jump(_TVMOpcodes.JUMP, lbl_fin_end)
@@ -7214,11 +7246,15 @@ class _TVMASTCompiler(ast.NodeVisitor):
     def visit_Break(self, node: ast.Break):
         if self.loop_stack:
             _, lbl_break = self.loop_stack[-1]
+            for _ in range(self.exc_frame_depth):
+                self.emit(_TVMOpcodes.POP_BLOCK)
             self.emit_jump(_TVMOpcodes.JUMP, lbl_break)
 
     def visit_Continue(self, node: ast.Continue):
         if self.loop_stack:
             lbl_head, _ = self.loop_stack[-1]
+            for _ in range(self.exc_frame_depth):
+                self.emit(_TVMOpcodes.POP_BLOCK)
             self.emit_jump(_TVMOpcodes.JUMP, lbl_head)
 
     @staticmethod
@@ -7294,11 +7330,22 @@ class _TVMASTCompiler(ast.NodeVisitor):
             self.visit(pat.cls)
             self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
             self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fail)
+            # FIX (GAP-35): missing kwd attr must FAIL the pattern (CPython),
+            # not raise AttributeError through user code. getattr-3-arg +
+            # _NO_ARG sentinel comparison.
+            _no_arg_gi = self.code_obj.get_name_idx('_NO_ARG')
             for attr_name, kp_node in zip(pat.kwd_attrs, pat.kwd_patterns):
+                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('getattr'))
                 self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
-                self.emit(_TVMOpcodes.GET_ATTR, self.code_obj.get_name_idx(attr_name))
+                self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(attr_name))
+                self.emit(_TVMOpcodes.LOAD_GLOBAL, _no_arg_gi)
+                self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
                 tmp_slot = self.code_obj.get_local_idx(f'_$mk_{self.new_label()}')
                 self.emit(_TVMOpcodes.STORE_FAST, tmp_slot)
+                self.emit(_TVMOpcodes.LOAD_FAST, tmp_slot)
+                self.emit(_TVMOpcodes.LOAD_GLOBAL, _no_arg_gi)
+                self.emit(_TVMOpcodes.COMPARE_OP, 9)  # is not
+                self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fail)
                 self._match_pattern(kp_node, tmp_slot, lbl_fail)
             if pat.patterns:
                 if len(pat.patterns) == 1 and isinstance(pat.patterns[0], ast.MatchAs):
@@ -7307,24 +7354,28 @@ class _TVMASTCompiler(ast.NodeVisitor):
                         self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
                         self._store_target(self._capture_target(cap.name))
                 else:
+                    _ma_gi = self.code_obj.get_name_idx('__tvm_margs')
                     for p_idx, pp_node in enumerate(pat.patterns):
-                        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('getattr'))
+                        # FIX (GAP-35b): positional index beyond __match_args__
+                        # must fail the pattern, not raise IndexError.
+                        self.emit(_TVMOpcodes.LOAD_GLOBAL, _ma_gi)
                         self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
-                        self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('getattr'))
                         self.visit(pat.cls)
-                        self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx('__match_args__'))
-                        self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
                         self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(p_idx))
-                        self.emit(_TVMOpcodes.GET_ITEM)
-                        self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
+                        self.emit(_TVMOpcodes.CALL_FUNCTION, 3)
                         tmp_slot = self.code_obj.get_local_idx(f'_$mk_{self.new_label()}')
                         self.emit(_TVMOpcodes.STORE_FAST, tmp_slot)
+                        self.emit(_TVMOpcodes.LOAD_FAST, tmp_slot)
+                        self.emit(_TVMOpcodes.LOAD_GLOBAL, _no_arg_gi)
+                        self.emit(_TVMOpcodes.COMPARE_OP, 9)  # is not
+                        self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fail)
                         self._match_pattern(pp_node, tmp_slot, lbl_fail)
         elif isinstance(pat, ast.MatchMapping):
-            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('isinstance'))
+            # FIX (GAP-34): match ANY collections.abc.Mapping (os.environ,
+            # defaultdict, MappingProxyType...), not only exact dict.
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__tvm_is_map'))
             self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
-            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('dict'))
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
             self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fail)
             for key_node, pat_node in zip(pat.keys, pat.patterns):
                 self.visit(key_node)
@@ -7347,12 +7398,13 @@ class _TVMASTCompiler(ast.NodeVisitor):
                 self._store_target(self._capture_target(pat.rest))
         elif isinstance(pat, ast.MatchSequence):
             has_star = any(isinstance(p, ast.MatchStar) for p in pat.patterns)
-            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('isinstance'))
+            # FIX (GAP-33): CPython sequence patterns match ANY object with
+            # __len__/__getitem__ (range, deque, array, numpy 1-D...) except
+            # str/bytes/bytearray. Use a runtime protocol helper instead of an
+            # exact (tuple, list) isinstance that silently skipped custom containers.
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__tvm_is_seq'))
             self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
-            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('tuple'))
-            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('list'))
-            self.emit(_TVMOpcodes.BUILD_TUPLE, 2)
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
             self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fail)
             self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('len'))
             self.emit(_TVMOpcodes.LOAD_FAST, subj_slot)
@@ -7383,12 +7435,39 @@ class _TVMASTCompiler(ast.NodeVisitor):
                     self.emit(_TVMOpcodes.STORE_FAST, tmp_slot)
                     self._match_pattern(p_node, tmp_slot, lbl_fail)
         elif isinstance(pat, ast.MatchOr):
+            # FIX (GAP-36): a partially-matched alternative must NOT leave its
+            # captures installed when it fails. Snapshot every capture slot the
+            # alternatives can write, restore on failure.
+            cap_slots = []
+            def _collect_caps(p):
+                for ch in ast.walk(p):
+                    if isinstance(ch, ast.MatchAs) and ch.name:
+                        cap_slots.append(self._capture_target(ch.name).id)
+                    elif isinstance(ch, ast.MatchStar) and ch.name:
+                        cap_slots.append(self._capture_target(ch.name).id)
+                    elif isinstance(ch, ast.MatchMapping) and ch.rest:
+                        cap_slots.append(self._capture_target(ch.rest).id)
+            for alt in pat.patterns:
+                _collect_caps(alt)
+            uniq_slots = list(dict.fromkeys(cap_slots))
+            snap_slot = self.code_obj.get_local_idx(f'_$orsnap_{self.new_label()}')
+            # snapshot current values of every possible capture binding
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__tvm_snap'))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(tuple(uniq_slots)))
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 1)
+            self.emit(_TVMOpcodes.STORE_FAST, snap_slot)
             lbl_ok = self.new_label()
             for alt in pat.patterns:
                 lbl_alt_fail = self.new_label()
                 self._match_pattern(alt, subj_slot, lbl_alt_fail)
                 self.emit_jump(_TVMOpcodes.JUMP, lbl_ok)
                 self.mark_label(lbl_alt_fail)
+            # all failed -> rollback captures then fail upward
+            self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx('__tvm_restore'))
+            self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(tuple(uniq_slots)))
+            self.emit(_TVMOpcodes.LOAD_FAST, snap_slot)
+            self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
+            self.emit(_TVMOpcodes.POP_TOP)
             self.emit_jump(_TVMOpcodes.JUMP, lbl_fail)
             self.mark_label(lbl_ok)
         # Unknown/unsupported pattern kinds: emit no constraint (always matches).
@@ -7426,10 +7505,16 @@ class _TVMASTCompiler(ast.NodeVisitor):
             idx = self.code_obj.get_name_idx(alias.name)
             self.emit(_TVMOpcodes.IMPORT_NAME, idx)
             if alias.asname:
-                # `import a.b as c` must bind c = a.b (the submodule), not a
+                # `import a.b as c` must bind c = a.b (the submodule), not a.
+                # FIX (GAP-30): route through the fromlist sentinel so the
+                # SUBMODULE is returned directly - the old IMPORT_NAME(root)
+                # + IMPORT_FROM(sub) + POP_TOP sequence popped the WRONG item
+                # and bound the root package to the alias.
                 if '.' in alias.name:
-                    last_idx = self.code_obj.get_name_idx(alias.name.split('.')[-1])
-                    self.emit(_TVMOpcodes.IMPORT_FROM, last_idx)
+                    last_part = alias.name.split('.')[-1]
+                    fl_sentinel = '__tvmfl__' + alias.name + '\x00' + last_part
+                    idx = self.code_obj.get_name_idx(fl_sentinel)
+                    self.emit(_TVMOpcodes.IMPORT_NAME, idx)
                 target_name = alias.asname
             else:
                 # plain `import a.b` binds the root package 'a'
@@ -7438,7 +7523,20 @@ class _TVMASTCompiler(ast.NodeVisitor):
             self.emit(_TVMOpcodes.STORE_GLOBAL, store_idx)
 
     def visit_ImportFrom(self, node: ast.ImportFrom):
-        mod_idx = self.code_obj.get_name_idx(node.module or '')
+        # FIX (GAP-31): star + relative imports are unsupported by the VM
+        # runtime; previously they crashed at RUNTIME with opaque errors.
+        # Fail LOUD at compile time instead.
+        if any(alias.name == '*' for alias in node.names):
+            raise TVMEmitError("from-module import * is not supported by TVM virtualization")
+        if node.level and node.level > 0:
+            raise TVMEmitError("relative imports are not supported by TVM virtualization")
+        # FIX (GAP-29): `from pkg.sub import name` previously called
+        # __import__('pkg.sub') WITHOUT fromlist -> returned the ROOT package
+        # -> getattr failed. The handler recognizes this sentinel name form
+        # and re-imports with fromlist so the SUBMODULE is returned.
+        names_csv = ','.join(a.name for a in node.names)
+        sentinel = '__tvmfl__' + (node.module or '') + '\x00' + names_csv
+        mod_idx = self.code_obj.get_name_idx(sentinel)
         self.emit(_TVMOpcodes.IMPORT_NAME, mod_idx)
         for alias in node.names:
             attr_idx = self.code_obj.get_name_idx(alias.name)
@@ -7561,7 +7659,8 @@ def _serialize_tvm_code_object(code: _TVMCodeObject, isa_map: Dict[int, int], k_
         code.local_names,
         bytes(bytecode_ba),
         tuple(serialized_consts),
-        tuple(code.names)
+        tuple(code.names),
+        tuple(getattr(code, 'kwonly_default_names', ()))
     ))
 
     import zlib as _zlib_mod
@@ -7861,6 +7960,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
             self.code = data[6]
             self.constants = list(data[7])
             self.names = data[8]
+            self.kwonly_default_names = tuple(data[9]) if _sys_len(data) > 9 else ()
             self.defining_class = None
             self._k_enc = parent_k_enc
 
@@ -8327,7 +8427,15 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         _f.stack.append(_new_class)
 
     def _h_imp_n(_f, _a):
-        _f.stack.append(__import__(_f.code_obj.names[_a]))
+        _n = _f.code_obj.names[_a]
+        if _n.startswith('__tvmfl__'):
+            # fromlist sentinel emitted by visit_ImportFrom:
+            # '__tvmfl__' + module + SEP + csv(names) -> return SUBMODULE.
+            _rest = _n[len('__tvmfl__'):]
+            _mod, _, _csv = _rest.partition(chr(0))
+            _f.stack.append(__import__(_mod, fromlist=tuple(_csv.split(','))))
+        else:
+            _f.stack.append(__import__(_n))
 
     def _h_imp_f(_f, _a):
         _m = _f.stack[-1]
@@ -8433,13 +8541,20 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
                 _loc[_aname] = _rem_kwargs.pop(_aname)
         if _fn_code.vararg_name:
             _loc[_fn_code.vararg_name] = tuple(_passed_args[_pos_count:])
+        elif _sys_len(_passed_args) > _pos_count and not _fn_code.name.startswith('<'):
+            # FIX (GAP-26): CPython raises on surplus positionals without *args;
+            # the old binder silently discarded them. Synthetic comps exempt.
+            raise TypeError(f"{{_fn_code.name}}() takes {{_pos_count}} positional arguments but {{_sys_len(_passed_args)}} were given")
         for _kname in getattr(_fn_code, 'kwonly_names', []):
             if _kname in _rem_kwargs:
                 _loc[_kname] = _rem_kwargs.pop(_kname)
         if _fn_code.kwarg_name:
             _loc[_fn_code.kwarg_name] = _rem_kwargs
-        else:
-            _loc.update(_rem_kwargs)
+        elif _rem_kwargs and not _fn_code.name.startswith('<'):
+            # FIX (GAP-26b): keyword-typo masking - reject unknown kwargs.
+            # Synthetic functions (comprehensions <listcomp> etc.) are exempt:
+            # their compiler emits synthetic params bound by the comp loop.
+            raise TypeError(f"{{_fn_code.name}}() got an unexpected keyword argument '{{next(iter(_rem_kwargs))}}'")
         _f = {v['frame_cls']}(_fn_code, _loc, _g_env)
         _f.captured_env = _captured_env or {{}}
         _f.defining_class = _def_cls
@@ -8447,6 +8562,14 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
             for _dn, _dv in _defaults.items():
                 if _loc.get(_dn) is {v['no_arg_sig']}:
                     _loc[_dn] = _dv
+        for _an in list(_fn_code.arg_names) + list(getattr(_fn_code, 'kwonly_names', [])):
+            if _loc.get(_an) is {v['no_arg_sig']} and not _fn_code.name.startswith('<') and _an not in getattr(_fn_code, 'kwonly_default_names', ()):
+                # FIX (GAP-27): native-shaped missing-argument error instead of
+                # leaking the internal sentinel into user code. Runs AFTER
+                # default application; ONLY real parameters checked. Kwonly
+                # params WITH defaults are exempt: their default is applied by
+                # the function-body preamble at call time (late-bound channel).
+                raise TypeError(f"{{_fn_code.name}}() missing required argument '{{_an}}'")
         {v['attach_isa_fn']}(_f)
         return _f
 
@@ -8666,6 +8789,45 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     _g_env['__vm_anext__'] = {v['vm_anext_fn']}
     _g_env['__vm_match_rest__'] = (lambda _subj, _excl: {{k: v for k, v in _subj.items() if k not in _excl}})
+    # Match-case protocol helpers (TVM 4.0 GAP-33/35):
+    def __tvm_is_seq__(_o):
+        if isinstance(_o, (str, bytes, bytearray)):
+            return False
+        # Exclude mappings (dict has __len__/__getitem__ but is NOT a sequence
+        # under PEP 634) - mirrors collections.abc.Sequence semantics closely.
+        if hasattr(_o, 'keys'):
+            return False
+        return hasattr(_o, '__len__') and hasattr(_o, '__getitem__')
+    def __tvm_is_map__(_o):
+        return hasattr(_o, 'keys') and hasattr(_o, '__getitem__')
+    def __tvm_margs__(_subj, _cls, _idx):
+        try:
+            _ma = getattr(_cls, '__match_args__', None)
+        except Exception:
+            return {v['no_arg_sig']}
+        if _ma is None or _idx >= _sys_len(tuple(_ma)):
+            return {v['no_arg_sig']}
+        return getattr(_subj, tuple(_ma)[_idx], {v['no_arg_sig']})
+    _g_env['__tvm_is_seq'] = __tvm_is_seq__
+    _g_env['__tvm_is_map'] = __tvm_is_map__
+    _g_env['__tvm_margs'] = __tvm_margs__
+
+    def __tvm_snap__(_names):
+        # Captures may be frame LOCALS (function scope) or module globals;
+        # resolve against the innermost active frame first.
+        _sent = _g_env.get('_NO_ARG')
+        _src = {v['active_frames']}[-1].locals if {v['active_frames']} else _g_env
+        return {{_n: _src.get(_n, _sent) for _n in _names}}
+    def __tvm_restore__(_names, _snap):
+        _tgt = {v['active_frames']}[-1].locals if {v['active_frames']} else _g_env
+        for _n in _names:
+            _v = _snap.get(_n)
+            if _v is _g_env.get('_NO_ARG'):
+                _tgt.pop(_n, None)
+            else:
+                _tgt[_n] = _v
+    _g_env['__tvm_snap'] = __tvm_snap__
+    _g_env['__tvm_restore'] = __tvm_restore__
 
     def __vm_bind_defaults__(_co, _pair):
         return _co
