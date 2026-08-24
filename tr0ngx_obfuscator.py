@@ -5821,7 +5821,6 @@ class _TVMCodeObject:
         # serialized so the runtime binder can exempt them from the strict
         # missing-argument check (TVM 4.0 GAP-27 refinement).
         self.kwonly_default_names: Tuple[str, ...] = ()
-        self.posonly_count: int = 0
 
     def get_const_idx(self, val: Any) -> int:
         for idx, c in enumerate(self.constants):
@@ -5858,8 +5857,8 @@ class _TVMASTCompiler(ast.NodeVisitor):
         # exc_handlers stack retains a stale entry that hijacks a later,
         # unrelated exception (TVM GAP-01/03).
         self.exc_frame_depth = 0
-        self.loop_depth = 0
         self._fin_stack: List[List[ast.stmt]] = []
+        self.loop_depth = 0
         self.explicit_globals: Set[str] = set()
         self.explicit_nonlocals: Set[str] = set()
 
@@ -6035,112 +6034,11 @@ class _TVMASTCompiler(ast.NodeVisitor):
             else:
                 self.emit(_TVMOpcodes.POP_TOP)
 
-    def visit_TryStar(self, node):
-        """TVM 5.0: real except* via ExceptionGroup.split(). Uses temp slots
-        instead of stack juggling for reliable operand management."""
-        has_finally = bool(node.finalbody)
-        has_handlers = bool(node.handlers)
-
-        # Compile-time prohibitions (CPython parity)
-        for h in node.handlers:
-            for stmt in ast.walk(h):
-                if isinstance(stmt, (ast.Return, ast.Break, ast.Continue)):
-                    raise TVMEmitError(
-                        f"'{type(stmt).__name__}' cannot appear in an except* block")
-
-        exc_slot = self.code_obj.get_local_idx(f'_$excg_{self.new_label()}')
-        rest_slot = self.code_obj.get_local_idx(f'_$excg_rest_{self.new_label()}')
-        match_slot = self.code_obj.get_local_idx(f'_$excg_match_{self.new_label()}')
-        split_helper = self.code_obj.get_name_idx('__tvm_excg_split__')
-        no_arg_gi = self.code_obj.get_name_idx(_TVM_TOKENS['no_arg'])
-
-        lbl_fin_handler = None
-        fin_exc_slot = None
-        if has_finally:
-            lbl_fin_handler = self.new_label()
-            fin_exc_slot = self.code_obj.get_local_idx(f'_$fin_exc_{self.new_label()}')
-            self.emit_jump(_TVMOpcodes.SETUP_FINALLY, lbl_fin_handler)
-            self.exc_frame_depth += 1
-
-        if has_handlers:
-            lbl_after_handlers = self.new_label()
-            self.emit_jump(_TVMOpcodes.SETUP_FINALLY, lbl_after_handlers)
-            self.exc_frame_depth += 1
-            for stmt in node.body:
-                self.visit(stmt)
-            self.emit(_TVMOpcodes.POP_BLOCK)
-            self.exc_frame_depth -= 1
-
-            lbl_end_all = self.new_label()
-            self.emit_jump(_TVMOpcodes.JUMP, lbl_end_all)
-
-            # Handler dispatch: exception on stack
-            self.mark_label(lbl_after_handlers)
-            self.emit(_TVMOpcodes.STORE_FAST, exc_slot)
-
-            cur_exc = exc_slot  # current exception being split
-            for h_idx, handler in enumerate(node.handlers):
-                lbl_next_h = self.new_label()
-
-                if handler.type:
-                    # CALL __tvm_excg_split__(cur_exc, type) -> (matched, rest)
-                    self.emit(_TVMOpcodes.LOAD_GLOBAL, split_helper)
-                    self.emit(_TVMOpcodes.LOAD_FAST, cur_exc)
-                    self.visit(handler.type)
-                    self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
-                    self.emit(_TVMOpcodes.UNPACK_SEQUENCE, 2)
-                    self.emit(_TVMOpcodes.STORE_FAST, match_slot)
-                    self.emit(_TVMOpcodes.STORE_FAST, rest_slot)
-                    # None = no match -> skip to next handler
-                    self.emit(_TVMOpcodes.LOAD_FAST, match_slot)
-                    self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_next_h)
-
-                if handler.name:
-                    if handler.type:
-                        self.emit(_TVMOpcodes.LOAD_FAST, match_slot)
-                        self._store_target(ast.Name(id=handler.name, ctx=ast.Store()))
-                    else:
-                        self.emit(_TVMOpcodes.LOAD_FAST, cur_exc)
-                        self._store_target(ast.Name(id=handler.name, ctx=ast.Store()))
-
-                for stmt in handler.body:
-                    self.visit(stmt)
-
-                if handler.type:
-                    self.emit(_TVMOpcodes.LOAD_FAST, rest_slot)
-                    self.emit(_TVMOpcodes.STORE_FAST, cur_exc)
-
-                self.mark_label(lbl_next_h)
-
-            # Re-raise remaining unmatched exceptions only if non-None
-            # (cur_exc tracks the shrinking remainder; None = fully handled)
-            lbl_fully_handled = self.new_label()
-            self.emit(_TVMOpcodes.LOAD_FAST, cur_exc)
-            self.emit_jump(_TVMOpcodes.JUMP_IF_FALSE, lbl_fully_handled)
-            self.emit(_TVMOpcodes.RAISE_VARARGS)
-            self.mark_label(lbl_fully_handled)
-
-        else:
-            for stmt in node.body:
-                self.visit(stmt)
-
-        if has_handlers:
-            self.mark_label(lbl_end_all)
-
-        if has_finally:
-            self.emit(_TVMOpcodes.POP_BLOCK)
-            self.exc_frame_depth -= 1
-            for stmt in node.finalbody:
-                self.visit(stmt)
-            lbl_fin_done = self.new_label()
-            self.emit_jump(_TVMOpcodes.JUMP, lbl_fin_done)
-            self.mark_label(lbl_fin_handler)
-            self.emit(_TVMOpcodes.STORE_FAST, fin_exc_slot)
-            for stmt in node.finalbody:
-                self.visit(stmt)
-            self.emit(_TVMOpcodes.LOAD_FAST, fin_exc_slot)
-            self.emit(_TVMOpcodes.RAISE_VARARGS)
-            self.mark_label(lbl_fin_done)
+    def visit_TryStar(self, node: ast.AST):
+        # FIX (GAP-38): except* was silently compiled as a plain try, destroying
+        # PEP 654 semantics (ExceptionGroup never split). Fail LOUD instead of
+        # silent-wrong-output; stage wrapper logs it and --strict aborts.
+        raise TVMEmitError("except* (PEP 654) is not supported by TVM virtualization")
 
     def visit_BoolOp(self, node: ast.BoolOp):
         # Short-circuiting boolean operations (And / Or)
@@ -6595,7 +6493,6 @@ class _TVMASTCompiler(ast.NodeVisitor):
             a.arg for a, d in zip(getattr(node.args, 'kwonlyargs', []), getattr(node.args, 'kw_defaults', []))
             if d is not None
         )
-        sub_compiler.code_obj.posonly_count = len(getattr(node.args, 'posonlyargs', []))
 
         # Handle default arguments
         # Positional defaults are evaluated ONCE at function-creation time
@@ -6657,11 +6554,6 @@ class _TVMASTCompiler(ast.NodeVisitor):
         sub_compiler = _TVMASTCompiler(name=node.name, arg_names=arg_names, kwonly_names=kwonly_names, kwarg_name=kwarg_name, vararg_name=vararg_name, is_function=True, vm_level=self.vm_level, rng=self.rng)
         sub_compiler._scan_scope(node.body)
         sub_compiler.is_async = True
-        sub_compiler.code_obj.kwonly_default_names = tuple(
-            a.arg for a, d in zip(getattr(node.args, 'kwonlyargs', []), getattr(node.args, 'kw_defaults', []))
-            if d is not None
-        )
-        sub_compiler.code_obj.posonly_count = len(getattr(node.args, 'posonlyargs', []))
         # Detect async-generator BEFORE compiling so visit_Yield emits suspends.
         is_agen_pre = self._contains_yield_in_scope(node.body)
         if is_agen_pre:
@@ -7343,7 +7235,7 @@ class _TVMASTCompiler(ast.NodeVisitor):
         if has_finally:
             self.emit(_TVMOpcodes.POP_BLOCK)
             self.exc_frame_depth -= 1
-            self._fin_stack.pop()
+            if self._fin_stack: self._fin_stack.pop()
             for stmt in node.finalbody:
                 self.visit(stmt)
             self.emit_jump(_TVMOpcodes.JUMP, lbl_fin_end)
@@ -7358,24 +7250,23 @@ class _TVMASTCompiler(ast.NodeVisitor):
             self.mark_label(lbl_fin_end)
 
     def visit_Break(self, node: ast.Break):
+        import copy as _cp2
+        for _fb in reversed(self._fin_stack):
+            for _fs in _fb:
+                self.visit(_cp2.deepcopy(_fs))
         if self.loop_stack:
             _, lbl_break = self.loop_stack[-1]
-            # Splice finally bodies for try-finally frames being exited
-            import copy as _copy_mod
-            for _fin_body in reversed(self._fin_stack):
-                for _fs in _fin_body:
-                    self.visit(_copy_mod.deepcopy(_fs))
             for _ in range(self.exc_frame_depth):
                 self.emit(_TVMOpcodes.POP_BLOCK)
             self.emit_jump(_TVMOpcodes.JUMP, lbl_break)
 
     def visit_Continue(self, node: ast.Continue):
+        import copy as _cp2
+        for _fb in reversed(self._fin_stack):
+            for _fs in _fb:
+                self.visit(_cp2.deepcopy(_fs))
         if self.loop_stack:
             lbl_head, _ = self.loop_stack[-1]
-            import copy as _copy_mod
-            for _fin_body in reversed(self._fin_stack):
-                for _fs in _fin_body:
-                    self.visit(_copy_mod.deepcopy(_fs))
             for _ in range(self.exc_frame_depth):
                 self.emit(_TVMOpcodes.POP_BLOCK)
             self.emit_jump(_TVMOpcodes.JUMP, lbl_head)
@@ -7618,19 +7509,16 @@ class _TVMASTCompiler(ast.NodeVisitor):
 
     def visit_Return(self, node: ast.Return):
         if self._fin_stack:
-            # GAP-02 fix: return inside try-finally must execute finalbody
-            # before actually returning. Store value → splice finallys (inner
-            # to outer) → load value → return.
             ret_slot = self.code_obj.get_local_idx(f'_$ret_val_{self.new_label()}')
             if node.value:
                 self.visit(node.value)
             else:
                 self.emit(_TVMOpcodes.LOAD_CONST, self.code_obj.get_const_idx(None))
             self.emit(_TVMOpcodes.STORE_FAST, ret_slot)
-            import copy as _copy_mod
-            for _fin_body in reversed(self._fin_stack):
-                for _fs in _fin_body:
-                    self.visit(_copy_mod.deepcopy(_fs))
+            import copy as _cp
+            for _fb in reversed(self._fin_stack):
+                for _fs in _fb:
+                    self.visit(_cp.deepcopy(_fs))
             self.emit(_TVMOpcodes.LOAD_FAST, ret_slot)
         else:
             if node.value:
@@ -7662,39 +7550,17 @@ class _TVMASTCompiler(ast.NodeVisitor):
             self.emit(_TVMOpcodes.STORE_GLOBAL, store_idx)
 
     def visit_ImportFrom(self, node: ast.ImportFrom):
-        # Star-import: `from X import *` via sentinel + runtime helper
+        # FIX (GAP-31): star + relative imports are unsupported by the VM
+        # runtime; previously they crashed at RUNTIME with opaque errors.
+        # Fail LOUD at compile time instead.
         if any(alias.name == '*' for alias in node.names):
-            star_sentinel = '__tvmstar__' + (node.module or '')
-            mod_idx = self.code_obj.get_name_idx(star_sentinel)
-            self.emit(_TVMOpcodes.IMPORT_NAME, mod_idx)
-            # Stack: [module]; call __tvm_star_load__(module, global_env)
-            helper_idx = self.code_obj.get_name_idx('__tvm_star_load__')
-            self.emit(_TVMOpcodes.LOAD_GLOBAL, helper_idx)
-            # Push global_env dict reference
-            genv_idx = self.code_obj.get_name_idx('_g_env')
-            self.emit(_TVMOpcodes.LOAD_GLOBAL, genv_idx)
-            self.emit(_TVMOpcodes.CALL_FUNCTION, 2)
-            self.emit(_TVMOpcodes.POP_TOP)  # discard return value
-            return
-
-        # Relative import: `from .pkg import x` via level-aware sentinel
+            raise TVMEmitError("from-module import * is not supported by TVM virtualization")
         if node.level and node.level > 0:
-            names_csv = ','.join(a.name for a in node.names if a.name != '*')
-            rel_sentinel = '__tvmrel__' + chr(1) + str(node.level) + '\x00' + (node.module or '') + '\x00' + names_csv
-            mod_idx = self.code_obj.get_name_idx(rel_sentinel)
-            self.emit(_TVMOpcodes.IMPORT_NAME, mod_idx)
-            for alias in node.names:
-                if alias.name == '*':
-                    continue
-                attr_idx = self.code_obj.get_name_idx(alias.name)
-                self.emit(_TVMOpcodes.IMPORT_FROM, attr_idx)
-                target_name = alias.asname or alias.name
-                store_idx = self.code_obj.get_name_idx(target_name)
-                self.emit(_TVMOpcodes.STORE_GLOBAL, store_idx)
-            self.emit(_TVMOpcodes.POP_TOP)
-            return
-
-        # Regular from-import: `from pkg.mod import name`
+            raise TVMEmitError("relative imports are not supported by TVM virtualization")
+        # FIX (GAP-29): `from pkg.sub import name` previously called
+        # __import__('pkg.sub') WITHOUT fromlist -> returned the ROOT package
+        # -> getattr failed. The handler recognizes this sentinel name form
+        # and re-imports with fromlist so the SUBMODULE is returned.
         names_csv = ','.join(a.name for a in node.names)
         sentinel = _TVM_TOKENS['fl_prefix'] + (node.module or '') + '\x00' + names_csv
         mod_idx = self.code_obj.get_name_idx(sentinel)
@@ -7821,8 +7687,7 @@ def _serialize_tvm_code_object(code: _TVMCodeObject, isa_map: Dict[int, int], k_
         bytes(bytecode_ba),
         tuple(serialized_consts),
         tuple(code.names),
-        tuple(getattr(code, 'kwonly_default_names', ())),
-        getattr(code, 'posonly_count', 0),
+        tuple(getattr(code, 'kwonly_default_names', ()))
     ))
 
     import zlib as _zlib_mod
@@ -8130,7 +7995,6 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
             self.constants = list(data[7])
             self.names = data[8]
             self.kwonly_default_names = tuple(data[9]) if _sys_len(data) > 9 else ()
-            self.posonly_count = data[10] if _sys_len(data) > 10 else 0
             self.defining_class = None
             self._k_enc = parent_k_enc
 
@@ -8199,8 +8063,8 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         return _perm
 
     def {v['trap_fn']}(_f, _a):
-        import time as _time_mod
-        _time_mod.sleep({_trap_delay})
+        import time as _tm
+        _tm.sleep({_trap_delay})
         _os._exit(1)
 
     # Dynamic Opcode Handlers
@@ -8209,12 +8073,14 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     def _h_ld_g(_f, _a):
         _n = _f.code_obj.names[_a]
-        # FIX (GAP-19/20): frame walk FIRST (current values), then captured_env
         if {v['active_frames']}:
             for _pf in reversed({v['active_frames']}[:-1]):
                 if _n in _pf.locals and _pf.locals[_n] is not {v['no_arg_sig']}:
                     _f.stack.append(_pf.locals[_n])
                     return
+        if _f.captured_env and _n in _f.captured_env:
+            _f.stack.append(_f.captured_env[_n])
+            return
         if _f.captured_env and _n in _f.captured_env:
             _f.stack.append(_f.captured_env[_n])
             return
@@ -8413,18 +8279,11 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     def _h_ld_drf(_f, _a):
         _n = _f.code_obj.names[_a]
-        # FIX (GAP-19/20): prioritize frame walk over captured_env snapshot.
-        # The captured_env is a stale dict copy; the active frame walk always
-        # finds the CURRENT value in the owning scope. This enables proper
-        # late-binding for closures and nonlocal mutations across levels.
         if {v['active_frames']}:
             for _pf in reversed({v['active_frames']}[:-1]):
-                if _n in _pf.locals and _pf.locals[_n] is not {v['no_arg_sig']}:
+                if _n in _pf.locals:
                     _f.stack.append(_pf.locals[_n])
                     return
-        if _f.captured_env and _n in _f.captured_env:
-            _f.stack.append(_f.captured_env[_n])
-            return
         if _n in _f.global_env:
             _f.stack.append(_f.global_env[_n])
         elif hasattr(__builtins__, _n):
@@ -8606,29 +8465,11 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
     def _h_imp_n(_f, _a):
         _n = _f.code_obj.names[_a]
         if _n.startswith({repr(tok['fl_prefix'])}):
+            # fromlist sentinel emitted by visit_ImportFrom:
+            # sentinel-prefix lookup + csv(names) -> return SUBMODULE.
             _rest = _n[len({repr(tok['fl_prefix'])}):]
             _mod, _, _csv = _rest.partition(chr(0))
             _f.stack.append(__import__(_mod, fromlist=tuple(_csv.split(','))))
-        elif _n.startswith('__tvmstar__'):
-            # `from X import *` sentinel: import module (no fromlist)
-            _f.stack.append(__import__(_n[len('__tvmstar__'):], fromlist=('')))
-        elif _n.startswith('__tvmrel__'):
-            # Relative import sentinel: level + module + csv separator format
-            _parts = _n[len('__tvmrel__'):].split(chr(0))
-            _level = int(_parts[0][1:])  # skip \x01 marker
-            _mod_name = _parts[1]
-            _csv = _parts[2] if len(_parts) > 2 else ''
-            # Resolve base package from caller's __package__
-            _pkg = _f.global_env.get('__package__', '')
-            if _level > 1 and _pkg:
-                _pkg = _pkg.rsplit('.', _level - 1)[0] if '.' in _pkg else ''
-            elif _level > 1:
-                _pkg = ''
-            _full = (_pkg + '.' + _mod_name) if (_pkg and _mod_name) else (_pkg or _mod_name)
-            if _csv:
-                _f.stack.append(__import__(_full, fromlist=tuple(_csv.split(','))))
-            else:
-                _f.stack.append(__import__(_full))
         else:
             _f.stack.append(__import__(_n))
 
@@ -8733,10 +8574,6 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
             if _idx < _sys_len(_passed_args):
                 _loc[_aname] = _passed_args[_idx]
             elif _aname in _rem_kwargs:
-                # FIX (GAP-25): `/` keyword-rejection — pos-only params cannot
-                # be passed as keyword arguments (native CPython TypeError).
-                if _idx < getattr(_fn_code, 'posonly_count', 0) and not _fn_code.name.startswith('<'):
-                    raise TypeError(f"{{_fn_code.name}}() got some positional-only arguments passed as keyword arguments: '{{_aname}}'")
                 _loc[_aname] = _rem_kwargs.pop(_aname)
         if _fn_code.vararg_name:
             _loc[_fn_code.vararg_name] = tuple(_passed_args[_pos_count:])
@@ -9027,30 +8864,6 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
                 _tgt[_n] = _v
     _g_env['__tvm_snap'] = __tvm_snap__
     _g_env['__tvm_restore'] = __tvm_restore__
-
-    def __tvm_excg_split__(_exc, _etype):
-        # PEP 654: split ExceptionGroup by type. Returns (matched, rest).
-        if isinstance(_exc, BaseExceptionGroup):
-            try:
-                return _exc.split(_etype)
-            except ValueError:
-                return (None, _exc)
-        if isinstance(_exc, _etype):
-            return (_exc, None)
-        return (None, _exc)
-    _g_env['__tvm_excg_split__'] = __tvm_excg_split__
-
-    def __tvm_star_load__(_mod, _genv):
-        # PEP 328 star-import: load all public names from module into globals.
-        _all = getattr(_mod, '__all__', None)
-        if _all is not None:
-            for _k in _all:
-                _genv[_k] = getattr(_mod, _k)
-        else:
-            for _k, _v in vars(_mod).items():
-                if not _k.startswith('_'):
-                    _genv[_k] = _v
-    _g_env['__tvm_star_load__'] = __tvm_star_load__
 
     def {tok['bind_defaults']}(_co, _pair):
         return _co
