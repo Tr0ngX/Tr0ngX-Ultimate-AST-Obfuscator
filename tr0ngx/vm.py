@@ -183,6 +183,10 @@ class _TVMASTCompiler(ast.NodeVisitor):
         self.loop_depth = 0
         self.explicit_globals: Set[str] = set()
         self.explicit_nonlocals: Set[str] = set()
+        # PERF G2: name indexes emitted as certain-globals (declared via
+        # `global x`); the runtime handler skips the O(depth) frame walk for
+        # these and reads global_env/builtins directly.
+        self.code_obj.global_only_idx: Set[int] = set()
 
     def new_label(self) -> int:
         lbl = self.next_label_id
@@ -309,7 +313,10 @@ class _TVMASTCompiler(ast.NodeVisitor):
         else:
             # Load context
             if node.id in self.explicit_globals:
-                self.emit(_TVMOpcodes.LOAD_GLOBAL, self.code_obj.get_name_idx(node.id))
+                _gidx = self.code_obj.get_name_idx(node.id)
+                self.emit(_TVMOpcodes.LOAD_GLOBAL, _gidx)
+                # PERF G2: declared-global loads skip the runtime frame walk.
+                self.code_obj.global_only_idx.add(_gidx)
             elif node.id in self.explicit_nonlocals:
                 self.emit(_TVMOpcodes.LOAD_DEREF, self.code_obj.get_name_idx(node.id))
             elif (self.is_class or self.is_function) and node.id in self.code_obj.local_names:
@@ -2025,7 +2032,9 @@ def _serialize_tvm_code_object(code: _TVMCodeObject, isa_map: Dict[int, int], k_
         bytes(bytecode_ba),
         tuple(serialized_consts),
         tuple(code.names),
-        tuple(getattr(code, 'kwonly_default_names', ()))
+        tuple(getattr(code, 'kwonly_default_names', ())),
+        # PERF G2: indexes of names that are certain-globals (declared `global`)
+        tuple(sorted(getattr(code, 'global_only_idx', ()) or ()))
     ))
 
     import zlib as _zlib_mod
@@ -2343,6 +2352,8 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
             self.constants = list(data[7])
             self.names = data[8]
             self.kwonly_default_names = tuple(data[9]) if _sys_len(data) > 9 else ()
+            # PERF G2: certain-global name indexes (skip frames-walk in ld_g)
+            self.global_only = frozenset(data[10]) if _sys_len(data) > 10 else ()
             self.defining_class = None
             self._k_enc = parent_k_enc
 
@@ -2455,17 +2466,16 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     def _h_ld_g(_f, _a):
         _n = _f.code_obj.names[_a]
-        if {v['active_frames']}:
-            for _pf in reversed({v['active_frames']}[:-1]):
-                if _n in _pf.locals and _pf.locals[_n] is not {v['no_arg_sig']}:
-                    _f.stack.append(_pf.locals[_n])
-                    return
-        if _f.captured_env and _n in _f.captured_env:
-            _f.stack.append(_f.captured_env[_n])
-            return
-        if _f.captured_env and _n in _f.captured_env:
-            _f.stack.append(_f.captured_env[_n])
-            return
+        # PERF G2: compiler-certified globals skip the O(depth) frames-walk
+        if _a not in _f.code_obj.global_only:
+            if {v['active_frames']}:
+                for _pf in reversed({v['active_frames']}[:-1]):
+                    if _n in _pf.locals and _pf.locals[_n] is not {v['no_arg_sig']}:
+                        _f.stack.append(_pf.locals[_n])
+                        return
+            if _f.captured_env and _n in _f.captured_env:
+                _f.stack.append(_f.captured_env[_n])
+                return
         if _n in _f.global_env:
             _f.stack.append(_f.global_env[_n])
         elif hasattr(__builtins__, _n):

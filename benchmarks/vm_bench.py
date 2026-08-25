@@ -86,7 +86,7 @@ CASES = {
     ),
 }
 
-RUNS = 5
+RUNS = int(os.environ.get('BENCH_RUNS', '5'))
 
 
 def median_run(cmd_list, expect_substr, cwd=None):
