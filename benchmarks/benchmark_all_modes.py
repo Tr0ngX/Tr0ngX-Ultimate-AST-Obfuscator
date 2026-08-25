@@ -302,7 +302,7 @@ def run_single_benchmark(mode: BenchmarkModeConfig, target_path: str, obf_engine
 
 def main():
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    obf_engine = os.path.join(root_dir, "tr0ngx_obfuscator.py")
+    obf_engine = os.path.join(root_dir, "main.py")
 
     # Create temporary baseline script
     src_file = tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w", encoding="utf-8")

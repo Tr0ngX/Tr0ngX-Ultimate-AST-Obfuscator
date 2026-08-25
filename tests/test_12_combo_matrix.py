@@ -41,7 +41,7 @@ except Exception:
     pass
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OBF_SCRIPT = os.path.join(REPO_ROOT, "tr0ngx_obfuscator.py")
+OBF_SCRIPT = os.path.join(REPO_ROOT, "main.py")
 BUILD_TIMEOUT = 300
 EXEC_TIMEOUT = 60
 

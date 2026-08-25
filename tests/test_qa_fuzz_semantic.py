@@ -18,7 +18,7 @@ except Exception:
     pass
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OBFUSCATOR = os.path.join(ROOT, "tr0ngx_obfuscator.py")
+OBFUSCATOR = os.path.join(ROOT, "main.py")
 REPORT_PATH = os.path.join(ROOT, "qa_report.txt")
 
 BUILD_TIMEOUT = 240
@@ -744,7 +744,7 @@ class _PinnedSystemRandom:
 
 secrets.SystemRandom = _PinnedSystemRandom
 
-sys.argv = ["tr0ngx_obfuscator.py"] + {argv!r}
+sys.argv = ["main.py"] + {argv!r}
 import tr0ngx_obfuscator
 
 tr0ngx_obfuscator.main()
