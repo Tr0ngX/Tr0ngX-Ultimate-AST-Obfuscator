@@ -2277,6 +2277,16 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
     import zlib as _zlib
     _sys_len = len
 
+    # PERF G1: snapshot the interpreter's long-lived objects out of the GC
+    # generational scans after the initial load; artifact workloads create
+    # mostly short-lived frames/stacks afterwards.
+    try:
+        import gc as _trx_gc
+        _trx_gc.collect()
+        _trx_gc.freeze()
+    except Exception:
+        pass
+
     if hasattr(_sys, 'monitoring'):
         try:
             _ttag = 'tx' + _hashlib.sha256(_root_packet[:9]).hexdigest()[:6]
@@ -2653,7 +2663,9 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         _n = _f.code_obj.names[_a]
         if {v['active_frames']}:
             for _pf in reversed({v['active_frames']}[:-1]):
-                if _n in _pf.locals:
+                # sentinel-transparent: unfilled slots read as absent (matches
+                # _h_ld_g and the slim-binder lazy locals)
+                if _n in _pf.locals and _pf.locals[_n] is not {v['no_arg_sig']}:
                     _f.stack.append(_pf.locals[_n])
                     return
         # FIX (closure GAP-19/20 completion): a closure invoked AFTER its
@@ -2946,6 +2958,9 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
     # object name. Levels < 4 share the single build-wide (M, A) pair.
 
     def {v['bind_frame_fn']}(_fn_code, _passed_args, _passed_kwargs=None, _captured_env=None, _def_cls=None, _defaults=None):
+        # PERF G1 note: an earlier "slim binder" (prefill params only) measured
+        # SLOWER on call-heavy workloads than this single C-level dict
+        # comprehension over local_names - kept the comprehension.
         _loc = {{_aname: {v['no_arg_sig']} for _aname in _fn_code.local_names}}
         _rem_kwargs = dict(_passed_kwargs or {{}})
         _pos_count = _sys_len(_fn_code.arg_names)
@@ -3252,6 +3267,9 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
     # Level-4 per-function ISA divergence infrastructure lives below; the
     # enable flag is interpolated from the emitter scope.
     _isa_fwd_cache = {{}}
+    # PERF G1: one shared slot table per permutation object (M/A are constant
+    # for the whole build, so the table only depends on _perm identity).
+    _slot_cache = {{}}
     def {v['attach_isa_fn']}(_fr):
         if {int(vm_level >= 4)} and {int(_TVM_L4_PERM_ENABLED)}:
             _n = _fr.code_obj.name
@@ -3262,6 +3280,18 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
             _fr._perm = _p
         else:
             _fr._perm = None
+        # PERF G1: precompute the affine dispatch slot per opcode ONCE per
+        # permutation - hoisted out of the hot loop. Same formula as before,
+        # ISA randomization is unchanged.
+        _pk = id(_fr._perm)
+        _slot = _slot_cache.get(_pk)
+        if _slot is None:
+            _slot = [0] * 256
+            _pp = _fr._perm
+            for _o in range(256):
+                _slot[_o] = (((_pp[_o]) if _pp is not None else _o) * {M} + {A}) & 0xFF
+            _slot_cache[_pk] = _slot
+        _fr._slot = _slot
         return _fr
 
     async def {v['eval_frame_async_fn']}(_frame):
@@ -3280,12 +3310,13 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
                     _arg = (_c_arr[_frame.pc+1] << 8) | _c_arr[_frame.pc+2]
                     _frame.pc += 3
 
-                    _h = {v['dispatch_tbl_async']}[(((_frame._perm[_op]) if _frame._perm is not None else _op) * {M} + {A}) & 0xFF]
+                    # PERF G1: precomputed slot + type() is tuple (see sync loop)
+                    _h = {v['dispatch_tbl_async']}[_frame._slot[_op]]
                     _sig = _h(_frame, _arg)
                     if _sig is not None:
                         if _sig is {v['halt_sig']}:
                             break
-                        if isinstance(_sig, tuple) and _sys_len(_sig) == 2:
+                        if type(_sig) is tuple and _sys_len(_sig) == 2:
                             if _sig[0] is {v['ret_sig']}:
                                 return _sig[1]
                             elif _sig[0] is {v['await_sig']}:
@@ -3331,14 +3362,16 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
                     _arg = (_c_arr[_frame.pc+1] << 8) | _c_arr[_frame.pc+2]
                     _frame.pc += 3
 
-                    _h = {v['dispatch_tbl']}[(((_frame._perm[_op]) if _frame._perm is not None else _op) * {M} + {A}) & 0xFF]
+                    # PERF G1: slot precomputed at frame attach; type() is tuple
+                    # avoids the isinstance virtual-call overhead in this loop.
+                    _h = {v['dispatch_tbl']}[_frame._slot[_op]]
                     _sig = _h(_frame, _arg)
                     if _sig is not None:
                         if _sig is {v['halt_sig']}:
                             break
-                        if isinstance(_sig, tuple) and _sys_len(_sig) == 2 and _sig[0] is {v['ret_sig']}:
+                        if type(_sig) is tuple and _sys_len(_sig) == 2 and _sig[0] is {v['ret_sig']}:
                             return _sig[1]
-                        if isinstance(_sig, tuple) and _sys_len(_sig) == 2 and _sig[0] is {v['yield_sig']}:
+                        if type(_sig) is tuple and _sys_len(_sig) == 2 and _sig[0] is {v['yield_sig']}:
                             return _sig
                 except BaseException as _e:
                     _frame.current_exception = _e
