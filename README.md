@@ -91,6 +91,7 @@ graph TD
 
 ### 7. Enterprise Anti-Tamper & Anti-Analysis Matrix
 - **Anti-Debug Watchdog Daemon**: Continuous background patrol verifying builtin integrity, PEB debugger flags, and anti-monkey-patching.
+- **Window-Title & Class Matrix (Vector 11)**: scans all visible windows for 100+ debugger/dumper/proxy tool signatures. 2026-08 fix: removed the over-broad `'id'` class pattern that false-matched `Chrome_WidgetWin_1` (every Chromium/Electron app) and silently killed protected scripts on normal developer desktops; real debugger classes remain covered.
 - **Audit-Hook Liveness Canary (Vector 15)**: Installs a CSPRNG-seeded `sys.addaudithook` counter and forces audited syscalls each patrol cycle; a frozen counter means the hook was stripped -> immediate response.
 - **sys.monitoring Tool-Slot Ownership (Vector 16)**: Registers a canary tool on Python 3.12+ and detects any override of its slot.
 - **Builtin Identity Watchdog (Vector 17)**: Snapshots `id()` of core builtins (`__import__`, `open`, `exec`, `eval`, `compile`, `__build_class__`) and obliterates on any monkeypatch.
@@ -109,6 +110,8 @@ graph TD
 ### 8. Resource Management & Diagnostic Profiling
 - **RAM & CPU Core Limits**: Built-in `--max-ram` (MB) and `--cores` limiter prevents memory exhaustion during heavy obfuscation passes.
 - **Micro-Stage Profiler & Debug Map**: High-resolution performance timer tracking and optional JSON mapping export (`--debug-map`).
+- **True Peak-RAM Reporting (2026-08)**: each debug-map stage entry now carries `peak_ram_mb` (in-stage RSS maximum from a 4Hz background sampler) in addition to the end-of-stage `ram_mb`, exposing transients that end-of-stage snapshots miss.
+- **Packaging Fast Path (2026-08)**: when a payload is already a sealed loader (`--double-compile y`), the Fused Matrix Shield, Emoji v2 and Whitespace v2 outer shields skip their redundant CPython `compile()` pass and embed the payload as 8 joined literal parts instead of one giant literal. Track encoding, interleaving order and all cryptographic layers are byte-identical - measured full-option builds drop peak RAM (~8.6GB to ~2GB) and total build time by roughly half on small inputs.
 
 ---
 

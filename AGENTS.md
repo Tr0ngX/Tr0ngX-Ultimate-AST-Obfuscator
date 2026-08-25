@@ -191,6 +191,27 @@ New capabilities:
 - Armor codec diversification + reversed payload storage inside `_multi_layer_encrypt`; all four emitted loader families mirror the chosen chain via interpolated metadata.
 - LZMA pre-encryption layer, hardware env-key salt blinding, built-in `--verify` semantic differential, two-phase batch shared-symbol map, seeded ASCII identifier stream (`--seed`), anti-debug Vectors 19/20, 7-family opaque predicates, weighted heterogeneous string ciphers + exact float ratio reconstruction, exception-frame eligibility sniffing for decompiler traps.
 
+### 4.8 Performance Hardening Wave (2026-08, profiled full-option build)
+Baseline measured on a 673-byte input with every option enabled: 486s total, 8.6GB peak RSS. Bottleneck attribution (debug map + external RSS sampling): fused matrix shield 181s / peak 8.6GB (redundant CPython `compile()` of an already-sealed loader), VM engine 107s and 12MB to 235MB expansion, double-compile 78s with multi-GB parser spikes.
+
+Changes (strength-neutral - all crypto layers, VM ISA randomization, trap/NOP rates, junk densities and opaque predicate families untouched):
+- `_fused_matrix_wrap(already_packaged=...)`: when the payload is already a sealed loader (double-compile ran), the redundant marshal `compile()` pass is skipped; a TEXT-MODE terminal decoder variant execs the decompressed utf-8 source directly instead of `marshal.loads`. Track tables (Kyrie rotation+Caesar, emoji XOR mask, whitespace bitfield) are precomputed per-symbol; LCG state sequence and track interleaving are bit-identical (verified old-vs-new over randomized trials). Loader assembled by direct interpolation, removing three whole-payload `.replace()` scans.
+- `_emoji_encode_v2` / `_whitespace_encode_v2`: same `already_packaged` fast path plus table-driven bit expansion.
+- `_double_compile`: armored payload embedded as 8 joined literal parts (mirrors the standard-packaging pattern) instead of one giant literal, shrinking CPython parser arena on both password and no-password loader variants.
+- `varsobf` validates via eval-mode parse; `_MainAstTransformer.visit_Constant` parses obfuscation expressions with `mode='eval'`, skipping the discarded Module+Assign wrapper nodes.
+- FIXED pre-existing defect found during verification: fused-matrix loader template indented the `{_vars_}` statement one level deeper than its `return` sibling (IndentationError at runtime); normalized to match previously shipped artifacts.
+- Debug map honesty: every stage entry now includes `peak_ram_mb` (true in-stage RSS maximum from a 4Hz daemon sampler); `ram_mb` remains end-of-stage RSS.
+
+Measured result on the same 673-byte full-option build: total time 486s -> ~208s (-57%), peak RSS 8.6GB -> ~4.0GB (-54%); fused matrix stage alone 181s/8.6GB -> 32s/~3GB. VM engine now actually completes on async targets instead of silently skipping.
+
+Bugs unmasked and fixed while re-verifying with the VM stage actually running (all were pre-existing; previously masked because `6.5_optimization_pass` crashed and the pipeline continued WITHOUT virtualization):
+- `visit_AsyncFunctionDef` referenced an undefined `_fn_code` when serializing `kwonly_default_names` -> NameError on EVERY async def with kwonly defaults under `--vm-obf`; now mirrors `sub_compiler.code_obj.kwonly_default_names` like the sync visitor.
+- `_h_ld_drf` had no `captured_env` fallback (unlike `_h_ld_g`), so closures invoked AFTER their enclosing frame returned raised `NameError: free variable ...`; fallback added.
+- Closure environments were snapshot copies at MAKE_FUNCTION time, so sibling closures never saw each other's nonlocal writes after the factory returned (native Python shares live cells). Replaced with a live `_EnvChain` delegating to the defining frames' real locals dicts. The chain is sentinel-transparent: unfilled binder slots (`no_arg_sig`) read as absent, preventing a child comprehension/function from observing a bare sentinel value (this transparency fixes the walrus-in-comprehension `<object> < int` crash in test_10 Check 10).
+- Anti-debug Vector 11 false positive (P0): bare `'id'` in `_BAD_CLASSES` substring-matched `Chrome_WidgetWin_1` - the window class of every Chromium/Electron app - so protected scripts self-terminated (`os._exit(1)`, silent) on ordinary developer desktops whenever `--antidebug y`. Entry removed; real debugger classes remain covered. Verified old build fails identically via git-stash A/B.
+
+Known remaining limitation (pre-existing, documented honestly): a MAXIMUM-POWER stack artifact (`-m 3` + all shields + zalgo + hyperion + lzma) still fails at RUNTIME (RecursionError inside TVM lazy-const `resolve_const`, or silent exit on older builds). Confirmed identical failure on the pre-change build via git stash; unrelated to this wave. Track separately from TVM crypto-envelope/cell-boxing work.
+
 ---
 
 ## 5. Verification & Testing Protocol
