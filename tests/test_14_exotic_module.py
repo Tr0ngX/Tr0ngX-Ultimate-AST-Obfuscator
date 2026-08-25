@@ -31,8 +31,8 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-MODULE_FILENAME = "tr0ngx_exotic.py"
-MODULE_NAME = "tr0ngx_exotic"
+MODULE_FILENAME = "tr0ngx/exotic.py"
+MODULE_NAME = "tr0ngx.exotic"
 ROUNDTRIP_SIZES = [0, 1, 7, 255, 4096]
 SAMPLES_PER_POOL = 200
 
@@ -268,7 +268,7 @@ def main():
         print("[TEST 14] >>> SUITE GREEN (SKIP) <<<")
         return 0
     try:
-        module = __import__(MODULE_NAME)
+        module = __import__(MODULE_NAME, fromlist=["exotic"])
     except Exception as exc:
         print("  [FAIL] importing %s raised %.160s" % (MODULE_NAME, exc))
         print("-" * 70)
