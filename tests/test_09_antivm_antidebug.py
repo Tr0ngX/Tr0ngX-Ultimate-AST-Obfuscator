@@ -25,7 +25,7 @@ def _host_is_hostile():
             with open(src_path, "w", encoding="utf-8") as f:
                 f.write("print('CONTROL_OK')\n")
             cmd = [
-                sys.executable, "tr0ngx_obfuscator.py",
+                sys.executable, "main.py",
                 "-i", src_path,
                 "-o", out_path,
                 "-m", "1",
@@ -63,7 +63,7 @@ print(f"CALC_RESULT:{val}")
             
         # Obfuscate with --antivm y and --antidebug y
         cmd = [
-            sys.executable, "tr0ngx_obfuscator.py",
+            sys.executable, "main.py",
             "-i", src_path,
             "-o", out_path,
             "-m", "2",
@@ -99,7 +99,7 @@ print(f"SQUARES:{x}")
             f.write(sample_code)
             
         cmd = [
-            sys.executable, "tr0ngx_obfuscator.py",
+            sys.executable, "main.py",
             "-i", src_path,
             "-o", out_path,
             "-m", "2",
@@ -137,7 +137,7 @@ print(f"MATRIX_VERIFIED:{data['status']}_{data['val']}")
             f.write(sample_code)
 
         cmd = [
-            sys.executable, "tr0ngx_obfuscator.py",
+            sys.executable, "main.py",
             "-i", src_path,
             "-o", out_path,
             "-m", "3",

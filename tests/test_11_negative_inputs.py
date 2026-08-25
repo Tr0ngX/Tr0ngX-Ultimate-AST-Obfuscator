@@ -1,6 +1,6 @@
 """
 Test 11: Negative Input Handling & CLI Robustness Suite
-Feeds malformed inputs to tr0ngx_obfuscator.py and verifies each case is
+Feeds malformed inputs to main.py and verifies each case is
 handled cleanly: the process must either exit non-zero OR emit a graceful
 error message, and must NEVER die with an undecorated raw Python traceback.
 
@@ -32,7 +32,7 @@ except Exception:
     pass
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OBF_SCRIPT = os.path.join(REPO_ROOT, "tr0ngx_obfuscator.py")
+OBF_SCRIPT = os.path.join(REPO_ROOT, "main.py")
 BUILD_TIMEOUT = 300
 EXEC_TIMEOUT = 60
 

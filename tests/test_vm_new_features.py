@@ -14,7 +14,7 @@ try:
 except Exception:
     pass
 
-OBF = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tr0ngx_obfuscator.py')
+OBF = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'main.py')
 REPO = os.path.dirname(OBF)
 _pass, _fail, _results = 0, 0, []
 

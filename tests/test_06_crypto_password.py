@@ -18,7 +18,7 @@ def test_password_encryption_roundtrip():
 
         pwd = 'Tr0ngX_MasterKey_2026!'
         # 1. Obfuscate with password
-        cmd = [sys.executable, 'tr0ngx_obfuscator.py', '-i', tmp_in, '-o', tmp_out, '-m', '2', '--compile', 'y', '--password', pwd, '--no-art']
+        cmd = [sys.executable, 'main.py', '-i', tmp_in, '-o', tmp_out, '-m', '2', '--compile', 'y', '--password', pwd, '--no-art']
         res = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
         assert res.returncode == 0, f'Obfuscation failed: {res.stderr}'
         assert os.path.exists(tmp_out), 'Output file not generated'

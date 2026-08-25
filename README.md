@@ -115,6 +115,26 @@ graph TD
 
 ---
 
+### Repository Layout (2026-08 module split)
+
+```
+main.py                 single entry point (python main.py ...)
+tr0ngx/
+  config.py             engine state, console setup, shared globals
+  names.py              identifier generators: rd(), chemical, CJK, homoglyph, rare-unicode, Zalgo
+  velimatix.py          Velimatix AST transformers (BiOpaque/ExceptionJump/ControlFlow/Mutator/...)
+  astpasses.py          core AST passes: opaque predicates, dyn-strings, traps, obfstr/obfint, obf()
+  shields.py            anti-debug / anti-hook / self-modify shield templates
+  crypto.py             AEAD (Argon2id/PBKDF2 + ChaCha20-Poly1305), multi-layer armor, double compile
+  vm.py                 TVM virtual machine (compiler, serializer, polymorphic runtime)
+  packagers.py          emoji / whitespace / Kramer / fused-matrix / camouflage / exotic packaging
+  diagnostics.py        banners, logger, profiler, debug map, peak-RSS sampler
+  pipeline.py           stage orchestrator (obfuscate_single_target)
+  cli.py + tui.py       argparse CLI and interactive TUI dispatcher
+  exotic.py             BitMatrix + Base4096 glyph encoders
+tests/, benchmarks/     unchanged; they invoke python main.py
+```
+
 ## Installation & Requirements
 
 ### System Requirements
@@ -137,7 +157,7 @@ pip install -r requirements.txt
 ### 1. Interactive Terminal UI (TUI) Mode
 Run the obfuscator without arguments to launch the step-by-step interactive configuration prompt:
 ```bash
-python tr0ngx_obfuscator.py
+python main.py
 ```
 
 ### 2. Command Line Interface (CLI) Mode
@@ -145,22 +165,22 @@ Execute automated obfuscation directly via CLI arguments:
 
 ```bash
 # Basic Mode 1 (Fast AST + String obfuscation)
-python tr0ngx_obfuscator.py -i input.py -o output.py -m 1
+python main.py -i input.py -o output.py -m 1
 
 # Standard Mode 2 with Compilation & Kramer Outer Shield
-python tr0ngx_obfuscator.py -i input.py -o output.py -m 2 --compile y --kramer y
+python main.py -i input.py -o output.py -m 2 --compile y --kramer y
 
 # Mode 3 + Velimatix Engine + Double Compilation
-python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 --compile y --velimatix y --veli-level 3 --double-compile y
+python main.py -i input.py -o output.py -m 3 --compile y --velimatix y --veli-level 3 --double-compile y
 
 # Multi-File Batch Obfuscation (Multiple target scripts)
-python tr0ngx_obfuscator.py -i file1.py file2.py file3.py -o dist/ -m 2 --compile y -w 4
+python main.py -i file1.py file2.py file3.py -o dist/ -m 2 --compile y -w 4
 
 # Entire Directory Recursive Obfuscation
-python tr0ngx_obfuscator.py -D src/ -o dist/ -r -m 2 --compile y --matrix y
+python main.py -D src/ -o dist/ -r -m 2 --compile y --matrix y
 
 # MAXIMUM POWER MODE (TVM 2.0, Camouflage, Fused Matrix, Anti-Analysis Matrix & Unicode Shields)
-python tr0ngx_obfuscator.py -i input.py -o output.py -m 3 \
+python main.py -i input.py -o output.py -m 3 \
   --moreobf y \
   --antidebug y \
   --antivm y \
@@ -282,7 +302,7 @@ The [`examples/`](examples/) folder ships a before/after pair:
 The obfuscated artifact was produced with **every protection option enabled** (AST mode 3-tier engine, dead-code injection, math-opaque predicates, dynamic string ciphers, string fragmentation, variable secret-sharing, decompiler traps, anti-dump, anti-debug watchdog, anti-VM matrix, self-modification, debug poison, metadata spoofing, Velimatix L2, VM virtualization L2, double AEAD compile + LZMA layer, Hyperion-class camouflage, fused Kyrie/Emoji/Whitespace matrix shield, CJK/homoglyph/rare-Unicode/Zalgo hostile identifiers, exotic Unicode pools, BitMatrix byte chain, deterministic seed):
 
 ```bash
-python tr0ngx_obfuscator.py -i examples/unobfuscated.py -o examples/obfuscated.py \
+python main.py -i examples/unobfuscated.py -o examples/obfuscated.py \
   -m 2 --moreobf y --math-opaque y --dyn-strings y --str-frag y --var-split y --dec-trap y \
   --anti-dump y --antidebug y --antivm y --selfmod y --debug-poison y --spoof-meta y \
   --velimatix y --veli-level 2 --vm-obf y --vm-level 2 \

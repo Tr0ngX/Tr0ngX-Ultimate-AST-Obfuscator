@@ -685,7 +685,7 @@ def main():
             for lvl in levels:
                 out_path = os.path.join(tmp_root, "%s.l%s.py" % (name, lvl))
                 cmd = [
-                    sys.executable, os.path.join(REPO_ROOT, "tr0ngx_obfuscator.py"),
+                    sys.executable, os.path.join(REPO_ROOT, "main.py"),
                     "-i", src_path, "-o", out_path,
                     "--vm-obf", "y", "--vm-level", str(lvl),
                     "-m", "1", "--force-py", "off", "--no-art",

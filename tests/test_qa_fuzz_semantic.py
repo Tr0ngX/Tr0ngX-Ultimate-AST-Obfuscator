@@ -18,7 +18,7 @@ except Exception:
     pass
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OBFUSCATOR = os.path.join(ROOT, "tr0ngx_obfuscator.py")
+OBFUSCATOR = os.path.join(ROOT, "main.py")
 REPORT_PATH = os.path.join(ROOT, "qa_report.txt")
 
 BUILD_TIMEOUT = 240
@@ -423,8 +423,19 @@ def phase_semantic_differential():
 def load_engine_module():
     if ROOT not in sys.path:
         sys.path.insert(0, ROOT)
-    import tr0ngx_obfuscator
-    return tr0ngx_obfuscator
+    # Module split (2026-08): the engine lives in the tr0ngx package now.
+    # Compose a compatibility facade exposing the symbols this suite pokes:
+    # main() from cli, TVM internals from vm.
+    import types
+    import tr0ngx.cli as _cli
+    import tr0ngx.vm as _vm
+    mod = types.SimpleNamespace(main=_cli.main)
+    for attr in ("_TVMOpcodes", "_vm_obfuscate", "_TVMASTCompiler",
+                 "_TVMCodeObject", "_serialize_tvm_code_object",
+                 "_tvm_aead_encrypt", "_tvm_derive_runtime_keys"):
+        if hasattr(_vm, attr):
+            setattr(mod, attr, getattr(_vm, attr))
+    return mod
 
 
 def tvm_keystream(k_enc, nonce, length):
@@ -744,8 +755,8 @@ class _PinnedSystemRandom:
 
 secrets.SystemRandom = _PinnedSystemRandom
 
-sys.argv = ["tr0ngx_obfuscator.py"] + {argv!r}
-import tr0ngx_obfuscator
+sys.argv = ["main.py"] + {argv!r}
+import tr0ngx.cli as tr0ngx_obfuscator
 
 tr0ngx_obfuscator.main()
 '''

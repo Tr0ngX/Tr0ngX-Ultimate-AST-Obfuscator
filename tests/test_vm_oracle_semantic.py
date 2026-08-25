@@ -19,7 +19,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from tr0ngx_obfuscator import _vm_obfuscate
+from tr0ngx.vm import _vm_obfuscate
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 31 SEMANTIC TEST CASES

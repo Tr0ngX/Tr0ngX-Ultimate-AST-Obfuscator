@@ -84,7 +84,7 @@ def run_single_obf_test(task):
     task_num = task["num"]
     total_tasks = task["total"]
     expected_stdout = task.get("expected_stdout")
-    obf_script = "tr0ngx_obfuscator.py"
+    obf_script = "main.py"
 
     with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as tmp_out:
         out_path = tmp_out.name

@@ -9,7 +9,7 @@ Welcome to the **Tr0ngX Ultimate AST Obfuscator** codebase repository. This docu
 All AI agents operating on this repository MUST strictly abide by the following protocol:
 
 1. **Documentation Synchronization (Strict Mandate)**:
-   - Every time a new feature, new transformation pass, or new `--` command-line argument is added or modified in `tr0ngx_obfuscator.py`, the agent **MUST immediately update** both `README.md` and `AGENTS.md` with:
+   - Every time a new feature, new transformation pass, or new `--` command-line argument is added or modified in `main.py`, the agent **MUST immediately update** both `README.md` and `AGENTS.md` with:
      - The exact CLI argument syntax and choices.
      - A concise explanation of what the feature does and its position in the pipeline.
      - Updated CLI option tables and summary metrics.
@@ -27,6 +27,27 @@ All AI agents operating on this repository MUST strictly abide by the following 
    - All default test runs, validation, and self-testing MUST run in single-thread / single-process mode (`-w 1` or individual standalone target scripts) to avoid system overload and resource starvation.
 
 ---
+
+### 1.5 Module Split (2026-08)
+
+The former single-file engine is now a package. Root contains only `main.py` (entry point); all engines live under `tr0ngx/`:
+
+| Module | Responsibility |
+| :--- | :--- |
+| `tr0ngx/config.py` | `_EngineState`, console setup, shared mutable globals (access via attribute style) |
+| `tr0ngx/names.py` | `rd()` + chemical/CJK/homoglyph/rare-unicode/Zalgo generators, `_gen_exotic_name` |
+| `tr0ngx/velimatix.py` | Velimatix transformer suite + dead-code/string-encoder |
+| `tr0ngx/astpasses.py` | opaque predicates, dyn-strings XOR, decompiler traps/var-split, obfstr/obfint, `obf()`, ANTI_PYCDC |
+| `tr0ngx/shields.py` | anti / velimatix_anti_hook templates, self-modify + anti-vm generators |
+| `tr0ngx/crypto.py` | AEAD v3, KDFs, armor codec, `_multi_layer_encrypt`, `_double_compile` |
+| `tr0ngx/vm.py` | TVM: opcodes, code objects, AST compiler, runtime emitter, `_vm_obfuscate` |
+| `tr0ngx/packagers.py` | emoji/ws encoders, Kramer/Kyrie, Hyperion camouflage, fused matrix, exotic wrap |
+| `tr0ngx/diagnostics.py` | banners, logger, profiler waterfall, debug map, peak-RSS sampler |
+| `tr0ngx/pipeline.py` | stage orchestrator (`obfuscate_single_target`) |
+| `tr0ngx/cli.py` + `tr0ngx/tui.py` | argparse entry (`main()`) and interactive TUI flows |
+| `tr0ngx/exotic.py` | BitMatrix byte chain + Base4096 glyph encoder |
+
+Invariant for future edits: cross-module access to MUTABLE state (`_EngineState`, `_DEBUG_MAP`, ...) must go through module attribute access (`from . import config as _cfg; _cfg._EngineState`) - never from-import rebindable globals. Build-time code must resolve builtins via the explicit builtins MODULE (`import builtins`), never the context-dependent `__builtins__` (dict when imported, module when run as __main__).
 
 ## 2. System Architecture Overview
 
@@ -222,7 +243,7 @@ Before committing any modifications:
 python tests/test_01_core_features.py
 
 # 2. Run complex challenge paradigm test in single-thread mode
-python tr0ngx_obfuscator.py -i tests/test_10_complex_realworld.py -o test_full_matrix.py -m 2 --compile y --double-compile y --velimatix y --veli-level 2 --vm-obf y --vm-level 3 --matrix y --camouflage y --math-opaque y --dyn-strings y --no-art
+python main.py -i tests/test_10_complex_realworld.py -o test_full_matrix.py -m 2 --compile y --double-compile y --velimatix y --veli-level 2 --vm-obf y --vm-level 3 --matrix y --camouflage y --math-opaque y --dyn-strings y --no-art
 
 # 3. Verify execution of obfuscated target
 python test_full_matrix.py

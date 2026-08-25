@@ -17,7 +17,7 @@ def test_dos_output_limits():
 
         # 1. Should abort when limit is exceeded (100 bytes)
         cmd1_res = subprocess.run(
-            [sys.executable, 'tr0ngx_obfuscator.py', '-i', target, '-o', out_small, '-m', '1', '--max-output-size', '100', '--no-art'],
+            [sys.executable, 'main.py', '-i', target, '-o', out_small, '-m', '1', '--max-output-size', '100', '--no-art'],
             capture_output=True, text=True, encoding='utf-8', errors='replace'
         )
         assert cmd1_res.returncode != 0, 'Expected abort when output exceeded max size'
@@ -26,7 +26,7 @@ def test_dos_output_limits():
 
         # 2. Should pass when limit is large enough (10MB)
         cmd2_res = subprocess.run(
-            [sys.executable, 'tr0ngx_obfuscator.py', '-i', target, '-o', out_large, '-m', '1', '--max-output-size', '10MB', '--no-art'],
+            [sys.executable, 'main.py', '-i', target, '-o', out_large, '-m', '1', '--max-output-size', '10MB', '--no-art'],
             capture_output=True, text=True, encoding='utf-8', errors='replace'
         )
         assert cmd2_res.returncode == 0, f"Expected success with 10MB limit: {cmd2_res.stderr}"
