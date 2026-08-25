@@ -264,10 +264,17 @@ def _generate_strict_version_guard(target_ver_str: str) -> str:
     if not target_ver_str or str(target_ver_str).lower() in ("off", "none", "n", "no"):
         return ""
     tgt = str(target_ver_str).strip()
+    # PERF G3: trailing '+' marks a FLOOR requirement (e.g. '3.12+' means
+    # >= 3.12) instead of an exact pin - lets artifacts run on newer,
+    # faster interpreters while keeping the anti-tamper vectors armed.
+    _floor = tgt.endswith('+')
+    if _floor:
+        tgt = tgt[:-1].strip()
     return f"""
 def _enforce_strict_py_runtime():
     import sys, os
     _tgt = {tgt!r}
+    _floor = {_floor!r}
     _fail = False
     
     # 1. Structural tuple & immutable type check (detect monkeypatched sys.version_info)
@@ -277,11 +284,19 @@ def _enforce_strict_py_runtime():
             _fail = True
         maj, min_ = vi[0], vi[1]
         tgt_parts = [int(p) for p in _tgt.split('.') if p.isdigit()]
-        if len(tgt_parts) >= 1 and maj != tgt_parts[0]:
-            _fail = True
-        if len(tgt_parts) >= 2 and min_ != tgt_parts[1]:
-            _fail = True
-        if len(tgt_parts) >= 3 and vi[2] != tgt_parts[2]:
+        if len(tgt_parts) >= 1:
+            if _floor:
+                if maj < tgt_parts[0]:
+                    _fail = True
+            elif maj != tgt_parts[0]:
+                _fail = True
+        if len(tgt_parts) >= 2:
+            if _floor:
+                if maj == tgt_parts[0] and min_ < tgt_parts[1]:
+                    _fail = True
+            elif min_ != tgt_parts[1]:
+                _fail = True
+        if not _floor and len(tgt_parts) >= 3 and vi[2] != tgt_parts[2]:
             _fail = True
     except Exception:
         _fail = True
@@ -293,10 +308,18 @@ def _enforce_strict_py_runtime():
             _fail = True
         hv_maj = (hv >> 24) & 0xFF
         hv_min = (hv >> 16) & 0xFF
-        if len(tgt_parts) >= 1 and hv_maj != tgt_parts[0]:
-            _fail = True
-        if len(tgt_parts) >= 2 and hv_min != tgt_parts[1]:
-            _fail = True
+        if len(tgt_parts) >= 1:
+            if _floor:
+                if hv_maj < tgt_parts[0]:
+                    _fail = True
+            elif hv_maj != tgt_parts[0]:
+                _fail = True
+        if len(tgt_parts) >= 2:
+            if _floor:
+                if hv_maj == tgt_parts[0] and hv_min < tgt_parts[1]:
+                    _fail = True
+            elif hv_min != tgt_parts[1]:
+                _fail = True
     except Exception:
         _fail = True
 
@@ -347,7 +370,17 @@ def _enforce_strict_py_runtime():
             if c_ver:
                 c_ver_str = c_ver.decode('utf-8', errors='ignore').split()[0]
                 if not c_ver_str.startswith(_tgt):
-                    _fail = True
+                    if _floor:
+                        # floor mode: accept any version >= major.minor target
+                        try:
+                            _cp = [int(p) for p in c_ver_str.split('.') if p.isdigit()]
+                            _tp = [int(p) for p in _tgt.split('.') if p.isdigit()]
+                            if tuple(_cp[:2]) < tuple(_tp[:2]):
+                                _fail = True
+                        except Exception:
+                            _fail = True
+                    else:
+                        _fail = True
     except Exception:
         pass
 
