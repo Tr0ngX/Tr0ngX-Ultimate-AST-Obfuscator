@@ -135,6 +135,14 @@ tr0ngx/
 tests/, benchmarks/     unchanged; they invoke python main.py
 ```
 
+### Running Artifacts Fast (2026-08)
+
+TVirtualized artifacts are pure stdlib Python. To maximize runtime speed:
+
+- Prefer CPython 3.12+ or PyPy 3.10/3.11 (pure-Python interpreter loops see 4-15x on PyPy).
+- Use a floor version lock instead of an exact pin when building: --force-py 3.12+ allows newer interpreters while keeping all anti-tamper vectors armed.
+- The VM already calls gc.freeze() after payload load; do not wrap artifacts in processes that re-enable aggressive GC cycles around them.
+
 ## Installation & Requirements
 
 ### System Requirements

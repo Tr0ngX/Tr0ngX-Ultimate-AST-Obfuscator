@@ -489,12 +489,18 @@ VÍ DỤ SỬ DỤNG:
         else:
             # FIX (audit P1): invalid versions like 'banana' previously passed
             # through and made every runtime guard vacuously true.
+            # PERF G3: also accept a floor range like '3.12+' so artifacts can
+            # target newer, faster interpreters instead of one pinned version.
             import re as _re_fp
-            if not _re_fp.fullmatch(r"\d+\.\d+(\.\d+)?", cli_args.force_py.strip()):
-                print(f"[-] ERROR: --force-py expects a version like 3.10 / 3.11.4 (got: {cli_args.force_py!r}).", file=sys.stderr)
+            _fp_val = cli_args.force_py.strip()
+            _fp_plus = _fp_val.endswith('+')
+            if _fp_plus:
+                _fp_val = _fp_val[:-1].strip()
+            if not _re_fp.fullmatch(r"\d+\.\d+(\.\d+)?", _fp_val):
+                print(f"[-] ERROR: --force-py expects a version like 3.10 / 3.11.4 or a floor like 3.12+ (got: {cli_args.force_py!r}).", file=sys.stderr)
                 sys.exit(2)
             force_py_choice = "Y"
-            forced_py_ver = cli_args.force_py.strip()
+            forced_py_ver = _fp_val + ('+' if _fp_plus else '')
     else:
         if is_cli_mode:
             force_py_choice = "N"

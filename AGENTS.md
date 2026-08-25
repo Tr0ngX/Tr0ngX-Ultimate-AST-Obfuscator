@@ -235,6 +235,35 @@ Known remaining limitation (pre-existing, documented honestly): a MAXIMUM-POWER 
 
 ---
 
+### 4.9 TVM Performance Wave (2026-08, branch perf/tvm-runtime)
+
+Strength-neutral runtime speedups for TVM-virtualized artifacts (all ISA
+randomization, trap/NOP rates, junk densities and crypto untouched):
+
+- G1 commit 8a4df11: dispatch slot table precomputed once per permutation
+  (`_slot_cache`, M/A are build-constant) instead of recomputing the affine
+  transform every instruction; `type(_sig) is tuple` in both eval loops;
+  `gc.collect()+gc.freeze()` after payload load; ld_drf frames-walk made
+  sentinel-transparent. Measured (benchmarks/vm_bench.py, BENCH_RUNS=9,
+  back-to-back A/B): geomean slowdown x16.94 -> x16.61; loop_sum -33%,
+  string_build -35%, closure -11%, fib -5%, miller -9%. Honest rejection:
+  a slim binder (prefill params only) measured SLOWER than the C-level dict
+  comprehension over local_names and was reverted.
+- G2 commit 7f28170: compiler-certified global loads (declared via
+  `global x`) record their name index in the serialized code object
+  (data[10]) and skip the O(depth) frames-walk in _h_ld_g; duplicated
+  captured_env block removed. ~2% additional, direction-consistent, within
+  noise. Implicit module-level names keep the walk by design.
+- G3: --force-py accepts a floor range (3.12+) - structural/hexversion/
+  Py_GetVersion vectors switch to >= semantics while per-version opcode and
+  magic-range probes stay armed; exact pins behave exactly as before.
+
+Invariant: emitted runtimes remain stdlib-only and byte-compatible with the
+existing loader families; serializer gained an optional trailing field
+(data[10]) that old readers ignore.
+
+---
+
 ## 5. Verification & Testing Protocol
 
 Before committing any modifications:

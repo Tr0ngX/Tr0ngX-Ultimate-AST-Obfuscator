@@ -1,0 +1,42 @@
+{
+ "python": "3.12.10",
+ "runs": 9,
+ "vm_level": 3,
+ "cases": {
+  "fib_recursive": {
+   "native_ms": 30.11,
+   "tvm_ms": 939.38,
+   "ratio": 31.2,
+   "build_s": 0.26
+  },
+  "loop_sum": {
+   "native_ms": 31.07,
+   "tvm_ms": 638.75,
+   "ratio": 20.56,
+   "build_s": 0.23
+  },
+  "string_build": {
+   "native_ms": 28.44,
+   "tvm_ms": 209.77,
+   "ratio": 7.38,
+   "build_s": 0.3
+  },
+  "closure_counter": {
+   "native_ms": 29.67,
+   "tvm_ms": 995.96,
+   "ratio": 33.56,
+   "build_s": 0.24
+  },
+  "miller_rabin": {
+   "native_ms": 29.46,
+   "tvm_ms": 340.15,
+   "ratio": 11.55,
+   "build_s": 0.26
+  }
+ },
+ "totals": {
+  "native_ms": 148.75,
+  "tvm_ms": 3124.0,
+  "geomean_ratio": 17.89
+ }
+}
