@@ -97,7 +97,7 @@ except ImportError:
 try:
     from pystyle import Col, Colors, Colorate, Write, Add, Center, Box
 except ImportError:
-    # Lớp giả lập pystyle dự phòng nếu môi trường không có mạng/pip lỗi
+    # pystyle fallback shims for offline / broken-pip environments
     class _FallbackCol:
         dark_gray = "\033[90m"
         light_gray = "\033[37m"

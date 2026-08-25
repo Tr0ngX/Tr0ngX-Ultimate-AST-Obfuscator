@@ -1,11 +1,10 @@
-# AUTO-SPLIT from tr0ngx/cli.py - interactive TUI layer (mechanical slice).
+# Interactive TUI layer (extracted from the original monolith dispatcher).
 # ═══════════════════════════════════════════════════════════════
-# INTERACTIVE DISPATCHER (TUI)
-# ═══════════════════════════════════════════════════════════════
-# Hosts the no-CLI-args interactive flows extracted verbatim from the
-# monolith's "CLI PARSER & INTERACTIVE DISPATCHER" section: file/batch
-# selection menu, protection profile presets, and the step-by-step
-# option prompts. Prompt text, order and behavior are unchanged.
+# Hosts the no-CLI-args interactive flows: file/batch selection menu,
+# protection profile presets, and the step-by-step option prompts.
+# Prompt ORDER and semantics are unchanged from the original; rendering is
+# the only thing that moved (gradient panels, aligned menus, clear states).
+# All user-facing text is English.
 
 # stdlib wiring
 import os
@@ -19,6 +18,9 @@ from .diagnostics import (
     _prompt_input,
 )
 
+# color primitives (pystyle-backed with safe fallbacks)
+from .config import Col, Colors, Colorate
+
 # input source security validation
 from .names import _validate_input_source
 
@@ -27,6 +29,65 @@ from .names import _validate_input_source
 # path. Safe because cli.py only imports this module lazily at call time,
 # so the package graph stays acyclic.
 from .cli import _resolve_input_files
+
+# ── visual language ──────────────────────────────────────────────
+# One accent ramp used everywhere: cyan → violet. Box drawing via plain
+# characters so it renders on every Windows terminal without font tricks.
+_C1 = (0, 240, 255)
+_C2 = (140, 80, 255)
+_W = 74
+
+
+def _g(text: str) -> str:
+    return _gradient_text(text, _C1, _C2)
+
+
+def _rule(label: str = "") -> None:
+    """Section divider: ──── LABEL ────"""
+    if label:
+        pad = max(0, _W - len(label) - 8)
+        _v(_g("  ─" * 3 + f"  {label}  " + "─" * pad))
+    else:
+        _v(_g("  " + "─" * _W))
+
+
+def _panel(title: str, subtitle: str = "") -> None:
+    """Big gradient header panel."""
+    inner = _W - 2
+    top = "╔" + "═" * inner + "╗"
+    bot = "╚" + "═" * inner + "╝"
+    t_pad = max(0, (inner - len(title)) // 2)
+    s_pad = max(0, (inner - len(subtitle)) // 2)
+    row_t = "║" + " " * t_pad + title + " " * (inner - t_pad - len(title)) + "║"
+    row_s = "║" + " " * s_pad + subtitle + " " * (inner - s_pad - len(subtitle)) + "║"
+    blank = "║" + " " * inner + "║"
+    _v(_g("  " + top))
+    _v("  " + Col.white + row_t)
+    if subtitle:
+        _v(Col.dark_gray + "  " + row_s)
+    _v("  " + blank)
+    _v(_g("  " + bot))
+
+
+def _option(num: str, label: str, desc: str) -> None:
+    """Aligned menu row:  [1] LABEL      · description"""
+    col = 26
+    lbl = f"  [{num}] "
+    pad = max(1, col - len(lbl))
+    line = lbl + Col.white + label.ljust(pad - 1) + Col.dark_gray + "· " + desc
+    _v(line)
+
+
+def _ok(msg: str) -> None:
+    _v(Col.green + f"  [+] {msg}" + Col.reset)
+
+
+def _warn(msg: str) -> None:
+    _v(Col.yellow + f"  [!] {msg}" + Col.reset)
+
+
+def _err(msg: str) -> None:
+    _v(Col.red + f"  [-] {msg}" + Col.reset)
 
 
 def run_interactive(cli_args):
@@ -38,34 +99,38 @@ def run_interactive(cli_args):
     is_batch = False
     custom_out = cli_args.output
 
-    _v(" [!] TR0NGX FILE SELECTION / CHỌN CHẾ ĐỘ NHẬP:")
-    _v("  1. SINGLE FILE (Mã hóa 1 file .py đơn lẻ)")
-    _v("  2. BATCH FILES / DIRECTORY (Mã hóa hàng loạt nhiều file / thư mục / pattern)")
+    _panel(
+        "TR0NGX ULTIMATE AST OBFUSCATOR",
+        "interactive setup · python code protection suite v4.0",
+    )
+    _rule("INPUT MODE")
+    _option(1, "SINGLE FILE", "protect one .py script")
+    _option(2, "BATCH / DIRECTORY", "many files, glob patterns or a whole tree")
     file_mode_choice = _prompt_input(" Choose (1/2, default 1): ").strip()
     if file_mode_choice == "2":
         is_batch = True
         while True:
-            batch_inp = _prompt_input(" ENTER DIRECTORY, GLOB PATTERN OR FILES (vd: src/, *.py, a.py, b.py): ").strip().strip('"').strip("'")
-            rec_inp = _prompt_input(" RECURSIVE SUBDIRECTORIES? (y/n, default n): ").strip().upper()
+            batch_inp = _prompt_input(" Directory / glob / files (e.g. src/, *.py): ").strip().strip('"').strip("'")
+            rec_inp = _prompt_input(" Recurse subdirectories? (y/n, default n): ").strip().upper()
             is_rec = (rec_inp == "Y")
             try:
                 targets = _resolve_input_files(inputs=batch_inp, directory=batch_inp if os.path.isdir(batch_inp) else None, recursive=is_rec)
                 if targets:
-                    _v(_gradient_text(f" [i] Đã tìm thấy {len(targets)} file Python để obfuscate hàng loạt.", (0, 240, 255), (140, 80, 255)))
+                    _ok(f"found {len(targets)} Python files for batch obfuscation")
                     for t_idx, t in enumerate(targets[:10], 1):
-                        _v(f"     {t_idx}. {t['rel']}")
+                        _v(Col.light_gray + f"       {t_idx:>2}. {t['rel']}" + Col.reset)
                     if len(targets) > 10:
-                        _v(f"     ... và {len(targets) - 10} file khác.")
+                        _v(Col.dark_gray + f"       ... and {len(targets) - 10} more." + Col.reset)
                     break
                 else:
-                    _v(" [!] Không tìm thấy file .py nào phù hợp. Vui lòng nhập lại.")
+                    _warn("no matching .py files found - try again")
             except Exception as e:
-                _v(f" [!] Lỗi tìm file: {e}. Vui lòng nhập lại.")
+                _err(f"file discovery failed: {e} - try again")
 
-        out_dir_inp = _prompt_input(" ENTER DESTINATION OUTPUT DIRECTORY (default: tr0ngx_dist/): ").strip().strip('"').strip("'")
+        out_dir_inp = _prompt_input(" Output directory (default tr0ngx_dist/): ").strip().strip('"').strip("'")
         custom_out = out_dir_inp if out_dir_inp else "tr0ngx_dist"
     else:
-        _file = _prompt_input(" ENTER FILE: ").strip().strip('"').strip("'")
+        _file = _prompt_input(" Enter file path: ").strip().strip('"').strip("'")
         while True:
             try:
                 if not os.path.isfile(_file):
@@ -75,20 +140,22 @@ def run_interactive(cli_args):
                 _validate_input_source(raw_code)
                 ast.parse(raw_code)
                 targets = [{"src": os.path.abspath(_file), "rel": os.path.basename(_file)}]
+                _ok(f"loaded {_file}")
                 break
             except Exception as e:
-                _v(f" SYNTAX/SECURITY ERROR: {e}")
-                _file = _prompt_input(" ENTER FILE AGAIN: ").strip().strip('"').strip("'")
+                _err(f"syntax/security check failed: {e}")
+                _file = _prompt_input(" Enter file path again: ").strip().strip('"').strip("'")
 
-    _v(_gradient_text(" ╔══════════════════════════════════════════════════════════════════════╗", (0, 240, 255), (140, 80, 255)))
-    _v(_gradient_text(" ║        TR0NGX ULTIMATE TUI - CẤU HÌNH BẢO VỆ MÃ NGUỒN PYTHON        ║", (0, 240, 255), (140, 80, 255)))
-    _v(_gradient_text(" ╚══════════════════════════════════════════════════════════════════════╝", (0, 240, 255), (140, 80, 255)))
-    _v("  1. FAST LITE PRESET      -- (Mode 1 AST + Dynamic Strings)")
-    _v("  2. BALANCED PRESET       -- (Mode 2 + AEAD Compile + Velimatix L2 + Fused Matrix + Anti-Debug)")
-    _v("  3. MAXIMUM ARSENAL       -- (Mode 3 + TVM 2.0 L3 + Fused Matrix + Camouflage + Zalgo +")
-    _v("                              Math Opaque + Dyn Strings + Dec Traps + Var Split + Str Frag +")
-    _v("                              Debug Poison + Spoof Meta + In-Memory Anti-Dump)")
-    _v("  4. CUSTOM STEP-BY-STEP   -- (Tùy chỉnh chi tiết từng bước toàn bộ 17 tầng bảo vệ)")
+    _panel(
+        "PROTECTION PROFILE",
+        "pick a preset now or fine-tune all 17 layers step by step",
+    )
+    _option(1, "FAST", "mode 1 AST pass + dynamic strings · builds in seconds")
+    _option(2, "BALANCED", "mode 2 + AEAD compile + Velimatix L2 + fused matrix")
+    _option(3, "MAXIMUM ARSENAL", "mode 3 + TVM L3 + camouflage + zalgo + traps + poison")
+    _v(Col.dark_gray + "                              + anti-dump + spoof meta" + Col.reset)
+    _option(4, "CUSTOM STEP-BY-STEP", "hand-tune every protection layer")
+
     _setup = _prompt_input(" Choose profile (1/2/3/4, default 2): ").strip()
     if not _setup:
         _setup = "2"
@@ -199,6 +266,7 @@ def prompt_feature_flags(cli_args):
     Runs only in interactive mode. Returns a dict of resolved choices that
     cli.get_args_or_prompt consumes through its is_cli_mode ternaries.
     """
+    _rule("LAYER TUNING")
     moreobf = cli_args.moreobf or _prompt_input(" MORE OBF? (y/n): ")
     antidebug = cli_args.antidebug or _prompt_input(" ANTI DEBUG? (y/n): ")
     antivm = getattr(cli_args, 'antivm', None) or _prompt_input(" ANTI VM & SANDBOX? (y/n): ")

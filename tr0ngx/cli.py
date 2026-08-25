@@ -53,7 +53,7 @@ from .pipeline import run_batch_obfuscation, obfuscate_single_target
 
 
 def _apply_resource_limits(max_ram_mb: int = None, max_cores: int = None):
-    """Giới hạn tài nguyên RAM và CPU Cores để chống lag hệ thống."""
+    """Caps process RAM and CPU cores to protect the host machine."""
     if max_cores and max_cores > 0:
         try:
             # Set CPU Affinity on Windows/Linux
@@ -222,114 +222,141 @@ def _resolve_input_files(inputs=None, directory=None, recursive=False):
     return found
 
 def get_args_or_prompt():
+    # PRESETS: one-flag bundles for lazy humans and AI agents. Explicit flags
+    # always win over preset values (preset only fills unset attrs).
+    PRESETS = {
+        "fast": dict(
+            mode=1, moreobf="N", antidebug="N", antivm="N", selfmod="N",
+            compile="N", velimatix="N", veli_level=1, double_compile="N",
+            kramer="N", cjk_vars="N", matrix="N", emoji_obf="N", homoglyph="N",
+            rare_unicode="N", zalgo="N", whitespace_obf="N", blank_padding="N",
+            hyperion="N", camouflage="N", math_opaque="N", dyn_strings="Y",
+            anti_dump="N", vm_obf="N", vm_level=1, dec_trap="N", var_split="N",
+            str_frag="N", debug_poison="N", spoof_meta="N",
+        ),
+        "balanced": dict(
+            mode=2, moreobf="Y", antidebug="Y", antivm="Y", selfmod="N",
+            compile="Y", velimatix="Y", veli_level=2, double_compile="Y",
+            kramer="N", cjk_vars="N", matrix="Y", emoji_obf="N", homoglyph="N",
+            rare_unicode="N", zalgo="N", whitespace_obf="N", blank_padding="N",
+            hyperion="N", camouflage="N", math_opaque="Y", dyn_strings="Y",
+            anti_dump="Y", vm_obf="N", vm_level=1, dec_trap="Y", var_split="Y",
+            str_frag="Y", debug_poison="Y", spoof_meta="Y",
+        ),
+        "max": dict(
+            mode=3, moreobf="Y", antidebug="Y", antivm="Y", selfmod="Y",
+            compile="Y", velimatix="Y", veli_level=2, double_compile="Y",
+            kramer="N", cjk_vars="N", matrix="Y", emoji_obf="N", homoglyph="N",
+            rare_unicode="N", zalgo="Y", whitespace_obf="N", blank_padding="N",
+            hyperion="Y", camouflage="Y", math_opaque="Y", dyn_strings="Y",
+            anti_dump="Y", vm_obf="Y", vm_level=3, dec_trap="Y", var_split="Y",
+            str_frag="Y", debug_poison="Y", spoof_meta="Y",
+        ),
+        "stealth": dict(
+            mode=3, moreobf="Y", antidebug="Y", antivm="Y", selfmod="Y",
+            compile="Y", velimatix="Y", veli_level=3, double_compile="Y",
+            kramer="N", cjk_vars="Y", matrix="Y", emoji_obf="N", homoglyph="Y",
+            rare_unicode="Y", zalgo="Y", whitespace_obf="N", blank_padding="N",
+            hyperion="Y", camouflage="Y", math_opaque="Y", dyn_strings="Y",
+            anti_dump="Y", vm_obf="Y", vm_level=3, dec_trap="Y", var_split="Y",
+            str_frag="Y", debug_poison="Y", spoof_meta="Y",
+        ),
+    }
+
     parser = argparse.ArgumentParser(
-        prog="procheck.py",
+        prog="main.py",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="""
-╔══════════════════════════════════════════════════════════════════════════════╗
-║        TR0NGX x VELIMATIX x KRAMER - ULTIMATE AST OBFUSCATOR        ║
-║                    PYTHON CODE PROTECTION SUITE v4.0                         ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+        description="""\
+TR0NGX ULTIMATE AST OBFUSCATOR v4.0
+Multi-layer Python code protection: AST transforms, Velimatix, TVM
+virtualization, AEAD loaders, anti-debug/anti-VM shields, disguise layers.
 
-CÔNG CỤ LÀM RỐI MÃ NGUỒN PYTHON ĐA TẦNG CỰC MẠNH:
-  • Tầng 0: Hyperion Engine (Builtin remapping, token variable remap, math/str splitting)
-  • Tầng 1: Tr0ngX AST Transformer (Biến đổi hằng số, chuỗi, số nguyên, logic)
-  • Tầng 2: Velimatix Engine (BiOpaque predicates, Exception jump, Match-Case state machine)
-  • Tầng 3: Trongdepzai Multi-Layer AST Obfuscation (Lớp 1..3)
-  • Tầng 4: True VM Virtualization 2.0 (TVM: Polymorphic CPU, Randomized ISA & Encrypted V-Bytecode)
-  • Tầng 5: Double Compile Bytecode Loader (marshal + XOR + zlib + bz2 + base85)
-  • Tầng 6: Anti-Analysis Matrix (Anti-Debug, Anti-VM/Sandbox, In-Memory Anti-Dump, Self-Mod)
-  • Tầng 7: Math Opaque & Dynamic Callsite XOR Strings
-  • Tầng 8: Kramer Kyrie Eleison Outer Shield (Mã hóa dịch chuyển Caesar động + Class ảo)
-  • Tầng 9: Tên biến tiếng Trung / CJK + Watermark bản quyền PyCool
-  • Tầng 10: Emoji Obfuscation (Code → chuỗi emoji 🐀🐁🐂 + self-decoding loader)
-  • Tầng 11: Homoglyph & Rare Unicode Names (Cyrillic/Greek & CJK Ext-B, Kangxi, Hieroglyphs)
-  • Tầng 12: Whitespace Obfuscation (Code biến đổi thành không gian trắng space/tab binary)
-  • Tầng 13: Extreme Zalgo Diacritics Shield (Chồng lớp dấu tổ hợp làm tê liệt decompiler GUI)
-  • Tầng 14: Hyperion Scientific Class Camouflage (Ngụy trang lớp mô phỏng bộ nhớ khoa học)
-  • Tầng 15: 3-Track Symbiotic Fused Matrix Shield (Kyrie + Emoji + Whitespace hợp nhất không phình dung lượng)
-  • Tầng 16: Bedrock Decompiler Traps & Secret Sharing (Decompiler crash matrix, var-split XOR & string-frag pool)
-  • Tầng 17: Deceptive Debug Poisoning & Metadata Spoofing (Trạng thái nhiễm độc ngầm & giả lập module stdlib)
-        """,
-        epilog="""
-VÍ DỤ SỬ DỤNG:
-  1. Chạy CLI đơn file:
-     python tr0ngx_obfuscator.py -i script.py -o obf_script.py -m 3 --compile y --velimatix y --kramer y
+PRESETS (one flag does everything):
+  fast       mode 1, quick AST pass + dynamic strings          (build ~1s)
+  balanced   mode 2 + AEAD compile + Velimatix L2 + matrix     (default pick)
+  max        mode 3 + TVM L3 + fused matrix + camouflage
+  stealth    max + CJK/homoglyph/rare-unicode/zalgo identity cloak
+             NOTE: stealth stacks every layer - artifacts may hit the
+             known TVM deep-stack runtime limitation on complex inputs
+             (see AGENTS.md section 4.8); test before shipping.
 
-  2. Chạy CLI nhiều file / Batch Obfuscation:
-     python tr0ngx_obfuscator.py -i file1.py file2.py file3.py -o dist/ -m 2 --compile y -w 4
+Any explicit flag overrides the preset.""",
+        epilog="""\
+EXAMPLES
+  python main.py -i app.py --preset balanced
+  python main.py -i app.py -o out.py -m 3 --compile y --vm-obf y --vm-level 3
+  python main.py -d src/ -o dist/ -r --preset max -w 4
+  python main.py                     # interactive TUI
 
-  3. Chạy CLI toàn bộ thư mục (đệ quy):
-     python tr0ngx_obfuscator.py -d src/ -o dist/ -r -m 2 --compile y --matrix y
-
-  4. Chạy giao diện tương tác TUI (hỗ trợ chọn 1 file hoặc hàng loạt):
-     python tr0ngx_obfuscator.py
-        """
+Full per-layer control: keep every --flag from before; they stack on top of
+any preset. Docs: README.md / AGENTS.md""",
     )
     # File & Batch options
-    parser.add_argument("-i", "--input", nargs="*", help="Đường dẫn một hoặc nhiều file Python / pattern glob cần obfuscate", default=None)
-    parser.add_argument("-D", "--dir", "--directory", help="Đường dẫn thư mục chứa các file Python cần obfuscate hàng loạt", default=None)
-    parser.add_argument("-r", "--recursive", action="store_true", help="Quét đệ quy tất cả thư mục con khi obfuscate thư mục")
-    parser.add_argument("-o", "--output", help="Đường dẫn file kết quả (nếu 1 file) hoặc thư mục kết quả (nếu nhiều file)", default=None)
-    parser.add_argument("-w", "--workers", "--jobs", "-j", type=int, default=None, help="Số luồng CPU xử lý song song khi obfuscate nhiều file")
+    parser.add_argument("-i", "--input", nargs="*", help="File(s)/glob patterns to obfuscate", default=None)
+    parser.add_argument("--preset", choices=["fast", "balanced", "max", "stealth"], default=None,
+                        help="One-flag protection bundle; explicit flags override it")
+    parser.add_argument("-D", "--dir", "--directory", help="Directory containing Python files for batch obfuscation", default=None)
+    parser.add_argument("-r", "--recursive", action="store_true", help="Recurse into subdirectories when batch-obfuscating a directory")
+    parser.add_argument("-o", "--output", help="Output file (single input) or output directory (batch)", default=None)
+    parser.add_argument("-w", "--workers", "--jobs", "-j", type=int, default=None, help="Parallel worker threads for batch obfuscation")
     
     # Engine modes
-    parser.add_argument("-m", "--mode", type=int, choices=[1, 2, 3], help="Cấp độ làm rối Trongdepzai AST (1: Cơ bản, 2: Nâng cao, 3: Cực đại)", default=None)
-    parser.add_argument("--moreobf", choices=["y", "n", "Y", "N"], help="Bơm mã rác AST junk & try-except dead code (y/n)", default=None)
-    parser.add_argument("--antidebug", choices=["y", "n", "Y", "N"], help="Kích hoạt khiên chống debug & anti-hook (y/n)", default=None)
-    parser.add_argument("--antivm", choices=["y", "n", "Y", "N"], help="Kích hoạt khiên phát hiện máy ảo (Anti-VM & Sandbox Detection) (y/n)", default=None)
-    parser.add_argument("--selfmod", choices=["y", "n", "Y", "N"], help="Thêm tầng mã tự biến đổi chữ ký khi chạy (y/n)", default=None)
-    parser.add_argument("--compile", choices=["y", "n", "Y", "N"], help="Biên dịch bytecode đa tầng (marshal + XOR + zlib + bz2) (y/n)", default=None)
+    parser.add_argument("-m", "--mode", type=int, choices=[1, 2, 3], help="Trongdepzai AST intensity (1 basic, 2 advanced, 3 maximum)", default=None)
+    parser.add_argument("--moreobf", choices=["y", "n", "Y", "N"], help="Inject AST junk code and try-except decoys (y/n)", default=None)
+    parser.add_argument("--antidebug", choices=["y", "n", "Y", "N"], help="Enable anti-debug & anti-hook shield (y/n)", default=None)
+    parser.add_argument("--antivm", choices=["y", "n", "Y", "N"], help="Enable anti-VM / sandbox detection shield (y/n)", default=None)
+    parser.add_argument("--selfmod", choices=["y", "n", "Y", "N"], help="Add runtime signature self-mutation layer (y/n)", default=None)
+    parser.add_argument("--compile", choices=["y", "n", "Y", "N"], help="Multi-layer bytecode compilation: marshal+XOR+zlib+bz2 (y/n)", default=None)
     
     # Cryptographic Authentication & Passwords
-    parser.add_argument("--password", type=str, default=None, help="Mật khẩu mã hóa payload chuẩn Argon2id + ChaCha20Poly1305 AEAD")
-    parser.add_argument("--password-file", type=str, default=None, help="Đường dẫn file chứa mật khẩu mã hóa (tránh lộ password qua tiến trình)")
-    parser.add_argument("--max-output-size", default=None, help="Giới hạn dung lượng file output tối đa (vd: 10MB, 50MB, 10485760)")
-    parser.add_argument("--seed", type=int, default=None, help="Seed số nguyên để sinh mã định danh mang tính tái lập (Reproducible deterministic build)")
+    parser.add_argument("--password", type=str, default=None, help="Payload password: Argon2id + ChaCha20-Poly1305 AEAD")
+    parser.add_argument("--password-file", type=str, default=None, help="File containing the encryption password (keeps it off the process list)")
+    parser.add_argument("--max-output-size", default=None, help="Maximum output size DoS cap (e.g. 10MB, 50MB, 10485760)")
+    parser.add_argument("--seed", type=int, default=None, help="Integer seed for reproducible builds")
 
     # Velimatix engine
-    parser.add_argument("--velimatix", choices=["y", "n", "Y", "N"], help="Kích hoạt động cơ Velimatix AST (y/n)", default=None)
-    parser.add_argument("--veli-level", type=int, choices=[1, 2, 3], help="Cấp độ Velimatix (1: BiOpaque, 2: Exception Jump, 3: Match-Case State Machine)", default=None)
-    parser.add_argument("--double-compile", choices=["y", "n", "Y", "N"], help="Đóng gói kép (Trongdepzai bytecode bên trong loader Velimatix) (y/n)", default=None)
+    parser.add_argument("--velimatix", choices=["y", "n", "Y", "N"], help="Enable Velimatix AST engine (y/n)", default=None)
+    parser.add_argument("--veli-level", type=int, choices=[1, 2, 3], help="Velimatix level (1 BiOpaque, 2 ExceptionJump, 3 MatchCase)", default=None)
+    parser.add_argument("--double-compile", choices=["y", "n", "Y", "N"], help="Double compile: inner bytecode wrapped in a Velimatix loader (y/n)", default=None)
     
     # Outer layers & variables
-    parser.add_argument("--kramer", choices=["y", "n", "Y", "N"], help="Bọc ngoài bằng khiên Kramer Kyrie Eleison (y/n)", default=None)
-    parser.add_argument("--cjk-vars", choices=["y", "n", "Y", "N"], help="Sử dụng biến ký tự chữ Hán / CJK & docstring PyCool (y/n)", default=None)
-    parser.add_argument("--force-py", help="Khóa chỉ cho phép chạy trên phiên bản Python chỉ định (vd: 3.10, 3.11, 3.12, 3.14) hoặc 'off'", default=None)
+    parser.add_argument("--kramer", choices=["y", "n", "Y", "N"], help="Wrap with Kramer Kyrie Eleison outer shield (y/n)", default=None)
+    parser.add_argument("--cjk-vars", choices=["y", "n", "Y", "N"], help="CJK identifiers + PyCool docstrings (y/n)", default=None)
+    parser.add_argument("--force-py", help="Lock runtime to a Python version (e.g. 3.10 / 3.11.4), a floor like 3.12+, or 'off' to disable", default=None)
     
     # Debug & Environment controls
-    parser.add_argument("--debug-map", nargs="?", const="AUTO", default=None, help="Xuất bản đồ ánh xạ ký hiệu & thời gian từng stage ra file JSON (vd: --debug-map map.json)")
-    parser.add_argument("--debug", "-d", action="store_true", help="Bật chế độ debug chi tiết (in log micro-stages, traceback và cảnh báo lỗi)")
-    parser.add_argument("--profile", action="store_true", help="Hiển thị bảng phân tích chi tiết hiệu năng (Profiling Waterfall & Bottleneck Analysis)")
-    parser.add_argument("--log-file", type=str, default=None, help="Ghi toàn bộ log và chẩn đoán chi tiết ra file riêng (vd: --log-file debug.log)")
-    parser.add_argument("--strict", action="store_true", help="Dừng tiến trình ngay khi gặp lỗi ở bất kỳ stage nào thay vì âm thầm bỏ qua")
-    parser.add_argument("--no-art", "--quiet", "-q", action="store_true", help="Tắt banner ASCII art và hiệu ứng màu để chạy sạch trong CLI/Agent")
+    parser.add_argument("--debug-map", nargs="?", const="AUTO", default=None, help="Export symbol-rename map + stage metrics to JSON (e.g. --debug-map map.json)")
+    parser.add_argument("--debug", "-d", action="store_true", help="Verbose debug logging with tracebacks")
+    parser.add_argument("--profile", action="store_true", help="Show profiling waterfall and bottleneck analysis")
+    parser.add_argument("--log-file", type=str, default=None, help="Write diagnostic logs to a file (e.g. --log-file debug.log)")
+    parser.add_argument("--strict", action="store_true", help="Abort immediately on any stage error instead of skipping silently")
+    parser.add_argument("--no-art", "--quiet", "-q", action="store_true", help="Disable ASCII banners and color effects for clean CI/agent runs")
     
     # Resource limiting (RAM & CPU Cores)
-    parser.add_argument("--max-ram", "--ram-limit", type=int, default=None, help="Giới hạn dung lượng RAM tối đa (MB) cho tiến trình (vd: --max-ram 2048)")
-    parser.add_argument("--cores", "--threads", type=int, default=None, help="Giới hạn số CPU Cores/Threads sử dụng (vd: --cores 2)")
+    parser.add_argument("--max-ram", "--ram-limit", type=int, default=None, help="Cap process memory usage in MB (e.g. --max-ram 2048)")
+    parser.add_argument("--cores", "--threads", type=int, default=None, help="Limit CPU cores used (e.g. --cores 2)")
 
     # New obfuscation modes
     parser.add_argument("--matrix", "--fused", choices=["y", "n", "Y", "N"], help="Kich hoat Ma Tran Hoa Quyen Da Tang (Hybrid Blended Variables + Fused 3-Track Shield) (y/n)", default=None)
-    parser.add_argument("--emoji-obf", choices=["y", "n", "Y", "N"], help="Ma hoa output thanh chuoi emoji sequence (y/n)", default=None)
-    parser.add_argument("--homoglyph", choices=["y", "n", "Y", "N"], help="Dung ten bien Cyrillic/Greek trong giong ASCII (a->а, o->о) (y/n)", default=None)
-    parser.add_argument("--rare-unicode", choices=["y", "n", "Y", "N"], help="Dung ky tu Unicode sieu hiem (CJK Extension B, Kangxi) (y/n)", default=None)
+    parser.add_argument("--emoji-obf", choices=["y", "n", "Y", "N"], help="Encode output as an emoji stream (y/n)", default=None)
+    parser.add_argument("--homoglyph", choices=["y", "n", "Y", "N"], help="Homoglyph identifiers: Cyrillic/Greek lookalikes (y/n)", default=None)
+    parser.add_argument("--rare-unicode", choices=["y", "n", "Y", "N"], help="Rare Unicode identifiers (CJK Ext-B, Kangxi) (y/n)", default=None)
     parser.add_argument("--zalgo", "--combining-marks", "-z", choices=["y", "n", "Y", "N"], help="Kich hoat khien Zalgo Combining Marks chong cuc nhieu dau lam lag engine render GUI/Decompiler (y/n)", default=None)
-    parser.add_argument("--whitespace-obf", choices=["y", "n", "Y", "N"], help="Mã hóa output thành khoảng trắng vô hình (space=0, tab=1) (y/n)", default=None)
-    parser.add_argument("--blank-padding", "--blank-lines", choices=["y", "n", "Y", "N"], help="Chèn hàng trăm dòng khoảng trống trắng tinh ở đầu file (Screen Blanker Padding) (y/n)", default=None)
-    parser.add_argument("--hyperion", choices=["y", "n", "Y", "N"], help="Kích hoạt Hyperion Engine (Builtins remapping + token variable remapping + math/str obfuscation + chunk shell) (y/n)", default=None)
-    parser.add_argument("--camouflage", "--camo", choices=["y", "n", "Y", "N"], help="Kích hoạt lớp ngụy trang Hyperion Camouflage (Fake Scientific/Algorithmic Class simulation) (y/n)", default=None)
-    parser.add_argument("--math-opaque", choices=["y", "n", "Y", "N"], help="Kích hoạt vị từ toán học mờ (Mathematical Opaque Predicates - Quadratic Non-Residue mod 7 & Euler invariants) (y/n)", default=None)
-    parser.add_argument("--dyn-strings", choices=["y", "n", "Y", "N"], help="Mã hóa chuỗi động XOR cục bộ từng vị trí gọi (Per-callsite dynamic XOR string encryption) (y/n)", default=None)
-    parser.add_argument("--anti-dump", choices=["y", "n", "Y", "N"], help="Kích hoạt khiên chống memory dump & lọc đối tượng GC (In-Memory Anti-Dump & GC Object Scrubber) (y/n)", default=None)
-    parser.add_argument("--vm-obf", choices=["y", "n", "Y", "N"], help="Kích hoạt VM Virtualization Engine - biến đổi code thành bytecode ảo thực thi bởi CPU ảo đa hình (y/n)", default=None)
-    parser.add_argument("--vm-level", type=int, choices=[1, 2, 3, 4], help="Cấp độ VM Virtualization (1: Basic, 2: + Traps/NOP, 3: + Dummy/Scrub, 4: + Per-Function ISA Keys)", default=None)
-    parser.add_argument("--dec-trap", "--dectrap", choices=["y", "n", "Y", "N"], help="Kích hoạt bẫy điều khiển luồng Decompiler Traps (làm sập uncompyle6, decompyle3, pycdc) (y/n)", default=None)
-    parser.add_argument("--var-split", choices=["y", "n", "Y", "N"], help="Phân rã biến số nguyên thành các mảnh bí mật XOR (Variable Secret Sharing) (y/n)", default=None)
-    parser.add_argument("--str-frag", choices=["y", "n", "Y", "N"], help="Băm nhỏ chuỗi và nạp mồi nhử trong const pool (String Fragmentation & Decoy Pool) (y/n)", default=None)
-    parser.add_argument("--debug-poison", choices=["y", "n", "Y", "N"], help="Kích hoạt trạng thái nhiễm độc ngầm Deceptive Debug Poisoning State Machine (y/n)", default=None)
-    parser.add_argument("--spoof-meta", choices=["y", "n", "Y", "N"], help="Ngụy trang siêu dữ liệu và đường dẫn module stdlib (Metadata & co_filename Spoofing) (y/n)", default=None)
-    parser.add_argument("--exotic-pools", choices=["y", "n", "Y", "N"], help="Identifier từ các pool Unicode cực hiếm (Tangut, Egyptian Hieroglyphs, CJK Ext G/H, Anatolian, Bamum, Glagolitic, Miao) - XID + NFKC validated (y/n)", default=None)
+    parser.add_argument("--whitespace-obf", choices=["y", "n", "Y", "N"], help="Encode output as invisible whitespace bits (space=0 tab=1) (y/n)", default=None)
+    parser.add_argument("--blank-padding", "--blank-lines", choices=["y", "n", "Y", "N"], help="Prepend hundreds of blank lines to hide code from editors (y/n)", default=None)
+    parser.add_argument("--hyperion", choices=["y", "n", "Y", "N"], help="Enable Hyperion Engine: builtin remap + token remap + math/str split + chunk shells (y/n)", default=None)
+    parser.add_argument("--camouflage", "--camo", choices=["y", "n", "Y", "N"], help="Wrap output in the Hyperion fake scientific-class camouflage (y/n)", default=None)
+    parser.add_argument("--math-opaque", choices=["y", "n", "Y", "N"], help="Number-theoretic opaque predicates (Quadratic Non-Residue mod 7 etc.) (y/n)", default=None)
+    parser.add_argument("--dyn-strings", choices=["y", "n", "Y", "N"], help="Per-callsite dynamic XOR string encryption (y/n)", default=None)
+    parser.add_argument("--anti-dump", choices=["y", "n", "Y", "N"], help="In-memory anti-dump shield + GC object scrubber (y/n)", default=None)
+    parser.add_argument("--vm-obf", choices=["y", "n", "Y", "N"], help="TVM virtualization: code becomes encrypted bytecode on a polymorphic VM (y/n)", default=None)
+    parser.add_argument("--vm-level", type=int, choices=[1, 2, 3, 4], help="TVM level (1 basic, 2 +traps/NOP, 3 +dummy/scrub, 4 reserved)", default=None)
+    parser.add_argument("--dec-trap", "--dectrap", choices=["y", "n", "Y", "N"], help="Decompiler control-flow traps: crash uncompyle6/decompyle3/pycdc (y/n)", default=None)
+    parser.add_argument("--var-split", choices=["y", "n", "Y", "N"], help="Split local ints into XOR secret shares (y/n)", default=None)
+    parser.add_argument("--str-frag", choices=["y", "n", "Y", "N"], help="String fragmentation with decoy pool (y/n)", default=None)
+    parser.add_argument("--debug-poison", choices=["y", "n", "Y", "N"], help="Deceptive debug-poison state machine (silent key degradation) (y/n)", default=None)
+    parser.add_argument("--spoof-meta", choices=["y", "n", "Y", "N"], help="Metadata & co_filename spoofing to stdlib modules (y/n)", default=None)
+    parser.add_argument("--exotic-pools", choices=["y", "n", "Y", "N"], help="Identifiers from rare Unicode pools (Tangut, Egyptian, CJK Ext G/H...) (y/n)", default=None)
     parser.add_argument("--base4096", choices=["y", "n", "Y", "N"], help="Encode payload thanh stream glyph 12-bit tu block Unicode hiem (Base4096 exotic alphabet) (y/n)", default=None)
     parser.add_argument("--bit-matrix", choices=["y", "n", "Y", "N"], help="Bien doi byte da vong: LCG-XOR / bit rotation / nibble swap / S-Box permutation (y/n)", default=None)
     parser.add_argument("--lzma-layer", choices=["y", "n", "Y", "N"], help="Them lop nen LZMA (preset 9) truoc ma hoa AEAD - giam 10-25%% kich thuoc payload (y/n)", default=None)
@@ -346,6 +373,15 @@ VÍ DỤ SỬ DỤNG:
                 continue
             print(f"[-] ERROR: unrecognized argument: {_u}", file=sys.stderr)
         sys.exit(2)
+
+    # PERF/UX: --preset fills every unset flag; explicit flags already parsed
+    # onto cli_args win because we only touch None attributes here.
+    if getattr(cli_args, "preset", None):
+        for _pk, _pv in PRESETS[cli_args.preset].items():
+            if getattr(cli_args, _pk, None) is None:
+                setattr(cli_args, _pk, _pv)
+        _trx_cfg._EngineState.cli_quiet_mode = True
+
     is_cli_mode = bool(cli_args.input is not None or cli_args.dir is not None)
 
     if getattr(cli_args, 'debug', False):
@@ -368,7 +404,7 @@ VÍ DỤ SỬ DỤNG:
     if is_cli_mode:
         targets = _resolve_input_files(inputs=cli_args.input, directory=cli_args.dir, recursive=cli_args.recursive)
         if not targets:
-            _v(" [ERROR] CLI: Không tìm thấy bất kỳ file Python (.py) hợp lệ nào.")
+            _v(" [ERROR] CLI: no valid Python (.py) files found for the given inputs.")
             sys.exit(1)
         if len(targets) > 1 or cli_args.dir is not None:
             is_batch = True

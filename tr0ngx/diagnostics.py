@@ -355,7 +355,7 @@ def _clean_ansi(text: str) -> str:
     return cleaned
 
 def _gradient_text(text: str, start_rgb: tuple, end_rgb: tuple) -> str:
-    """Tạo chuỗi màu gradient 2 màu mượt mà pha trộn qua 24-bit TrueColor ANSI escape codes."""
+    """Smooth two-color gradient string via 24-bit TrueColor ANSI escapes."""
     if not isinstance(text, str) or not text:
         return str(text)
     if _cfg._EngineState.cli_quiet_mode:
@@ -370,7 +370,7 @@ def _gradient_text(text: str, start_rgb: tuple, end_rgb: tuple) -> str:
     return "".join(res) + "\033[0m"
 
 def _format_symbol_tag(symbol: str) -> str:
-    """Tạo tag [TR0NGX] / [STAGE] bằng bảng phối màu Neon Cyberpunk rực rỡ, sắc nét từng ký tự."""
+    """Build the [TR0NGX] / [STAGE] tag with a sharp neon-cyberpunk palette."""
     if _cfg._EngineState.cli_quiet_mode:
         return f"[{symbol}]"
     if symbol == 'TR0NGX':
@@ -438,7 +438,7 @@ def _safe_print(*args, **kwargs):
 _raw_print = _safe_print
 
 def _v_step(step, total, text):
-    """Hiển thị log từng bước cực đẹp với màu sắc và căn lề chuẩn"""
+    """Pretty per-stage log line with colors and aligned columns."""
     if _cfg._EngineState.cli_quiet_mode:
         _v(f" [{step}/{total}] {text}")
         return

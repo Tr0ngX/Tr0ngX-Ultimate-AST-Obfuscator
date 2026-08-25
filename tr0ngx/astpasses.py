@@ -1648,8 +1648,8 @@ def _syntax(x):
 
 _obf_progress = {'current': 0, 'total': 0}
 
-def _print_progress_bar(current, total, prefix='[TR0NGX]', suffix='biến đã obfuscate', length=40):
-    """Hiển thị progress bar cực đẹp với animation (tắt trong quiet/CLI mode)"""
+def _print_progress_bar(current, total, prefix='[TR0NGX]', suffix='identifiers obfuscated', length=40):
+    """Animated progress bar display (disabled in quiet/CLI mode)."""
     if _cfg._EngineState.cli_quiet_mode:
         return
     import sys

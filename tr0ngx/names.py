@@ -135,11 +135,11 @@ def _rd():
 _cfg._EngineState.use_fused_names = False
 
 def _gen_fused_name(scope='general'):
-    """Tạo tên biến lai ma trận (Hybrid Blended Identifier):
+    """Generate hybrid blended matrix identifiers:
        - 'state_machine': Homoglyphs (Cyrillic a, e, o, s, p lookalikes)
        - 'biopaque': Rare Unicode Kangxi radicals (𪚥, 龘, 鱻, 麤, 靐)
        - 'globals': PyCool CJK Ideographs
-       - 'general': Luân phiên đa hình ngẫu nhiên
+       - 'general': randomized polymorphic rotation
     """
     _init_rare_chars()
     if scope == 'state_machine':
@@ -466,8 +466,8 @@ def _init_combining_marks():
     _COMBINING_MARKS_VALID = pool
 
 def _gen_zalgo_name(base_len=1, mark_intensity=45):
-    """Tạo tên biến hợp lệ trong Python chứa hàng chục dấu combining diacritical marks (Z͑͗͑͗...)
-       gây quá tải rendering engine của IDE / Decompiler (DirectWrite, HarfBuzz, Scintilla, FreeType).
+    """Generate valid Python names stacked with dozens of combining marks (Z͑͗͑͗...)
+       overloads IDE/decompiler text renderers (DirectWrite, HarfBuzz, Scintilla, FreeTypeype).
     """
     import unicodedata
     _init_combining_marks()
@@ -484,7 +484,7 @@ def _gen_zalgo_name(base_len=1, mark_intensity=45):
             return name
 
 def _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=6, chars_per_line=12, marks_per_char=50):
-    """Tạo khối docstring/comment cascade cực đại chứa hàng nghìn combining marks chồng chéo."""
+    """Emit a maximal cascade docstring block with thousands of stacked combining marks."""
     _init_combining_marks()
     tq = chr(39) * 3
     _bases = list("ZALGO_CHAOS_ENGINE_TR0NGX_MATRIX_AST_OBFUSCATOR_VOID_KYRIE_ELEISON")
