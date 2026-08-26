@@ -1,10 +1,12 @@
 # Interactive TUI layer (extracted from the original monolith dispatcher).
 # ═══════════════════════════════════════════════════════════════
-# Hosts the no-CLI-args interactive flows: file/batch selection menu,
-# protection profile presets, and the step-by-step option prompts.
-# Prompt ORDER and semantics are unchanged from the original; rendering is
-# the only thing that moved (gradient panels, aligned menus, clear states).
-# All user-facing text is English.
+# Full UI/UX remake grounded in the ui-ux-pro-max design system:
+#   style     Dark Mode (OLED) - deep slate surfaces, high contrast text
+#   palette   fg #F8FAFC · muted #94A3B8 · border #475569
+#             accent/run #22C55E · warn #FACC15 · danger #EF4444
+#   mood      terminal / cli / hacker / monospace precision
+# Prompt ORDER and semantics are preserved from the original flows;
+# only rendering moved. All user-facing text is English.
 
 # stdlib wiring
 import os
@@ -18,9 +20,6 @@ from .diagnostics import (
     _prompt_input,
 )
 
-# color primitives (pystyle-backed with safe fallbacks)
-from .config import Col, Colors, Colorate
-
 # input source security validation
 from .names import _validate_input_source
 
@@ -30,64 +29,228 @@ from .names import _validate_input_source
 # so the package graph stays acyclic.
 from .cli import _resolve_input_files
 
-# ── visual language ──────────────────────────────────────────────
-# One accent ramp used everywhere: cyan → violet. Box drawing via plain
-# characters so it renders on every Windows terminal without font tricks.
-_C1 = (0, 240, 255)
-_C2 = (140, 80, 255)
-_W = 74
+# ── design tokens (ui-ux-pro-max: Dark OLED / slate-emerald) ─────────
+_W = 74                      # content width, consistent rhythm everywhere
+_FG = (248, 250, 252)        # #F8FAFC foreground
+_MUTED = (148, 163, 184)     # #94A3B8 secondary text
+_BORDER = (71, 85, 105)      # #475569 borders/rules
+_ACC1 = (34, 197, 94)        # #22C55E run-green (primary ramp start)
+_ACC2 = (56, 189, 248)       # sky   (primary ramp end)
+_OK = (34, 197, 94)
+_WARN = (250, 204, 21)
+_DANGER = (239, 68, 68)
+
+try:
+    from pystyle import Col as _Col
+    _GREEN = _Col.green
+    _YELLOW = _Col.yellow
+    _RED = _Col.red
+    _GREY = _Col.dark_gray
+    _WHITE = _Col.white
+    _RESET = _Col.reset
+except Exception:
+    _GREEN, _YELLOW, _RED = "\033[92m", "\033[93m", "\033[91m"
+    _GREY, _WHITE, _RESET = "\033[90m", "\033[97m", "\033[0m"
 
 
 def _g(text: str) -> str:
-    return _gradient_text(text, _C1, _C2)
+    """Primary brand gradient (emerald -> sky)."""
+    return _gradient_text(text, _ACC1, _ACC2)
 
 
-def _rule(label: str = "") -> None:
-    """Section divider: ──── LABEL ────"""
-    if label:
-        pad = max(0, _W - len(label) - 8)
-        _v(_g("  ─" * 3 + f"  {label}  " + "─" * pad))
-    else:
-        _v(_g("  " + "─" * _W))
+def _dim(text: str) -> str:
+    return f"\033[38;2;{ _MUTED[0] };{_MUTED[1]};{_MUTED[2] }m{text}{_RESET}"
 
 
-def _panel(title: str, subtitle: str = "") -> None:
-    """Big gradient header panel."""
-    inner = _W - 2
-    top = "╔" + "═" * inner + "╗"
-    bot = "╚" + "═" * inner + "╝"
-    t_pad = max(0, (inner - len(title)) // 2)
-    s_pad = max(0, (inner - len(subtitle)) // 2)
-    row_t = "║" + " " * t_pad + title + " " * (inner - t_pad - len(title)) + "║"
-    row_s = "║" + " " * s_pad + subtitle + " " * (inner - s_pad - len(subtitle)) + "║"
-    blank = "║" + " " * inner + "║"
-    _v(_g("  " + top))
-    _v("  " + Col.white + row_t)
-    if subtitle:
-        _v(Col.dark_gray + "  " + row_s)
-    _v("  " + blank)
-    _v(_g("  " + bot))
+def _border_ch(ch: str) -> str:
+    return f"\033[38;2;{_BORDER[0]};{_BORDER[1]};{_BORDER[2]}m{ch}{_RESET}"
 
 
-def _option(num: str, label: str, desc: str) -> None:
-    """Aligned menu row:  [1] LABEL      · description"""
-    col = 26
-    lbl = f"  [{num}] "
-    pad = max(1, col - len(lbl))
-    line = lbl + Col.white + label.ljust(pad - 1) + Col.dark_gray + "· " + desc
-    _v(line)
+def _out(text: str = "") -> None:
+    """Direct console write - bypasses the [TR0NGX] stage-tag logger so UI
+    frames stay perfectly aligned and colors render untouched."""
+    sys.stdout.write(text + "\n")
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
 
 
-def _ok(msg: str) -> None:
-    _v(Col.green + f"  [+] {msg}" + Col.reset)
+def _init_console() -> None:
+    """Best-effort console polish: clear screen, enable VT processing,
+    pin a monospace font on legacy conhost. Every step is optional."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.GetStdHandle(-11)
+        # clear + home
+        _out("\033[2J\033[H")
+        # VT processing (harmless if already enabled by config.py)
+        mode = ctypes.c_ulong()
+        if k32.GetConsoleMode(h, ctypes.byref(mode)):
+            k32.SetConsoleMode(h, mode.value | 0x0004)
+        # best-effort monospace font pin (legacy conhost only)
+        class COORD(ctypes.Structure):
+            _fields_ = [("X", ctypes.c_short), ("Y", ctypes.c_short)]
+
+        class FONT(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_ulong),
+                        ("nFont", ctypes.c_ulong),
+                        ("dwFontSize", COORD),
+                        ("FontFamily", ctypes.c_uint),
+                        ("FontWeight", ctypes.c_uint),
+                        ("FaceName", ctypes.c_wchar * 32)]
+        f = FONT()
+        f.cbSize = ctypes.sizeof(FONT)
+        f.dwFontSize.X = 0
+        f.dwFontSize.Y = 18
+        f.FontWeight = 500
+        name = "JetBrains Mono"
+        for ch in name[:31]:
+            pass
+        f.FaceName = "Consolas"  # universally present; JetBrains Mono if user-set
+        k32.SetCurrentConsoleFontEx(h, False, ctypes.byref(f))
+    except Exception:
+        pass
 
 
-def _warn(msg: str) -> None:
-    _v(Col.yellow + f"  [!] {msg}" + Col.reset)
+# Block-letter logo, 5 rows. Gradient is applied per character column.
+_LOGO_ROWS = [
+    "████████     █████   ████    ██   ██  ██████  ██   ██",
+    "   ██       ██   ██  ██  ██   ██  ██  ██      ██  ██ ",
+    "   ██       ███████  ██   ██  █████   ██████  █████  ",
+    "   ██       ██   ██  ██  ██   ██  ██  ██      ██  ██ ",
+    "   ██  ██   ██   ██  ████    ██   ██  ██████  ██   ██",
+]
 
 
-def _err(msg: str) -> None:
-    _v(Col.red + f"  [-] {msg}" + Col.reset)
+def _logo() -> None:
+    """Per-character horizontal gradient across the block-letter logo."""
+    total = max(len(r) for r in _LOGO_ROWS)
+
+    def lerp(a, b, t):
+        return int(a + (b - a) * t)
+
+    stops = (_ACC1, (56, 189, 248), (140, 80, 255))
+    for r in _LOGO_ROWS:
+        line = ""
+        for x, ch in enumerate(r):
+            if ch == " ":
+                line += " "
+                continue
+            t = min(1.0, max(0.0, x / max(1, total - 1)))
+            seg = t * (len(stops) - 1)
+            i = min(len(stops) - 2, int(seg))
+            tt = seg - i
+            c = tuple(lerp(stops[i][k], stops[i + 1][k], tt) for k in range(3))
+            line += f"\033[38;2;{c[0]};{c[1]};{c[2]}m{ch}"
+        _out(line + _RESET)
+
+
+def _banner() -> None:
+    """Hero: gradient block-letter logo + muted tagline strip."""
+    sub = "python code protection suite  ·  interactive setup  ·  v4.0"
+    sp = max(0, (_W - len(sub)) // 2)
+    _out("")
+    _logo()
+    _out(_dim((" " * sp) + sub))
+    _out("")
+
+
+def _section(label: str) -> None:
+    """Section divider with the label embedded in a border-colored rule."""
+    pad = max(0, _W - len(label) - 6)
+    line = "  ──  " + label + "  " + "─" * pad
+    _out("")
+    _out(_border_ch(line))
+
+
+def _menu(rows) -> None:
+    """Rounded option list. rows = [(num, label, desc)]."""
+    top = "  ╭" + "─" * (_W - 2) + "╮"
+    bot = "  ╰" + "─" * (_W - 2) + "╯"
+    _out(top)
+    for num, label, desc in rows:
+        left = f"  │ [{num}] "
+        mid = label.ljust(max(1, 20 - len(num)))
+        right = "· " + desc
+        pad = max(0, _W - 4 - len(f"[{num}] ") - len(mid) - len(right) - 2)
+        line = left + _WHITE + mid + _GREY + " " + right + " " * pad + _RESET + "│"
+        _out(line)
+    _out(bot)
+
+
+def _checklist(title: str, pairs) -> None:
+    """Two-column ON/OFF state panel for the chosen profile."""
+    col_w = (_W - 8) // 2
+    cells = []
+    for name, on in pairs:
+        mark = (_GREEN + "✓" + _RESET) if str(on).upper() == "Y" else _dim("·")
+        cells.append((name, mark))
+    top = "  ╭" + "─" * (_W - 2) + "╮"
+    bot = "  ╰" + "─" * (_W - 2) + "╯"
+    head = "  │ " + _g(title.ljust(_W - 4)) + "│"
+    _out(top)
+    _out(head)
+    for i in range(0, len(cells), 2):
+        left_n, left_m = cells[i]
+        if i + 1 < len(cells):
+            right_n, right_m = cells[i + 1]
+            r_txt = right_m + " " + right_n
+        else:
+            r_txt = ""
+        l_txt = left_m + " " + left_n
+        pad_l = max(0, col_w - len(left_n) - 2)
+        pad_r = max(0, col_w - len(right_n) - 2) if r_txt else col_w
+        line = ("  │ " + l_txt + " " * pad_l + "  " + r_txt
+                + (" " * pad_r if r_txt else "") + "│")
+        _out(line)
+    _out(bot)
+
+
+def _state_ok(msg: str) -> None:
+    _out(f"\033[38;2;{_OK[0]};{_OK[1]};{_OK[2]}m  [ok] {msg}{_RESET}")
+
+
+def _state_warn(msg: str) -> None:
+    _out(f"\033[38;2;{_WARN[0]};{_WARN[1]};{_WARN[2]}m  [!!] {msg}{_RESET}")
+
+
+def _state_err(msg: str) -> None:
+    _out(f"\033[38;2;{_DANGER[0]};{_DANGER[1]};{_DANGER[2]}m  [xx] {msg}{_RESET}")
+
+
+def _profile_pairs(cli_args) -> list:
+    keys = [
+        ("AST mode %d" % getattr(cli_args, "mode", 0), None),
+    ]
+    flags = [
+        ("compile", cli_args.compile),
+        ("double-compile", cli_args.double_compile),
+        ("velimatix L%d" % getattr(cli_args, "veli_level", 1), cli_args.velimatix),
+        ("TVM virtualization", cli_args.vm_obf),
+        ("anti-debug", cli_args.antidebug),
+        ("anti-vm", cli_args.antivm),
+        ("anti-dump", cli_args.anti_dump),
+        ("self-modify", cli_args.selfmod),
+        ("fused matrix", cli_args.matrix),
+        ("camouflage", cli_args.camouflage),
+        ("hyperion", cli_args.hyperion),
+        ("math-opaque", cli_args.math_opaque),
+        ("dyn-strings", cli_args.dyn_strings),
+        ("dec-traps", cli_args.dec_trap),
+        ("var-split", cli_args.var_split),
+        ("str-frag", cli_args.str_frag),
+        ("debug-poison", cli_args.debug_poison),
+        ("spoof-meta", cli_args.spoof_meta),
+        ("zalgo marks", cli_args.zalgo),
+        ("cjk vars", cli_args.cjk_vars),
+        ("homoglyph", cli_args.homoglyph),
+        ("rare-unicode", cli_args.rare_unicode),
+    ]
+    return [(k, v) for k, v in flags]
 
 
 def run_interactive(cli_args):
@@ -99,13 +262,13 @@ def run_interactive(cli_args):
     is_batch = False
     custom_out = cli_args.output
 
-    _panel(
-        "TR0NGX ULTIMATE AST OBFUSCATOR",
-        "interactive setup · python code protection suite v4.0",
-    )
-    _rule("INPUT MODE")
-    _option(1, "SINGLE FILE", "protect one .py script")
-    _option(2, "BATCH / DIRECTORY", "many files, glob patterns or a whole tree")
+    _init_console()
+    _banner()
+    _section("INPUT MODE")
+    _menu([
+        ("1", "SINGLE FILE", "protect one .py script"),
+        ("2", "BATCH / TREE", "globs, many files or a whole directory"),
+    ])
     file_mode_choice = _prompt_input(" Choose (1/2, default 1): ").strip()
     if file_mode_choice == "2":
         is_batch = True
@@ -116,16 +279,16 @@ def run_interactive(cli_args):
             try:
                 targets = _resolve_input_files(inputs=batch_inp, directory=batch_inp if os.path.isdir(batch_inp) else None, recursive=is_rec)
                 if targets:
-                    _ok(f"found {len(targets)} Python files for batch obfuscation")
+                    _state_ok("discovered %d Python files for batch obfuscation" % len(targets))
                     for t_idx, t in enumerate(targets[:10], 1):
-                        _v(Col.light_gray + f"       {t_idx:>2}. {t['rel']}" + Col.reset)
+                        _out(_dim(f"       {t_idx:>2}. {t['rel']}"))
                     if len(targets) > 10:
-                        _v(Col.dark_gray + f"       ... and {len(targets) - 10} more." + Col.reset)
+                        _out(_dim(f"       ... and {len(targets) - 10} more."))
                     break
                 else:
-                    _warn("no matching .py files found - try again")
+                    _state_warn("no matching .py files found - try again")
             except Exception as e:
-                _err(f"file discovery failed: {e} - try again")
+                _state_err(f"file discovery failed: {e} - try again")
 
         out_dir_inp = _prompt_input(" Output directory (default tr0ngx_dist/): ").strip().strip('"').strip("'")
         custom_out = out_dir_inp if out_dir_inp else "tr0ngx_dist"
@@ -140,22 +303,19 @@ def run_interactive(cli_args):
                 _validate_input_source(raw_code)
                 ast.parse(raw_code)
                 targets = [{"src": os.path.abspath(_file), "rel": os.path.basename(_file)}]
-                _ok(f"loaded {_file}")
+                _state_ok("loaded %s (%d bytes)" % (_file, len(raw_code)))
                 break
             except Exception as e:
-                _err(f"syntax/security check failed: {e}")
+                _state_err(f"syntax/security check failed: {e}")
                 _file = _prompt_input(" Enter file path again: ").strip().strip('"').strip("'")
 
-    _panel(
-        "PROTECTION PROFILE",
-        "pick a preset now or fine-tune all 17 layers step by step",
-    )
-    _option(1, "FAST", "mode 1 AST pass + dynamic strings · builds in seconds")
-    _option(2, "BALANCED", "mode 2 + AEAD compile + Velimatix L2 + fused matrix")
-    _option(3, "MAXIMUM ARSENAL", "mode 3 + TVM L3 + camouflage + zalgo + traps + poison")
-    _v(Col.dark_gray + "                              + anti-dump + spoof meta" + Col.reset)
-    _option(4, "CUSTOM STEP-BY-STEP", "hand-tune every protection layer")
-
+    _section("PROTECTION PROFILE")
+    _menu([
+        ("1", "FAST", "mode 1 AST pass + dynamic strings"),
+        ("2", "BALANCED", "mode 2 + AEAD compile + Velimatix L2 + matrix"),
+        ("3", "MAX ARSENAL", "mode 3 + TVM L3 + camouflage + traps + zalgo"),
+        ("4", "CUSTOM", "hand-tune every layer step by step"),
+    ])
     _setup = _prompt_input(" Choose profile (1/2/3/4, default 2): ").strip()
     if not _setup:
         _setup = "2"
@@ -257,6 +417,11 @@ def run_interactive(cli_args):
         cli_args.spoof_meta = "Y"
         cli_args.force_py = "off"
 
+    if _setup in ("1", "2", "3"):
+        names = {"1": "FAST", "2": "BALANCED", "3": "MAXIMUM ARSENAL"}
+        _checklist("PROFILE LOCKED  ·  " + names[_setup],
+                   _profile_pairs(cli_args))
+
     return targets, is_batch, custom_out, _setup
 
 
@@ -266,7 +431,7 @@ def prompt_feature_flags(cli_args):
     Runs only in interactive mode. Returns a dict of resolved choices that
     cli.get_args_or_prompt consumes through its is_cli_mode ternaries.
     """
-    _rule("LAYER TUNING")
+    _section("LAYER TUNING")
     moreobf = cli_args.moreobf or _prompt_input(" MORE OBF? (y/n): ")
     antidebug = cli_args.antidebug or _prompt_input(" ANTI DEBUG? (y/n): ")
     antivm = getattr(cli_args, 'antivm', None) or _prompt_input(" ANTI VM & SANDBOX? (y/n): ")
@@ -284,9 +449,9 @@ def prompt_feature_flags(cli_args):
                     veli_level = int(_prompt_input(" VELIMATIX LEVEL (1-3): "))
                     if 1 <= veli_level <= 3:
                         break
-                    _v(" ENTER 1, 2, OR 3")
+                    _out(" ENTER 1, 2, OR 3")
                 except ValueError:
-                    _v(" INVALID")
+                    _out(" INVALID")
 
     double_compile = "N"
     if method.upper() == "Y" and velimatix.upper() == "Y":
