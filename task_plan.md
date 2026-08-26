@@ -1,63 +1,56 @@
-# Task Plan: TVM 5.0 Final — Annotations + Deep Anti-Intercept Shield
+# Task Plan: Tr0ngX v5 Native-Core Refactor (single-engine, Windows-first)
 
 ## Status: IN_PROGRESS
-## Goal: Add --vm-annotations opt-in + --anti-intercept DEEP shield
+## Goal: Rust core + Python shell, 3 output formats (.py / .pyc / .exe), zero functionality loss, parallel multi-agent execution
 
 ---
 
-## Phase 1: Annotations Support (--vm-annotations y/n)
-**Scope:** Compiler-side only, no runtime changes needed beyond __annotations__ dict
+## Phase W0: Foundations — **Status: complete**
+- [x] A1 planning-files v5 + archive TVM-5.0 plan
+- [x] A2 link-smoke: rustc 1.98.0 / cargo 1.98.0 / MSVC link PASS; hypothesis 6.165.10
+- [x] A3 Golden-Corpus seeds (tests/corpus/, 60 cases + manifest)
 
-- [ ] 1a. CLI flag `--vm-annotations` y/n default n
-  - File: argparse section ~L10300, engine state wiring ~L10500
+## Phase W1: Output formats py/pyc/exe (parallel agents) — **Status: in_progress**
+- [x] B1 `tr0ngx/packagers_pyc.py` (agent-owned new file)
+- [x] B2 `tr0ngx/packagers_exe.py` PyInstaller onefile, clean error if absent (agent-owned)
+- [x] MAIN wire `--out-format {py,pyc,exe}` into cli.py + options dict + pipeline write path
+- [ ] Gate-W1: test_01 PASS · semantic parity test_02-05 · pyc smoke run · exe smoke (PyInstaller present) · full legacy suite untouched
 
-- [ ] 1b. Module-level annotated assignments: `x: int = 5`
-  - visit_AnnAssign: if flag on → evaluate annotation value → store into `__annotations__` dict via STORE_SUBSCR on LOAD_GLOBAL __annotations__
-  - If flag off → current behavior (just assign value)
+## Phase W2: trx-ir + serializer dual-impl — **Status: pending**
+- [ ] IR schema v5 freeze (hashable, versioned, data[10]+ extensible)
+- [ ] Rust reader byte-equal vs Python writer on corpus
 
-- [ ] 1c. Class-body annotated assignments: `attr: str = "val"`
-  - Same as module level but inside class namespace
+## Phase W3: TVM native dispatcher shadow-mode — **Status: pending**
+- [ ] eval_frame/binder port; lazy-const ITERATIVE resolver (kills MAXIMUM-POWER RecursionError)
+- [ ] trace-diff harness L2(b); 14-night green gate before default flip
+- [ ] TRX_CORE=python|native env switch; python stays default until green
 
-- [ ] 1d. Function parameter + return annotations
-  - visit_FunctionDef/AsyncFunctionDef/Lambda: collect param.annotation + node.returns
-  - If flag on: after MAKE_FUNCTION, emit CALL __tvm_set_annotations__(fn_obj, ann_dict)
-  - Runtime helper builds {param_name: type_value, 'return': ret_type}
+## Phase W4: Crypto envelope v4 (ring AEAD) dual-read — **Status: pending**
+- [ ] Kill TRXH HMAC-CTR handroll; zeroize keys; v3/v4 dual-read window
 
-- [ ] 1e. Runtime helper `__tvm_set_annotations__`
-  - Takes function object + annotations dict → sets fn.__annotations__
+## Phase W5: Passes hot-loop ports (per-pass diff-fuzz) — **Status: pending**
 
-- [ ] 1f. Verify: dataclass-like pattern works when flag=y; no bloat when flag=n
+## Phase W6: Native .pyd/.so + self-extracting .py + standalone .exe embed — **Status: pending**
 
-## Phase 2: Deep Anti-Intercept Shield (--anti-intercept y/n)
-**Scope:** New runtime shield injected like antidebug/antivm
+## Phase W7: Hardening (asm stubs TEB/syscall, cargo-deny/audit, strip, build-ID rotation) — **Status: pending**
 
-- [ ] 2a. CLI flag `--anti-intercept` y/n default n
+---
 
-- [ ] 2b. Network interception tool detection (runtime):
-  - Module blacklist scan: mitmproxy, scapy, httpretty, responses, requests_mock, unittest.mock.patch('requests.get'), pyproxy, proxy.py
-  - Socket wrapper detection: check if `socket.socket` has been monkeypatched (compare id vs fresh import)
-  - SSL context tampering: verify ssl.create_default_context hasn't been replaced
-  - Environment variable probes: HTTP_PROXY/HTTPS_PROXY set to localhost MITM ports (8080, 8888, 9090)
-  - Certificate authority injection: scan ssl.get_default_verify_paths() for non-system CA certs
+## Decisions Made
+| Decision | Rationale |
+|----------|-----------|
+| Single-engine architecture; emergency py-interpreter auto-generated+CI-verified | unlimited-resources best answer; kills double-maintenance |
+| CPython ast = only semantic truth | parity guarantees live on it |
+| Packet format versioned; dual-read windows | lesson from crypto-envelope v4 rollback |
+| Windows-first; 3 outputs incl NEW .pyc | user directive 2026-08-26 |
+| --preset/--out-format additive flags; defaults unchanged | no-functionality-loss invariant |
+| Agents own NEW files only; main owns shared-file edits | parallel conflict-free |
 
-- [ ] 2c. Active countermeasures:
-  - Pin SSL context at import time before any user code runs
-  - Snapshot socket.socket original reference; periodic verification
-  - Block imports of known interception modules via sys.meta_path hook
-  - If interception detected → _obliterate() (same as antidebug)
+## Errors Encountered
+| Error | Attempt | Resolution |
+|-------|---------|------------|
+| pip hypothesis IncompleteRead (network) | 1 | retried by agent A2 -> installed 6.165.10 |
+| template indent drift caused emitted IndentationError | perf wave G1 | fixed by matching HEAD indentation exactly |
 
-- [ ] 2d. Integration into pipeline
-  - Insert alongside antidebug shield (before compile packaging)
-  - Wire flag through options dict + get_args_or_prompt
-
-## Phase 3: Docs Sync
-- [ ] AGENTS.md: new flags table entries + §4.8 coverage matrix
-- [ ] GEMINI.md mirror
-- [ ] README feature table
-
-## Verify
-- [ ] vm_oracle 31/31 (no regression from annotation emission when off)
-- [ ] vm_full_coverage 156/156
-- [ ] syntax_parity 66/66
-- [ ] New test cases for annotations (flag=y produces correct __annotations__)
-- [ ] New test case for anti-intercept (detects mock interception)
+## Next Step
+Finish W1 gates then start W2 (trx-ir crate skeleton).

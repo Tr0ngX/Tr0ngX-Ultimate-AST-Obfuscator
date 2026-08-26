@@ -5,6 +5,12 @@
 #   palette   fg #F8FAFC · muted #94A3B8 · border #475569
 #             accent/run #22C55E · warn #FACC15 · danger #EF4444
 #   mood      terminal / cli / hacker / monospace precision
+#
+# The block-letter logo renders the brand "Tr0ngX". Because 5x5 block
+# letters have no case distinction, the camelCase brand renders as
+# "TR0NGX" - the canonical uppercase form of the same word.
+#   T  R  0  N  G  X   (left → right)
+#
 # Prompt ORDER and semantics are preserved from the original flows;
 # only rendering moved. All user-facing text is English.
 
@@ -12,6 +18,9 @@
 import os
 import sys
 import ast
+import time
+import threading
+from typing import List, Tuple, Optional
 
 # pure UI/diagnostic helpers
 from .diagnostics import (
@@ -30,15 +39,18 @@ from .names import _validate_input_source
 from .cli import _resolve_input_files
 
 # ── design tokens (ui-ux-pro-max: Dark OLED / slate-emerald) ─────────
-_W = 74                      # content width, consistent rhythm everywhere
-_FG = (248, 250, 252)        # #F8FAFC foreground
-_MUTED = (148, 163, 184)     # #94A3B8 secondary text
-_BORDER = (71, 85, 105)      # #475569 borders/rules
-_ACC1 = (34, 197, 94)        # #22C55E run-green (primary ramp start)
-_ACC2 = (56, 189, 248)       # sky   (primary ramp end)
+_W = 76                          # content width, consistent rhythm everywhere
+_FG = (248, 250, 252)            # #F8FAFC foreground
+_MUTED = (148, 163, 184)         # #94A3B8 secondary text
+_BORDER = (71, 85, 105)           # #475569 borders/rules
+_BORDER_DIM = (51, 65, 85)        # darker inner rule for layered depth
+_ACC1 = (34, 197, 94)             # #22C55E emerald (ramp start)
+_ACC2 = (56, 189, 248)            # #38BDF8 sky    (ramp mid)
+_ACC3 = (140, 80, 255)            # #8C50FF violet(ramp end)
 _OK = (34, 197, 94)
 _WARN = (250, 204, 21)
 _DANGER = (239, 68, 68)
+_INFO = (56, 189, 248)
 
 try:
     from pystyle import Col as _Col
@@ -53,22 +65,72 @@ except Exception:
     _GREY, _WHITE, _RESET = "\033[90m", "\033[97m", "\033[0m"
 
 
+# ══════════════════════════════════════════════════════════════════
+#  Low-level colour & output primitives
+# ══════════════════════════════════════════════════════════════════
+def _rgb(c: tuple) -> str:
+    return f"\033[38;2;{c[0]};{c[1]};{c[2]}m"
+
+
 def _g(text: str) -> str:
     """Primary brand gradient (emerald -> sky)."""
     return _gradient_text(text, _ACC1, _ACC2)
 
 
+def _gradient_str(text: str, stops) -> str:
+    """Multi-stop horizontal per-character gradient."""
+    if not text:
+        return ""
+    total = max(1, len(text) - 1)
+    out = []
+    for i, ch in enumerate(text):
+        t = i / total
+        seg = t * (len(stops) - 1)
+        idx = min(len(stops) - 2, int(seg))
+        tt = seg - idx
+        a, b = stops[idx], stops[idx + 1]
+        c = (int(a[0] + (b[0] - a[0]) * tt),
+             int(a[1] + (b[1] - a[1]) * tt),
+             int(a[2] + (b[2] - a[2]) * tt))
+        out.append(f"\033[38;2;{c[0]};{c[1]};{c[2]}m{ch}")
+    return "".join(out) + _RESET
+
+
 def _dim(text: str) -> str:
-    return f"\033[38;2;{ _MUTED[0] };{_MUTED[1]};{_MUTED[2] }m{text}{_RESET}"
+    return f"{_rgb(_MUTED)}{text}{_RESET}"
+
+
+def _fg(text: str) -> str:
+    return f"{_rgb(_FG)}{text}{_RESET}"
+
+
+def _accent(text: str) -> str:
+    return f"{_rgb(_ACC1)}{text}{_RESET}"
+
+
+def _info_c(text: str) -> str:
+    return f"{_rgb(_INFO)}{text}{_RESET}"
+
+
+def _warn_c(text: str) -> str:
+    return f"{_rgb(_WARN)}{text}{_RESET}"
+
+
+def _danger_c(text: str) -> str:
+    return f"{_rgb(_DANGER)}{text}{_RESET}"
 
 
 def _border_ch(ch: str) -> str:
-    return f"\033[38;2;{_BORDER[0]};{_BORDER[1]};{_BORDER[2]}m{ch}{_RESET}"
+    return f"{_rgb(_BORDER)}{ch}{_RESET}"
+
+
+def _border_dim_ch(ch: str) -> str:
+    return f"{_rgb(_BORDER_DIM)}{ch}{_RESET}"
 
 
 def _out(text: str = "") -> None:
     """Direct console write - bypasses the [TR0NGX] stage-tag logger so UI
-    frames stay perfectly aligned and colors render untouched."""
+    frames stay perfectly aligned and colours render untouched."""
     sys.stdout.write(text + "\n")
     try:
         sys.stdout.flush()
@@ -76,22 +138,71 @@ def _out(text: str = "") -> None:
         pass
 
 
+def _out_raw(text: str = "") -> None:
+    """Write without trailing newline - used by inline animations."""
+    sys.stdout.write(text)
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Animations
+# ══════════════════════════════════════════════════════════════════
+_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+
+def _spinner(done_event: threading.Event, label: str, color=_ACC1) -> None:
+    """Async braille spinner. Stops the instant done_event is set."""
+    i = 0
+    while not done_event.is_set():
+        frame = _SPINNER_FRAMES[i % len(_SPINNER_FRAMES)]
+        _out_raw(f"\r  {_rgb(color)}{frame}{_RESET}  {_dim(label)}")
+        i += 1
+        time.sleep(0.06)
+    _out_raw("\r" + " " * (len(label) + 8) + "\r")
+
+
+def _typewriter(text: str, delay: float = 0.010) -> None:
+    """Per-character reveal for hero taglines."""
+    for ch in text:
+        _out_raw(ch)
+        time.sleep(delay)
+    _out_raw("\n")
+
+
+def _mini_bar(active: int, total: int, width: int = 24, color=_ACC1) -> str:
+    """Static mini progress bar string (no newline)."""
+    if total <= 0:
+        return ""
+    pct = min(1.0, active / total)
+    filled = int(width * pct)
+    bar = "█" * filled + "░" * (width - filled)
+    return f"{_rgb(color)}{bar}{_RESET}"
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Console init
+# ══════════════════════════════════════════════════════════════════
 def _init_console() -> None:
     """Best-effort console polish: clear screen, enable VT processing,
     pin a monospace font on legacy conhost. Every step is optional."""
     if os.name != "nt":
+        try:
+            _out("\033[2J\033[H")
+        except Exception:
+            pass
         return
     try:
         import ctypes
         k32 = ctypes.windll.kernel32
         h = k32.GetStdHandle(-11)
-        # clear + home
         _out("\033[2J\033[H")
-        # VT processing (harmless if already enabled by config.py)
         mode = ctypes.c_ulong()
         if k32.GetConsoleMode(h, ctypes.byref(mode)):
             k32.SetConsoleMode(h, mode.value | 0x0004)
-        # best-effort monospace font pin (legacy conhost only)
+
         class COORD(ctypes.Structure):
             _fields_ = [("X", ctypes.c_short), ("Y", ctypes.c_short)]
 
@@ -107,16 +218,19 @@ def _init_console() -> None:
         f.dwFontSize.X = 0
         f.dwFontSize.Y = 18
         f.FontWeight = 500
-        name = "JetBrains Mono"
-        for ch in name[:31]:
-            pass
-        f.FaceName = "Consolas"  # universally present; JetBrains Mono if user-set
+        f.FaceName = "Consolas"
         k32.SetCurrentConsoleFontEx(h, False, ctypes.byref(f))
     except Exception:
         pass
 
 
-# Block-letter logo, 5 rows. Gradient is applied per character column.
+# ══════════════════════════════════════════════════════════════════
+#  Block-letter logo & hero banner
+# ══════════════════════════════════════════════════════════════════
+# Block-letter ASCII art rendering of the brand "Tr0ngX".
+# Reads left→right as:  T  R  0  N  G  X
+# (5x5 block letters have no case distinction, so the camelCase
+#  brand "Tr0ngX" canonicalises to "TR0NGX" in block form.)
 _LOGO_ROWS = [
     "████████     █████   ████    ██   ██  ██████  ██   ██",
     "   ██       ██   ██  ██  ██   ██  ██  ██      ██  ██ ",
@@ -127,101 +241,223 @@ _LOGO_ROWS = [
 
 
 def _logo() -> None:
-    """Per-character horizontal gradient across the block-letter logo."""
+    """Per-character multi-stop gradient (emerald → sky → violet)."""
+    stops = (_ACC1, _ACC2, _ACC3)
     total = max(len(r) for r in _LOGO_ROWS)
-
-    def lerp(a, b, t):
-        return int(a + (b - a) * t)
-
-    stops = (_ACC1, (56, 189, 248), (140, 80, 255))
     for r in _LOGO_ROWS:
-        line = ""
+        parts = []
         for x, ch in enumerate(r):
             if ch == " ":
-                line += " "
+                parts.append(" ")
                 continue
             t = min(1.0, max(0.0, x / max(1, total - 1)))
             seg = t * (len(stops) - 1)
             i = min(len(stops) - 2, int(seg))
             tt = seg - i
-            c = tuple(lerp(stops[i][k], stops[i + 1][k], tt) for k in range(3))
-            line += f"\033[38;2;{c[0]};{c[1]};{c[2]}m{ch}"
-        _out(line + _RESET)
+            a, b = stops[i], stops[i + 1]
+            c = (int(a[0] + (b[0] - a[0]) * tt),
+                 int(a[1] + (b[1] - a[1]) * tt),
+                 int(a[2] + (b[2] - a[2]) * tt))
+            parts.append(f"\033[38;2;{c[0]};{c[1]};{c[2]}m{ch}")
+        _out("".join(parts) + _RESET)
+
+
+def _gradient_rule(width: int = _W, ch: str = "─", stops=None) -> str:
+    if stops is None:
+        stops = (_ACC1, _ACC2, _ACC3)
+    return _gradient_str(ch * width, stops)
 
 
 def _banner() -> None:
-    """Hero: gradient block-letter logo + muted tagline strip."""
+    """Hero: gradient double-rule frame, multi-stop gradient logo,
+    centred gradient tagline, bottom gradient rule."""
     sub = "python code protection suite  ·  interactive setup  ·  v4.0"
     sp = max(0, (_W - len(sub)) // 2)
     _out("")
+    _out("  " + _gradient_rule(_W - 4, "═"))
+    _out("")
     _logo()
-    _out(_dim((" " * sp) + sub))
+    _out("")
+    _out(" " * sp + _g(sub))
+    _out("")
+    _out("  " + _gradient_rule(_W - 4, "═"))
     _out("")
 
 
 def _section(label: str) -> None:
-    """Section divider with the label embedded in a border-colored rule."""
-    pad = max(0, _W - len(label) - 6)
-    line = "  ──  " + label + "  " + "─" * pad
+    """Section divider with ◆ badge embedded in a double-edge rule."""
     _out("")
-    _out(_border_ch(line))
+    inner = _W - 6
+    badge = f"  ◆  {label}  "
+    pad_after = max(2, inner - len(label) - 6)
+    line = (
+        "  "
+        + _border_dim_ch("──")
+        + _border_ch("─" * 2)
+        + _g(badge)
+        + _border_ch("─" * pad_after)
+        + _border_dim_ch("──")
+    )
+    _out(line)
 
 
-def _menu(rows) -> None:
-    """Rounded option list. rows = [(num, label, desc)]."""
-    top = "  ╭" + "─" * (_W - 2) + "╮"
-    bot = "  ╰" + "─" * (_W - 2) + "╯"
-    _out(top)
-    for num, label, desc in rows:
-        left = f"  │ [{num}] "
-        mid = label.ljust(max(1, 20 - len(num)))
-        right = "· " + desc
-        pad = max(0, _W - 4 - len(f"[{num}] ") - len(mid) - len(right) - 2)
-        line = left + _WHITE + mid + _GREY + " " + right + " " * pad + _RESET + "│"
-        _out(line)
-    _out(bot)
+# ══════════════════════════════════════════════════════════════════
+#  Panels, menus, checklists
+# ══════════════════════════════════════════════════════════════════
+def _panel_open(inner: int) -> str:
+    return "  " + _border_ch("╭") + _border_ch("─" * (inner + 2)) + _border_ch("╮")
+
+
+def _panel_close(inner: int) -> str:
+    return "  " + _border_ch("╰") + _border_ch("─" * (inner + 2)) + _border_ch("╯")
+
+
+def _panel_mid(inner: int) -> str:
+    return "  " + _border_ch("├") + _border_ch("─" * (inner + 2)) + _border_ch("┤")
+
+
+def _menu(rows, icons: Optional[List[str]] = None) -> None:
+    """Rounded option list with optional icon prefix per row."""
+    inner = _W - 6
+    _out(_panel_open(inner))
+    for idx, (num, label, desc) in enumerate(rows):
+        icon = icons[idx] if icons and idx < len(icons) else " "
+        bullet = _accent(f"[{num}]")
+        label_str = _fg(label)
+        sep = _dim("·")
+        desc_str = _dim(desc)
+        icon_str = _accent(icon) if icon != " " else " "
+        content = f"  {icon_str}  {bullet}  {label_str}  {sep} {desc_str}"
+        visual_len = 2 + 1 + 2 + 3 + 2 + len(label) + 2 + 1 + 1 + 1 + len(desc)
+        pad = max(0, inner - visual_len)
+        _out("  " + _border_ch("│") + content + " " * pad + _border_ch("│"))
+    _out(_panel_close(inner))
 
 
 def _checklist(title: str, pairs) -> None:
-    """Two-column ON/OFF state panel for the chosen profile."""
-    col_w = (_W - 8) // 2
+    """Two-column ON/OFF state panel + density bar at the bottom."""
+    inner = _W - 6
     cells = []
+    active_count = 0
+    total_count = 0
     for name, on in pairs:
-        mark = (_GREEN + "✓" + _RESET) if str(on).upper() == "Y" else _dim("·")
-        cells.append((name, mark))
-    top = "  ╭" + "─" * (_W - 2) + "╮"
-    bot = "  ╰" + "─" * (_W - 2) + "╯"
-    head = "  │ " + _g(title.ljust(_W - 4)) + "│"
-    _out(top)
-    _out(head)
-    for i in range(0, len(cells), 2):
-        left_n, left_m = cells[i]
-        if i + 1 < len(cells):
-            right_n, right_m = cells[i + 1]
-            r_txt = right_m + " " + right_n
+        total_count += 1
+        if str(on).upper() == "Y":
+            mark = _accent("✓")
+            state = _accent("ON ")
+            active_count += 1
         else:
-            r_txt = ""
-        l_txt = left_m + " " + left_n
-        pad_l = max(0, col_w - len(left_n) - 2)
-        pad_r = max(0, col_w - len(right_n) - 2) if r_txt else col_w
-        line = ("  │ " + l_txt + " " * pad_l + "  " + r_txt
-                + (" " * pad_r if r_txt else "") + "│")
-        _out(line)
-    _out(bot)
+            mark = _dim("·")
+            state = _dim("off")
+        cells.append((name, mark, state))
+
+    _out(_panel_open(inner))
+    title_pad = max(0, inner - len(title) - 1)
+    _out("  " + _border_ch("│") + " " + _g(title) + " " * title_pad + _border_ch("│"))
+    _out(_panel_mid(inner))
+
+    for i in range(0, len(cells), 2):
+        left_n, left_m, left_s = cells[i]
+        left_block = f" {left_m} {left_n:<22} {left_s}"
+        if i + 1 < len(cells):
+            right_n, right_m, right_s = cells[i + 1]
+            right_block = f" {right_m} {right_n:<22} {right_s}"
+        else:
+            right_block = ""
+        used = len(left_block) + len(right_block)
+        pad = max(0, inner - used)
+        _out("  " + _border_ch("│") + left_block + right_block + " " * pad + _border_ch("│"))
+
+    # density bar at the bottom of the panel
+    _out(_panel_mid(inner))
+    pct = active_count / max(1, total_count)
+    bar_w = 24
+    filled = int(bar_w * pct)
+    bar = "█" * filled + "░" * (bar_w - filled)
+    density_label = f" density: {active_count} / {total_count} layers active"
+    bar_str = f" {_rgb(_ACC1)}{bar}{_RESET}"
+    content = bar_str + _dim(density_label)
+    pad = max(0, inner - len(density_label) - bar_w - 1)
+    _out("  " + _border_ch("│") + content + " " * pad + _border_ch("│"))
+    _out(_panel_close(inner))
 
 
+def _summary_panel(cli_args, _setup: str, targets, is_batch: bool, custom_out) -> None:
+    """Rich summary card: key-value rows + density progress bar."""
+    names = {"1": "FAST", "2": "BALANCED", "3": "MAXIMUM ARSENAL", "4": "CUSTOM"}
+    inner = _W - 6
+    _out("")
+    _out(_panel_open(inner))
+    title = "  ◉  READY  ·  configuration locked  "
+    title_pad = max(0, inner - len(title) + 4)
+    _out("  " + _border_ch("│") + _g(title) + " " * title_pad + _border_ch("│"))
+    _out(_panel_mid(inner))
+
+    rows = [
+        ("profile",   names.get(_setup, _setup)),
+        ("ast mode",  str(getattr(cli_args, "mode", 0))),
+        ("targets",   "%d file%s" % (len(targets), "s" if len(targets) != 1 else "")),
+        ("scope",     "batch" if is_batch else "single"),
+        ("output",    custom_out or "default"),
+    ]
+    for k, v in rows:
+        klen = len(k) + 2  # 'key:'
+        vlen = len(v) + 1
+        content = f" {_dim(k + ':')} {_fg(v)}"
+        pad = max(0, inner - klen - vlen - 1)
+        _out("  " + _border_ch("│") + content + " " * pad + _border_ch("│"))
+
+    # density bar inside summary too
+    _out(_panel_mid(inner))
+    pairs = _profile_pairs(cli_args)
+    active = sum(1 for _, v in pairs if str(v).upper() == "Y")
+    total = len(pairs)
+    pct = active / max(1, total)
+    bar_w = 24
+    filled = int(bar_w * pct)
+    bar = "█" * filled + "░" * (bar_w - filled)
+    pct_str = f"{int(pct * 100):>3d}%"
+    content = f" {_rgb(_ACC1)}{bar}{_RESET}  {_fg(pct_str)}  {_dim('protection density')}"
+    visual_len = 1 + bar_w + 2 + 3 + 2 + len("protection density")
+    pad = max(0, inner - visual_len)
+    _out("  " + _border_ch("│") + content + " " * pad + _border_ch("│"))
+
+    _out(_panel_close(inner))
+
+
+def _footer() -> None:
+    """Branded footer with double gradient rule."""
+    _out("")
+    _out("  " + _gradient_rule(_W - 4, "═"))
+    brand = "tr0ngx · python code protection suite · stay paranoid"
+    sp = max(0, (_W - len(brand)) // 2)
+    _out(" " * sp + _dim(brand))
+    _out("  " + _gradient_rule(_W - 4, "═"))
+    _out("")
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Status indicators
+# ══════════════════════════════════════════════════════════════════
 def _state_ok(msg: str) -> None:
-    _out(f"\033[38;2;{_OK[0]};{_OK[1]};{_OK[2]}m  [ok] {msg}{_RESET}")
+    _out(f"  {_rgb(_OK)}●{_RESET}  {_fg(msg)}")
 
 
 def _state_warn(msg: str) -> None:
-    _out(f"\033[38;2;{_WARN[0]};{_WARN[1]};{_WARN[2]}m  [!!] {msg}{_RESET}")
+    _out(f"  {_rgb(_WARN)}▲{_RESET}  {_warn_c(msg)}")
 
 
 def _state_err(msg: str) -> None:
-    _out(f"\033[38;2;{_DANGER[0]};{_DANGER[1]};{_DANGER[2]}m  [xx] {msg}{_RESET}")
+    _out(f"  {_rgb(_DANGER)}✗{_RESET}  {_danger_c(msg)}")
 
 
+def _state_info(msg: str) -> None:
+    _out(f"  {_rgb(_INFO)}◆{_RESET}  {_info_c(msg)}")
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Profile pair extractor
+# ══════════════════════════════════════════════════════════════════
 def _profile_pairs(cli_args) -> list:
     keys = [
         ("AST mode %d" % getattr(cli_args, "mode", 0), None),
@@ -253,6 +489,9 @@ def _profile_pairs(cli_args) -> list:
     return [(k, v) for k, v in flags]
 
 
+# ══════════════════════════════════════════════════════════════════
+#  Interactive entry
+# ══════════════════════════════════════════════════════════════════
 def run_interactive(cli_args):
     """Interactive entry: file/batch selection menu + protection profile menu.
 
@@ -264,20 +503,43 @@ def run_interactive(cli_args):
 
     _init_console()
     _banner()
+
+    # ── INPUT MODE ─────────────────────────────────────────────────
     _section("INPUT MODE")
-    _menu([
-        ("1", "SINGLE FILE", "protect one .py script"),
-        ("2", "BATCH / TREE", "globs, many files or a whole directory"),
-    ])
+    _menu(
+        [
+            ("1", "SINGLE FILE", "protect one .py script"),
+            ("2", "BATCH / TREE", "globs, many files or a whole directory"),
+        ],
+        icons=["▸", "⚡"],
+    )
     file_mode_choice = _prompt_input(" Choose (1/2, default 1): ").strip()
     if file_mode_choice == "2":
         is_batch = True
         while True:
-            batch_inp = _prompt_input(" Directory / glob / files (e.g. src/, *.py): ").strip().strip('"').strip("'")
-            rec_inp = _prompt_input(" Recurse subdirectories? (y/n, default n): ").strip().upper()
+            batch_inp = _prompt_input(
+                " Directory / glob / files (e.g. src/, *.py): "
+            ).strip().strip('"').strip("'")
+            rec_inp = _prompt_input(
+                " Recurse subdirectories? (y/n, default n): "
+            ).strip().upper()
             is_rec = (rec_inp == "Y")
+
+            done = threading.Event()
+            t = threading.Thread(
+                target=_spinner,
+                args=(done, "scanning filesystem for .py sources"),
+                daemon=True,
+            )
+            t.start()
             try:
-                targets = _resolve_input_files(inputs=batch_inp, directory=batch_inp if os.path.isdir(batch_inp) else None, recursive=is_rec)
+                targets = _resolve_input_files(
+                    inputs=batch_inp,
+                    directory=batch_inp if os.path.isdir(batch_inp) else None,
+                    recursive=is_rec,
+                )
+                done.set()
+                t.join()
                 if targets:
                     _state_ok("discovered %d Python files for batch obfuscation" % len(targets))
                     for t_idx, t in enumerate(targets[:10], 1):
@@ -288,9 +550,13 @@ def run_interactive(cli_args):
                 else:
                     _state_warn("no matching .py files found - try again")
             except Exception as e:
+                done.set()
+                t.join()
                 _state_err(f"file discovery failed: {e} - try again")
 
-        out_dir_inp = _prompt_input(" Output directory (default tr0ngx_dist/): ").strip().strip('"').strip("'")
+        out_dir_inp = _prompt_input(
+            " Output directory (default tr0ngx_dist/): "
+        ).strip().strip('"').strip("'")
         custom_out = out_dir_inp if out_dir_inp else "tr0ngx_dist"
     else:
         _file = _prompt_input(" Enter file path: ").strip().strip('"').strip("'")
@@ -309,13 +575,17 @@ def run_interactive(cli_args):
                 _state_err(f"syntax/security check failed: {e}")
                 _file = _prompt_input(" Enter file path again: ").strip().strip('"').strip("'")
 
+    # ── PROTECTION PROFILE ─────────────────────────────────────────
     _section("PROTECTION PROFILE")
-    _menu([
-        ("1", "FAST", "mode 1 AST pass + dynamic strings"),
-        ("2", "BALANCED", "mode 2 + AEAD compile + Velimatix L2 + matrix"),
-        ("3", "MAX ARSENAL", "mode 3 + TVM L3 + camouflage + traps + zalgo"),
-        ("4", "CUSTOM", "hand-tune every layer step by step"),
-    ])
+    _menu(
+        [
+            ("1", "FAST",        "mode 1 AST pass + dynamic strings"),
+            ("2", "BALANCED",    "mode 2 + AEAD compile + Velimatix L2 + matrix"),
+            ("3", "MAX ARSENAL", "mode 3 + TVM L3 + camouflage + traps + zalgo"),
+            ("4", "CUSTOM",      "hand-tune every layer step by step"),
+        ],
+        icons=["⚡", "⚖", "☠", "⚙"],
+    )
     _setup = _prompt_input(" Choose profile (1/2/3/4, default 2): ").strip()
     if not _setup:
         _setup = "2"
@@ -421,10 +691,16 @@ def run_interactive(cli_args):
         names = {"1": "FAST", "2": "BALANCED", "3": "MAXIMUM ARSENAL"}
         _checklist("PROFILE LOCKED  ·  " + names[_setup],
                    _profile_pairs(cli_args))
+        _summary_panel(cli_args, _setup, targets, is_batch, custom_out)
+
+    _footer()
 
     return targets, is_batch, custom_out, _setup
 
 
+# ══════════════════════════════════════════════════════════════════
+#  Layer tuning
+# ══════════════════════════════════════════════════════════════════
 def prompt_feature_flags(cli_args):
     """Interactive step-by-step protection prompts (original order preserved).
 
@@ -449,9 +725,9 @@ def prompt_feature_flags(cli_args):
                     veli_level = int(_prompt_input(" VELIMATIX LEVEL (1-3): "))
                     if 1 <= veli_level <= 3:
                         break
-                    _out(" ENTER 1, 2, OR 3")
+                    _state_warn("ENTER 1, 2, OR 3")
                 except ValueError:
-                    _out(" INVALID")
+                    _state_err("INVALID INPUT")
 
     double_compile = "N"
     if method.upper() == "Y" and velimatix.upper() == "Y":
@@ -460,7 +736,6 @@ def prompt_feature_flags(cli_args):
     kramer_wrap_choice = cli_args.kramer or _prompt_input(" KRAMER OUTER SHIELD (Kyrie Eleison)? (y/n): ")
     cjk_choice = cli_args.cjk_vars or _prompt_input(" CJK CHINESE IDENTIFIERS & PYCOOL DOCSTRINGS? (y/n): ")
 
-    # New Obfuscation Modes
     matrix_choice = cli_args.matrix or _prompt_input(" MATRIX DEEP FUSION (Hybrid Variables + Fused 3-Track Shield)? (y/n): ")
     emoji_obf_choice = cli_args.emoji_obf or _prompt_input(" EMOJI OBFUSCATION (code -> Animal emoji stream)? (y/n): ")
     homoglyph_choice = cli_args.homoglyph or _prompt_input(" HOMOGLYPH NAMES (Cyrillic/Greek lookalikes: a/o/e)? (y/n): ")
@@ -518,8 +793,12 @@ def prompt_feature_flags(cli_args):
     }
 
 
+# ══════════════════════════════════════════════════════════════════
+#  Build extras
+# ══════════════════════════════════════════════════════════════════
 def ask_force_python():
     """Interactive FORCE PYTHON VERSION prompt pair. Returns (choice, version)."""
+    _section("RUNTIME TARGET")
     force_py_choice = _prompt_input(" FORCE PYTHON VERSION? (y/n): ")
     forced_py_ver = ""
     if force_py_choice.upper() == "Y":
@@ -561,4 +840,8 @@ def ask_build_extras(_setup, is_batch, debug_map_arg, max_ram, max_cores, custom
 
 def ask_encryption_password():
     """Interactive payload encryption password prompt (secret input)."""
-    return _prompt_input(" PASSWORD ENCRYPTION (press Enter for obfuscation-only): ", secret=True).strip()
+    _section("PAYLOAD ENCRYPTION")
+    return _prompt_input(
+        " PASSWORD ENCRYPTION (press Enter for obfuscation-only): ",
+        secret=True,
+    ).strip()

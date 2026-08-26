@@ -298,6 +298,8 @@ any preset. Docs: README.md / AGENTS.md""",
     parser.add_argument("-D", "--dir", "--directory", help="Directory containing Python files for batch obfuscation", default=None)
     parser.add_argument("-r", "--recursive", action="store_true", help="Recurse into subdirectories when batch-obfuscating a directory")
     parser.add_argument("-o", "--output", help="Output file (single input) or output directory (batch)", default=None)
+    parser.add_argument("--out-format", choices=["py", "pyc", "exe"], default=None,
+                        help="Output format: py (default), pyc (compiled bytecode), exe (standalone Windows executable)")
     parser.add_argument("-w", "--workers", "--jobs", "-j", type=int, default=None, help="Parallel worker threads for batch obfuscation")
     
     # Engine modes
@@ -424,6 +426,17 @@ any preset. Docs: README.md / AGENTS.md""",
     # Resource capping and workers
     max_ram = cli_args.max_ram
     max_cores = cli_args.cores
+
+    # Output format resolution: explicit flag wins; else infer from -o suffix; default py
+    out_format_resolved = cli_args.out_format
+    if out_format_resolved is None and cli_args.output:
+        _ol = cli_args.output.lower()
+        if _ol.endswith(".pyc"):
+            out_format_resolved = "pyc"
+        elif _ol.endswith(".exe"):
+            out_format_resolved = "exe"
+    if out_format_resolved is None:
+        out_format_resolved = "py"
     # FIX (audit P1): -w 0 previously fell through the falsy-or chain to auto;
     # zero is now rejected exactly like negative values.
     if cli_args.workers is not None and cli_args.workers < 1:
@@ -634,6 +647,7 @@ any preset. Docs: README.md / AGENTS.md""",
         "shared_symbols": getattr(cli_args, 'shared_symbols', None) or "N",
         "force_py_choice": force_py_choice,
         "forced_py_ver": forced_py_ver,
+        "out_format": out_format_resolved,
         "debug_map": debug_map_arg,
         "max_ram": max_ram,
         "max_cores": max_cores,

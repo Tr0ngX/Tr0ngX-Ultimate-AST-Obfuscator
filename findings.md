@@ -1,21 +1,33 @@
-# Findings: TVM 5.0 Final Wave
+# Findings — v5 Native-Core Refactor
 
-## Annotations Design
-- `visit_AnnAssign` currently ignores node.annotation entirely
-- Module/class level: need `__annotations__[name] = evaluated_annotation` after value assignment
-- Function level: annotations dict built at def-time, attached via `fn.__annotations__`
-- CPython stores param anns in `co_annotations` bytecode (3.11+) but we can use a simpler dict
-- Flag default=n: avoids bloat + side effects (annotation evaluation may import modules)
-- When y: annotation expressions ARE evaluated (matching CPython behavior where module-level annotations are stored)
+## Measured facts (this machine, 2026-08)
+- TVM runtime slowdown vs native: baseline x16.94 -> G1 x16.61 (slot-table hoist);
+  loop_sum -33%, string_build -35%, closure -11%. Handler-call dominates remaining cost.
+- Full-option build: 486s/8.6GB peak -> ~208s/~4GB after build-pipeline wave.
+- MAXIMUM-POWER stack artifact fails at RUNTIME (RecursionError in TVM lazy-const
+  resolve_const) - pre-existing, A/B-verified via git stash. W3 must fix (iterative resolver).
+- Toolchain: rustc/cargo 1.98.0 stable-msvc; VS BuildTools 2022 + VC.Tools.x64 present;
+  link-smoke PASS (0.29s, hello.exe runs). maturin 1.15.0, hypothesis 6.165.10,
+  cryptography 48.0.1, pystyle 2.9, psutil 7.2.2, pytest 9.1.1.
+- Missing: cargo-deny/audit (P6), PyOxidizer (W6), PyInstaller (check at exe-packaging time).
 
-## Anti-Intercept Design
-- Detection vectors: monkeypatched socket, fake CA certs, proxy env vars, interception module imports
-- Countermeasure: pin original socket.socket reference, periodic integrity check via watchdog
-- Integration point: same as antidebug — prepend shield source before compile packaging
-- Must NOT break legitimate proxies (only flag localhost MITM ports commonly used by tools)
-- False positive risk: corporate environments use real proxies on port 8080 → only flag when BOTH localhost AND non-system CA detected
+## Design decisions locked
+- Single-engine: Rust = only semantic engine; portable .py embeds native blobs and
+  self-extracts; emergency py-interpreter is auto-generated + CI trace-diff verified.
+- IR schema v5: versioned, hashable, extensible tail fields (data[10]+ pattern proven).
+- CPython ast stays the ONLY parser; Rust consumes serialized IR bytes.
+- Crypto: ring ChaCha20-Poly1305 AEAD replaces TRXH HMAC-CTR handroll (v3/v4 dual-read).
+- Anti-tamper split: Python shell keeps PEP578 canary; Rust does syscall/TEB layer.
+- asm budget ~50 instructions total: TEB read + direct-syscall stubs only.
 
-## Key Insight: Annotation emission is compiler-only change
-- No new opcodes needed; reuse STORE_SUBSCR for __annotations__ updates
-- No runtime helper needed if we emit inline dict operations
-- Function annotations need one small helper to set fn.__annotations__ after MAKE_FUNCTION
+## Gotchas discovered (do not repeat)
+- __builtins__ is a dict when module imported vs module under __main__ - always use
+  explicit `import builtins` at BUILD time (broke every velimatix>=2 artifact post-split).
+- Emitted-runtime templates: indentation must match HEAD exactly or artifacts break
+  (G1 interp_fn lesson).
+- Per-frame work in attach path scales with call count - cache per permutation identity.
+- Slim binder (prefill params only) measured SLOWER than full dict-comprehension - reverted.
+
+## Corpus / gates inventory (current main)
+syntax parity 66/66 · coverage 156/156 · oracle 31/31 · fuzz 38/38 · test_01..14 green
+(native); semantic parity test_02-05 byte-match; test_10 full-matrix 10/10; shields 6/6.

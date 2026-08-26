@@ -71,6 +71,33 @@ from .packagers import (
     _kramer_wrap,
 )
 
+
+def _write_final_output(output_file: str, code: str, out_format: str, src_file: str = None) -> None:
+    """Dispatch final-artifact write based on --out-format.
+
+    py  (default): atomic text write (existing behavior, zero change).
+    pyc: compile to .pyc bytecode (PEP 554 header + marshal).
+    exe: wrap the .py artifact into a standalone Windows .exe via PyInstaller.
+    """
+    if out_format == "pyc":
+        from .packagers_pyc import package_pyc
+        package_pyc(str(code), output_file)
+        return
+
+    if out_format == "exe":
+        from .packagers_exe import package_exe
+        import tempfile, os
+        work_dir = tempfile.mkdtemp(prefix="trx_exe_")
+        # First write the .py artifact, then wrap it
+        py_path = os.path.join(work_dir, "_trx_entry.py")
+        _safe_atomic_write(py_path, str(code), input_file=src_file)
+        package_exe(str(code), work_dir, output_file)
+        return
+
+    # default: py
+    _safe_atomic_write(output_file, str(code), input_file=src_file)
+
+
 def obfuscate_single_target(src_file: str, output_file: str, options: dict, quiet_progress: bool = False) -> dict:
     """
     Core transformation engine that executes the entire Tr0ngX pipeline on a single file.
@@ -178,6 +205,7 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
     _cfg._EngineState.env_key_lock = str(options.get("env_key", "N")).upper() == "Y" and not options.get("password")
     force_py_choice = options.get("force_py_choice", "N")
     forced_py_ver = options.get("forced_py_ver", "")
+    out_format = options.get("out_format", "py")
     _debug_map_choice = options.get("debug_map")
 
     # Step 0: Hyperion AST & Token Engine
@@ -419,7 +447,7 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
             except SyntaxError as e:
                 _log_stage_error("7_compile_syntax_error", e)
                 code = _var_template + code
-                _safe_atomic_write(output_file, str(code), input_file=src_file)
+                _write_final_output(output_file, str(code), out_format, src_file=src_file)
                 return {"success": True, "src": src_file, "out": output_file, "original_size": original_size, "output_size": len(code.encode('utf-8')), "ratio": 1.0, "elapsed": round(time.time()-start_time, 4), "error": None}
 
             encrypted_data, _salt, _armor = _multi_layer_encrypt(compiled_bytes, password=encryption_password)
@@ -656,8 +684,8 @@ except Exception as _e:
     else:
         code = _gen_tr0ngx_header() + "\n" + _blank_pad + code
 
-    # Write output atomically
-    _safe_atomic_write(output_file, str(code), input_file=src_file)
+    # Write output atomically (format dispatch: py/pyc/exe)
+    _write_final_output(output_file, str(code), out_format, src_file=src_file)
     elapsed = time.time() - start_time
     file_size = os.path.getsize(output_file)
     ratio = file_size / original_size if original_size > 0 else 0
