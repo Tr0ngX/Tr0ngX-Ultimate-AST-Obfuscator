@@ -11,6 +11,30 @@ import traceback, marshal, sys, os, threading, time, struct, types, gc, random
 # ═══ CORE PROTECTION LAYER ═══
 _SHIELD = type('Shield', (), {'_active': True, '_checks': 0})()
 _ORIGINAL_BUILTINS = {}
+# Registry of Tr0ngX's OWN hardening wrappers. id() is the fast path, but the
+# shield source can be exec'd into more than one module namespace (builtins are
+# shared, module globals are not), so the wrapper's code object filename is used
+# as the namespace-agnostic fallback.
+_TRX_OWN_WRAPPER_IDS = {}
+_TRX_OWN_WRAPPER_NAMES = ('_safe_exec', '_safe_eval', '_guarded_loads')
+_TRX_SHIELD_FILE = None
+try:
+    _TRX_SHIELD_FILE = sys._getframe(0).f_code.co_filename
+except Exception:
+    pass
+
+
+def _is_own_wrapper(fn):
+    '''True only for wrappers emitted by this shield (id or code-origin match).'''
+    try:
+        if getattr(fn, '__name__', None) not in _TRX_OWN_WRAPPER_NAMES:
+            return False
+        if id(fn) in _TRX_OWN_WRAPPER_IDS:
+            return True
+        _co = getattr(fn, '__code__', None)
+        return _co is not None and _co.co_filename == _TRX_SHIELD_FILE
+    except Exception:
+        return False
 
 def _obliterate():
     '''Nuclear exit - multiple fallback methods'''
@@ -97,6 +121,8 @@ def _protect_exec_eval():
 
     builtins.exec = _safe_exec
     builtins.eval = _safe_eval
+    _TRX_OWN_WRAPPER_IDS['exec'] = id(_safe_exec)
+    _TRX_OWN_WRAPPER_IDS['eval'] = id(_safe_eval)
     _ORIGINAL_BUILTINS['exec'] = id(builtins.exec)
     _ORIGINAL_BUILTINS['eval'] = id(builtins.eval)
 
@@ -122,6 +148,7 @@ def _protect_marshal():
         return _real_loads(data, *args, **kwargs)
 
     marshal.loads = _guarded_loads
+    _TRX_OWN_WRAPPER_IDS['marshal.loads'] = id(_guarded_loads)
     _ORIGINAL_BUILTINS['marshal.loads'] = id(_guarded_loads)
 
 # ═══ ANTI-DEBUGGER (MULTI-VECTOR) ═══
@@ -428,6 +455,10 @@ def _anti_debugger():
             pass
 
     # Vector 15: Audit-hook liveness canary (detects audit-hook stripping)
+    # FIX (P0 false positive): the liveness probe used to be os.stat(), which
+    # raises NO audit event in CPython (verified on 3.12: counter delta 0), so
+    # the canary nuked every protected script on the watchdog's second cycle.
+    # open() and os.chdir() DO raise audited events and are used as the probe.
     try:
         _g = globals()
         if '_trx_audit_count' not in _g:
@@ -436,15 +467,22 @@ def _anti_debugger():
                 _g['_trx_audit_count'][0] += 1
             # FIX (audit P0): register through the preserved real builtin, not the nulled attr.
             (_g.get('_trx_real_addaudithook') or sys.addaudithook)(_trx_audit_hook)
-        else:
-            _c_before = _g['_trx_audit_count'][0]
+        _c_before = _g['_trx_audit_count'][0]
+        _probe_ran = False
+        try:
+            _probe_fh = open(os.devnull, 'rb')
+            _probe_fh.close()
+            _probe_ran = True
+        except Exception:
+            pass
+        if not _probe_ran:
             try:
-                os.stat(os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else '.')
+                os.chdir(os.getcwd())
+                _probe_ran = True
             except Exception:
-                os.stat('.')
-            _c_after = _g['_trx_audit_count'][0]
-            if _c_after <= _c_before:
-                _obliterate()
+                pass
+        if _probe_ran and _g['_trx_audit_count'][0] <= _c_before:
+            _obliterate()
     except Exception:
         pass
 
@@ -475,14 +513,31 @@ def _anti_debugger():
         pass
 
     # Vector 17: Core builtin identity watchdog (monkeypatch detection)
+    # FIX (P0 false positive): _protect_exec_eval()/_protect_marshal() install
+    # Tr0ngX's own closures AFTER the first snapshot was taken, so the raw id
+    # tuple compare killed every build on the watchdog's second cycle. Own
+    # wrappers are now recognised by id and the baseline is re-armed for them.
     try:
         import builtins as _trx_bi
+        _trx_names = ('__import__', 'open', 'exec', 'eval', 'compile', '__build_class__')
         _trx_sig = (id(_trx_bi.__import__), id(_trx_bi.open), id(_trx_bi.exec),
                     id(_trx_bi.eval), id(_trx_bi.compile), id(_trx_bi.__build_class__))
-        if '_trx_bi_sig' not in globals():
+        _trx_prev = globals().get('_trx_bi_sig')
+        if _trx_prev is None:
             globals()['_trx_bi_sig'] = _trx_sig
-        elif _trx_sig != globals()['_trx_bi_sig']:
-            _obliterate()
+        elif _trx_sig != _trx_prev:
+            _trx_foreign = False
+            for _trx_nm, _trx_old, _trx_new in zip(_trx_names, _trx_prev, _trx_sig):
+                if _trx_old == _trx_new:
+                    continue
+                if _trx_nm in ('exec', 'eval') and _is_own_wrapper(getattr(_trx_bi, _trx_nm, None)):
+                    continue
+                _trx_foreign = True
+                break
+            if _trx_foreign:
+                _obliterate()
+            else:
+                globals()['_trx_bi_sig'] = _trx_sig
     except Exception:
         pass
 
@@ -515,17 +570,22 @@ def _anti_debugger():
     # namespace; id() equality catches attribute replacement while the type()
     # equality against print() catches proxy objects spoofing __name__.
     # Source: pyshield anti_analysis.py builtins identity check (MIT, research note).
+    # FIX (P0 false positive): the shield's own _safe_exec/_safe_eval closures are
+    # Python-level functions, so type(exec) is not type(print) by design - those
+    # id-verified wrappers are exempted (foreign replacements still abort).
     try:
         import builtins as _trx_bi2
         import importlib as _trx_il2
         _trx_pristine = _trx_il2.import_module('builtins')
-        if id(_trx_bi2.exec) != id(_trx_pristine.exec):
+        _trx_cur_exec = _trx_bi2.exec
+        _trx_cur_compile = _trx_bi2.compile
+        if id(_trx_cur_exec) != id(_trx_pristine.exec) and not _is_own_wrapper(_trx_cur_exec):
             _obliterate()
-        if id(_trx_bi2.compile) != id(_trx_pristine.compile):
+        if id(_trx_cur_compile) != id(_trx_pristine.compile) and not _is_own_wrapper(_trx_cur_compile):
             _obliterate()
-        if type(_trx_bi2.exec) is not type(_trx_bi2.print):
+        if type(_trx_cur_exec) is not type(_trx_bi2.print) and not _is_own_wrapper(_trx_cur_exec):
             _obliterate()
-        if type(_trx_bi2.compile) is not type(_trx_bi2.print):
+        if type(_trx_cur_compile) is not type(_trx_bi2.print) and not _is_own_wrapper(_trx_cur_compile):
             _obliterate()
         del _trx_pristine
     except SystemExit:
