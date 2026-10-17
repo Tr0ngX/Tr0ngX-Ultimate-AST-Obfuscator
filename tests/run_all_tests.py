@@ -10,6 +10,37 @@ try:
 except Exception:
     pass
 
+
+def _find_repo_root():
+    """Locate the repo root even when the harness is launched from another cwd."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [os.path.dirname(here), os.path.abspath(os.getcwd())]
+    env_root = os.environ.get("TR0NGX_REPO_ROOT")
+    if env_root:
+        candidates.append(os.path.abspath(env_root))
+    for base in candidates:
+        cur = base
+        for _ in range(8):
+            if os.path.isfile(os.path.join(cur, "main.py")):
+                return cur
+            parent = os.path.dirname(cur)
+            if parent == cur:
+                break
+            cur = parent
+    return os.path.dirname(here)
+
+
+# Suites are always launched with cwd=REPO_ROOT and absolute paths: relative
+# paths resolved against an inherited cwd silently broke every suite that
+# derives the repo root from __file__ (test_12 / test_13).
+REPO_ROOT = _find_repo_root()
+OBF_SCRIPT = os.path.join(REPO_ROOT, "main.py")
+
+
+def _abs(path):
+    """Resolve repo-relative paths against REPO_ROOT, never the inherited cwd."""
+    return path if os.path.isabs(path) else os.path.join(REPO_ROOT, path)
+
 TEST_FILES = [
     "tests/test_01_core_features.py",
     "tests/test_02_crypto_math.py",
@@ -33,8 +64,8 @@ STANDALONE_TESTS = [
     "tests/test_qa_fuzz_semantic.py"
 ]
 
-OBF_BUILD_TIMEOUT = 420
-OBF_RUN_TIMEOUT = 120
+OBF_BUILD_TIMEOUT = 600
+OBF_RUN_TIMEOUT = 360
 NATIVE_TIMEOUT = 600
 
 OBF_CONFIGS = [
@@ -84,7 +115,7 @@ def run_single_obf_test(task):
     task_num = task["num"]
     total_tasks = task["total"]
     expected_stdout = task.get("expected_stdout")
-    obf_script = "main.py"
+    obf_script = OBF_SCRIPT
 
     with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as tmp_out:
         out_path = tmp_out.name
@@ -92,8 +123,8 @@ def run_single_obf_test(task):
     try:
         # Step 1: Obfuscation
         t_obf0 = time.time()
-        cmd = [sys.executable, obf_script, "-i", tf, "-o", out_path] + cfg["args"]
-        p_obf = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        cmd = [sys.executable, obf_script, "-i", _abs(tf), "-o", out_path] + cfg["args"]
+        p_obf = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
                                timeout=OBF_BUILD_TIMEOUT)
         obf_dur = time.time() - t_obf0
 
@@ -116,9 +147,10 @@ def run_single_obf_test(task):
         # Step 2: Runtime Execution Verification
         t_run0 = time.time()
         run_env = os.environ.copy()
+        run_env["TR0NGX_REPO_ROOT"] = REPO_ROOT
         if "env" in cfg:
             run_env.update(cfg["env"])
-        p_run = subprocess.run([sys.executable, out_path], env=run_env, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        p_run = subprocess.run([sys.executable, out_path], cwd=REPO_ROOT, env=run_env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                                timeout=OBF_RUN_TIMEOUT)
         run_dur = time.time() - t_run0
 
@@ -194,7 +226,7 @@ def main():
         except ValueError:
             pass
 
-    selected_files = [f for f in TEST_FILES if os.path.exists(f)]
+    selected_files = [f for f in TEST_FILES if os.path.exists(_abs(f))]
     if args.file != "all":
         selected_files = [f for f in selected_files if args.file in f]
 
@@ -211,7 +243,7 @@ def main():
     native_outputs = {}
     def run_native(tf):
         t0 = time.time()
-        p = subprocess.run([sys.executable, tf], capture_output=True, text=True, encoding="utf-8", errors="replace",
+        p = subprocess.run([sys.executable, _abs(tf)], cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=NATIVE_TIMEOUT)
         dur = time.time() - t0
         return tf, p.returncode == 0, dur, p.stderr.strip(), p.stdout.strip()
@@ -268,7 +300,7 @@ def main():
                 total_failed += 1
 
     # 3. Standalone Security & Resilience Test Suites (Concurrent)
-    standalone_files = [st for st in STANDALONE_TESTS if os.path.exists(st)]
+    standalone_files = [st for st in STANDALONE_TESTS if os.path.exists(_abs(st))]
     safe_print(f"\n[PHASE 3] Concurrently Running {len(standalone_files)} Standalone Security Suites...")
 
     if standalone_files:

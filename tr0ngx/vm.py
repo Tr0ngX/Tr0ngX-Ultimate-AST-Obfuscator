@@ -3274,6 +3274,20 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
 
     _g_env[{repr(tok['bind_defaults'])}] = {tok['bind_defaults']}
 
+    def __tvm_locals__():
+        if {v['active_frames']}:
+            return {v['active_frames']}[-1].locals
+        return _g_env
+    def __tvm_globals__():
+        return _g_env
+    def __tvm_vars__(*_vargs):
+        if not _vargs:
+            return __tvm_locals__()
+        return getattr(_vargs[0], '__dict__', dict())
+    _g_env['locals'] = __tvm_locals__
+    _g_env['globals'] = __tvm_globals__
+    _g_env['vars'] = __tvm_vars__
+
     # Level-4 per-function ISA divergence infrastructure lives below; the
     # enable flag is interpolated from the emitter scope.
     _isa_fwd_cache = {{}}

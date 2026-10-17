@@ -8,7 +8,6 @@ from .names import rd
 anti = r"""
 import traceback, marshal, sys, os, threading, time, struct, types, gc, random
 
-# ═══ CORE PROTECTION LAYER ═══
 _SHIELD = type('Shield', (), {'_active': True, '_checks': 0})()
 _ORIGINAL_BUILTINS = {}
 # Registry of Tr0ngX's OWN hardening wrappers. id() is the fast path, but the
@@ -62,7 +61,6 @@ def _obliterate():
                 while True:
                     pass  # Infinite loop as last resort
 
-# ═══ HOOK DETECTION ENGINE ═══
 def _snapshot_builtins():
     '''Take snapshot of original builtins for tamper detection'''
     import builtins
@@ -90,7 +88,6 @@ def _verify_builtins():
         if curr_id != orig_id and not (hasattr(current, '__name__') and current.__name__ in _safe_names):
             _obliterate()
 
-# ═══ EXEC/EVAL PROTECTION (ZERO-ATTRIBUTE-LEAK CLOSURES) ═══
 def _protect_exec_eval():
     '''Make exec/eval tamper-resistant using closed lexical closures with zero inspectable attribute leaks (TRX-DEOB-007)'''
     import builtins
@@ -126,7 +123,6 @@ def _protect_exec_eval():
     _ORIGINAL_BUILTINS['exec'] = id(builtins.exec)
     _ORIGINAL_BUILTINS['eval'] = id(builtins.eval)
 
-# ═══ MARSHAL PROTECTION (ZERO-ATTRIBUTE-LEAK CLOSURE) ═══
 def _protect_marshal():
     '''Deep marshal.loads protection without __wrapped__ or exposed function references (TRX-DEOB-007)'''
     _real_loads = marshal.loads
@@ -151,9 +147,7 @@ def _protect_marshal():
     _TRX_OWN_WRAPPER_IDS['marshal.loads'] = id(_guarded_loads)
     _ORIGINAL_BUILTINS['marshal.loads'] = id(_guarded_loads)
 
-# ═══ ANTI-DEBUGGER (MULTI-VECTOR) ═══
 
-# ═══ ANTI-AUDIT-HOOK & TAMPER SHIELD (PEP 578) ═══
 # NOTE: sys.audit/addaudithook override only replaces the Python-level attribute.
 # C-level PySys_Audit() and previously registered audit hooks still function.
 # This is best-effort protection - a determined attacker with C-level access can bypass it.
@@ -593,7 +587,6 @@ def _anti_debugger():
     except Exception:
         pass
 
-# ═══ ANTI-IMPORT HOOK ═══
 class _ImportBlocker:
     '''Block dangerous decompilation & debugger imports at meta_path level (PEP 451 compatible) (TRX-DEOB-009/010)'''
     _BLOCKED = frozenset({
@@ -623,7 +616,6 @@ def _install_import_blocker():
     if blocker not in sys.meta_path:
         sys.meta_path.insert(0, blocker)
 
-# ═══ ANTI-MEMORY DUMP, REFLECTION NEUTRALIZATION & C-LEVEL TRACE PURGE ═══
 def _anti_memory_analysis():
     '''Make memory analysis harder, neutralize reflection/bytecode dumpers, wipe linecache, clear tracebacks and wipe C-level trace hooks (TRX-DEOB-009/010)'''
     try:
@@ -672,7 +664,6 @@ def _anti_memory_analysis():
     except Exception:
         pass
 
-# ═══ SELF-INTEGRITY CHECK (BYTECODE OPCODES CHECKSUM) ═══
 def _self_verify():
     '''Verify own functions and bytecode opcodes have not been patched or hooked'''
     checks = [_obliterate, _anti_debugger, _verify_builtins,
@@ -685,7 +676,6 @@ def _self_verify():
         if not hasattr(check, '__code__') or not check.__code__.co_code:
             _obliterate()
 
-# ═══ CONTINUOUS MONITORING THREAD ═══
 def _start_watchdog():
     def _monitor():
         _check_count = 0
@@ -713,7 +703,6 @@ def _start_watchdog():
         random.choices('abcdefghijklmnop', k=12)))
     t.start()
 
-# ═══ ANTI-MONKEY PATCHING ═══
 def _freeze_critical():
     '''Make critical objects harder to monkey-patch'''
     import builtins
@@ -743,7 +732,6 @@ def _freeze_critical():
 
     return _check_hidden
 
-# ═══ INITIALIZE ALL PROTECTION ═══
 try:
     _snapshot_builtins()
     _anti_debugger()
@@ -1034,7 +1022,6 @@ def _generate_anti_vm_shield() -> str:
     host_var = rd('guard')
     
     return f"""
-# ═══ ANTI-VIRTUALIZATION, SANDBOX & VIRTUAL NETWORK MATRIX ═══
 def {fn_name}():
     import os, sys
 

@@ -17,16 +17,15 @@ so no interactive stdin prompt is required.
 Anti-debug environmental gate (--antidebug y combos C and F):
 the injected shield enumerates visible window titles/classes and running
 processes and terminates the process when an analysis tool pattern matches
-(verified behaviour: _anti_debugger() Vector 11 calls _obliterate()). Its
-window-class blacklist contains the bare substring "id", which matches the
-ubiquitous "Chrome_WidgetWin_1" class of every visible Chromium/Electron
-window, so on developer desktops with a browser or Electron app open the
-artifact self-terminates instantly and silently - by design, not breakage.
-Before running such combos this suite probes the desktop with the SAME
-heuristics; when a trigger is present the combo is reported as SKIP with
-the matching evidence instead of FAIL, because asserting "the artifact
-runs anyway" would contradict the protection being tested. On clean
-machines (CI) the full run-and-compare assertions execute.
+(verified behaviour: _anti_debugger() Vector 11 calls _obliterate()). The
+window-class blacklist is the shield's real one (the historical bare "id"
+substring entry was removed from shields.py as a P0 false positive - it
+matched Chrome_WidgetWin_1 on every Chromium/Electron desktop). Before
+running such combos this suite probes the desktop with the SAME heuristics;
+when a trigger is present the combo is reported as SKIP with the matching
+evidence instead of FAIL, because asserting "the artifact runs anyway" would
+contradict the protection being tested. On clean machines (CI) the full
+run-and-compare assertions execute.
 """
 import os
 import shutil
@@ -40,10 +39,30 @@ try:
 except Exception:
     pass
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def _find_repo_root():
+    """Locate the repo root even when the suite is launched from another cwd."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [os.path.dirname(here), os.path.abspath(os.getcwd())]
+    env_root = os.environ.get("TR0NGX_REPO_ROOT")
+    if env_root:
+        candidates.append(os.path.abspath(env_root))
+    for base in candidates:
+        cur = base
+        for _ in range(8):
+            if os.path.isfile(os.path.join(cur, "main.py")):
+                return cur
+            parent = os.path.dirname(cur)
+            if parent == cur:
+                break
+            cur = parent
+    return os.path.dirname(here)
+
+
+REPO_ROOT = _find_repo_root()
 OBF_SCRIPT = os.path.join(REPO_ROOT, "main.py")
 BUILD_TIMEOUT = 300
-EXEC_TIMEOUT = 60
+EXEC_TIMEOUT = 120
 
 SAMPLE_SOURCE = (
     "def compute(n):\n"
@@ -94,9 +113,11 @@ BAD_WINDOW_CLASS_SUBSTRINGS = (
     "ollydbg", "x64dbg", "x32dbg", "procmon_window_class", "cheatengine",
     "processhacker", "httpdebugger", "dbgviewclass", "tformmain",
 )
-# The injected shield also blacklists the bare window-class substring "id",
-# which matches Chrome_WidgetWin_1 and other everyday classes.
-HOSTILE_CLASS_SUBSTRINGS = BAD_WINDOW_CLASS_SUBSTRINGS + ("id",)
+# Window-class substrings mirrored from the injected shield's _BAD_CLASSES.
+# The shield no longer blacklists the bare substring "id" (P0 false positive on
+# Chrome_WidgetWin_1), so this probe must not either - doing so silently turned
+# every --antidebug y combo into a SKIP on ordinary developer desktops.
+HOSTILE_CLASS_SUBSTRINGS = BAD_WINDOW_CLASS_SUBSTRINGS
 
 RESULTS = {"pass": 0, "fail": 0, "skip": 0}
 

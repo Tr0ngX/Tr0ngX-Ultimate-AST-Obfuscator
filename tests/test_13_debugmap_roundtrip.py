@@ -27,7 +27,26 @@ try:
 except Exception:
     pass
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+def _find_repo_root():
+    """Locate the repo root even when the suite is launched from another cwd."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [os.path.dirname(here), os.path.abspath(os.getcwd())]
+    env_root = os.environ.get("TR0NGX_REPO_ROOT")
+    if env_root:
+        candidates.append(os.path.abspath(env_root))
+    for base in candidates:
+        cur = base
+        for _ in range(8):
+            if os.path.isfile(os.path.join(cur, "main.py")):
+                return cur
+            parent = os.path.dirname(cur)
+            if parent == cur:
+                break
+            cur = parent
+    return os.path.dirname(here)
+
+
+REPO_ROOT = _find_repo_root()
 OBF_SCRIPT = os.path.join(REPO_ROOT, "main.py")
 BUILD_TIMEOUT = 300
 

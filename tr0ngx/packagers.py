@@ -594,9 +594,7 @@ def _hyperion_camouflage(content: str) -> str:
 
     rand_addr = f"0x00000{random.randint(1000, 9999)}BE{random.randint(10000, 99999)}"
 
-    camo_code = f"""# ═════════════════════════════════════════════════════════════════
-# HYPERION SCIENTIFIC SIMULATION LAYER (Camouflage Architecture)
-# ═════════════════════════════════════════════════════════════════
+    camo_code = f"""# HYPERION SCIENTIFIC SIMULATION LAYER (Camouflage Architecture)
 import sys, os, time, math, zlib, base64
 
 from math import prod as {gen[5]}

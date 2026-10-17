@@ -746,7 +746,6 @@ def _generate_debug_poison_shield() -> str:
     """Generate Deceptive Poison State Machine shield (Bedrock-grade silent degradation)."""
     fn_name = rd('state_machine')
     return f"""
-# ═══ DECEPTIVE DEBUG POISON STATE MACHINE ═══
 __trx_poison_state__ = [0]
 def __trx_poison(weight, tag):
     global __trx_poison_state__
@@ -776,7 +775,6 @@ def _generate_spoof_meta_shield(target_module: str = "<frozen importlib._bootstr
     """Generate Metadata Spoofing & Signature Debranding shield."""
     fn_name = rd('guard')
     return f"""
-# ═══ METADATA SPOOFING & SIGNATURE DEBRANDING ═══
 def {fn_name}():
     import sys
     try:
@@ -803,7 +801,6 @@ def _generate_anti_dump_shield() -> str:
     abort_fn = rd('guard')
     
     return f'''
-# ═══ IN-MEMORY ANTI-DUMP & GC SCANNER SCRUBBER ═══
 def {fn_name}():
     import sys, gc, types, os
 
