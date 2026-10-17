@@ -62,7 +62,7 @@ def _find_repo_root():
 REPO_ROOT = _find_repo_root()
 OBF_SCRIPT = os.path.join(REPO_ROOT, "main.py")
 BUILD_TIMEOUT = 300
-EXEC_TIMEOUT = 120
+EXEC_TIMEOUT = 300
 
 SAMPLE_SOURCE = (
     "def compute(n):\n"

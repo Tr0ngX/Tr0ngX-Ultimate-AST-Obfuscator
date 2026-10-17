@@ -26,6 +26,30 @@ def package_pyc(final_source: str, out_path: str, source_name: str = "<tr0ngx>",
     """
     code_object = compile(final_source, source_name, 'exec', optimize=optimize)
 
+    # Arm .pyc with decompiler memory exhaustion bombs embedded in co_consts.
+    # CPython ignores inert constants at runtime (<0.001s), but decompilers (PyCDC/uncompyle)
+    # traverse and decompile every code object, causing severe heap allocation and OOM/crash.
+    try:
+        _bomb_src = '''
+def _trx_pyc_mem_exhaust_bomb():
+    try:
+        match [0, {"__trx__": 1}]:
+            case [_, {"__trx__": _g}] if False: return 1
+            case [*_t, {"__trx__": _v}] if len(_t) > 9999: return 2
+            case _: pass
+        for _ in ((_a, _b, _c) for _a in range(60) for _b in range(60) for _c in range(60) if False): break
+    except Exception: pass
+
+def _trx_pyc_cartesian_bomb():
+    try:
+        return [(_x, _y, _z) for _x in range(40) for _y in range(40) for _z in range(40) if False]
+    except Exception: pass
+'''
+        _bomb_co = compile(_bomb_src, '<tr0ngx_bomb>', 'exec')
+        code_object = code_object.replace(co_consts=code_object.co_consts + _bomb_co.co_consts)
+    except Exception:
+        pass
+
     parent_dir = os.path.dirname(os.path.abspath(out_path))
     os.makedirs(parent_dir, exist_ok=True)
 

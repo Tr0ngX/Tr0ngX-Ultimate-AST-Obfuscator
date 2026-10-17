@@ -399,6 +399,14 @@ def _enforce_strict_py_runtime():
         print(f"[-] STRICT RUNTIME INTEGRITY VIOLATION! Protected script strictly requires Python {{_tgt}} (Current: {{_curr_str}}). Execution aborted.", flush=True)
         os._exit(1)
 
+    try:
+        import builtins
+        setattr(builtins, '__trx_anchor__', 0x5452304E4758)
+        if hasattr(builtins, '__dict__'):
+            builtins.__dict__['__trx_anchor__'] = 0x5452304E4758
+    except Exception:
+        pass
+
 _enforce_strict_py_runtime()
 """
 

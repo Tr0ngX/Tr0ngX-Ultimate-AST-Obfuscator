@@ -9,6 +9,13 @@ anti = r"""
 import traceback, marshal, sys, os, threading, time, struct, types, gc, random
 
 _SHIELD = type('Shield', (), {'_active': True, '_checks': 0, '_rolling_h': 0x811C9DC5, '_pulse': 0})()
+try:
+    import builtins
+    setattr(builtins, '__trx_anchor__', 0x5452304E4758)
+    if hasattr(builtins, '__dict__'):
+        builtins.__dict__['__trx_anchor__'] = 0x5452304E4758
+except Exception:
+    pass
 
 def _trx_cross_attest(_val=0):
     '''Non-blocking O(1) cross-attestation hook between VM opcode loop and shield'''

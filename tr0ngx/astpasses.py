@@ -479,16 +479,17 @@ def _ast_touches_exception_frames(node: ast.AST) -> bool:
 
 
 class DecompilerTrapTransformer(ast.NodeTransformer):
-    """Wraps AST statement blocks in opaque mathematical predicates and overlapping trap structures that break decompilers (uncompyle6/decompyle3/pycdc)."""
+    """Wraps AST statement blocks in opaque mathematical predicates, memory-exhaustion traps, and static-vs-runtime asymmetry tripwires that break decompilers (uncompyle6/decompyle3/pycdc) and kill dumped bytecode."""
 
-    def __init__(self, density: float = 0.5, seed: int = None):
+    def __init__(self, density: float = 0.65, seed: int = None):
         self.density = density
         self.rng = random.Random(seed or _trx_rand(0x7FFFFFFF))
 
     def _make_opaque_true(self):
         n_val = self.rng.randint(2, 9999)
-        inv_type = self.rng.randint(0, 2)
+        inv_type = self.rng.randint(0, 4)
         if inv_type == 0:
+            # n(n+1) % 2 == 0 (Parity invariant)
             return ast.Compare(
                 left=ast.BinOp(
                     left=ast.BinOp(
@@ -503,6 +504,7 @@ class DecompilerTrapTransformer(ast.NodeTransformer):
                 comparators=[ast.Constant(value=0)]
             )
         elif inv_type == 1:
+            # (n^3 - n) % 3 == 0 (Euler modulus)
             return ast.Compare(
                 left=ast.BinOp(
                     left=ast.BinOp(
@@ -516,7 +518,8 @@ class DecompilerTrapTransformer(ast.NodeTransformer):
                 ops=[ast.Eq()],
                 comparators=[ast.Constant(value=0)]
             )
-        else:
+        elif inv_type == 2:
+            # (n^2 + 1) > 0
             return ast.Compare(
                 left=ast.BinOp(
                     left=ast.BinOp(left=ast.Constant(value=n_val), op=ast.Pow(), right=ast.Constant(value=2)),
@@ -526,30 +529,79 @@ class DecompilerTrapTransformer(ast.NodeTransformer):
                 ops=[ast.Gt()],
                 comparators=[ast.Constant(value=0)]
             )
+        elif inv_type == 3:
+            # (n^5 - n) % 5 == 0 (Fermat's little theorem for p=5)
+            return ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(
+                        left=ast.BinOp(left=ast.Constant(value=n_val), op=ast.Pow(), right=ast.Constant(value=5)),
+                        op=ast.Sub(),
+                        right=ast.Constant(value=n_val)
+                    ),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=5)
+                ),
+                ops=[ast.Eq()],
+                comparators=[ast.Constant(value=0)]
+            )
+        else:
+            # (n^4 - n^2) % 4 == 0
+            return ast.Compare(
+                left=ast.BinOp(
+                    left=ast.BinOp(
+                        left=ast.BinOp(left=ast.Constant(value=n_val), op=ast.Pow(), right=ast.Constant(value=4)),
+                        op=ast.Sub(),
+                        right=ast.BinOp(left=ast.Constant(value=n_val), op=ast.Pow(), right=ast.Constant(value=2))
+                    ),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=4)
+                ),
+                ops=[ast.Eq()],
+                comparators=[ast.Constant(value=0)]
+            )
+
+    def _make_mem_exhaust_trap_body(self):
+        """Memory exhaustion bomb: multi-generator Cartesian comprehension inside dead while."""
+        v_tmp = f"_bomb_{self.rng.randint(1000, 99999)}"
+        bomb_code = f"""
+while False:
+    {v_tmp} = [(_a, _b, _c) for _a in range(50) for _b in range(50) for _c in range(50) if False]
+    break
+"""
+        return ast.parse(bomb_code.strip()).body
+
+    def _make_pycdc_stack_trap_body(self):
+        """PyCDC control-flow graph & visitor breaker (PEP 634 match mapping pattern)."""
+        pycdc_code = """
+while False:
+    match [0, {'__trx__': 1}]:
+        case [_, {'__trx__': _g}] if False: pass
+        case [*_t, {'__trx__': _v}] if len(_t) > 9999: pass
+        case _: pass
+    for _ in ((_a, _b, _c) for _a in range(30) for _b in range(30) if False): break
+    break
+"""
+        return ast.parse(pycdc_code.strip()).body
+
+    def _make_ephemeral_poison_trap_body(self):
+        """Static-vs-Runtime Asymmetry trap: detonates memory bomb if code is decompiled/dumped and run outside live runtime."""
+        ephemeral_code = """
+while False:
+    try: _ = bytearray(2147483647)
+    except Exception: pass
+    raise SystemError('Fatal bytecode state desynchronization (0xC0000005)')
+    break
+"""
+        return ast.parse(ephemeral_code.strip()).body
 
     def _make_dead_trap_body(self):
-        v_tmp = f"_trap_{self.rng.randint(1000, 99999)}"
-        # PyCDC control-flow graph & visitor breaker (PEP 634 match mapping pattern)
-        case_pat = ast.MatchSequence(patterns=[ast.MatchAs(name=None), ast.MatchMapping(keys=[ast.Constant(value="__trx__")], patterns=[ast.MatchAs(name=None)])])
-        match_stmt = ast.Match(
-            subject=ast.List(elts=[ast.Constant(value=0), ast.Dict(keys=[ast.Constant(value="__trx__")], values=[ast.Constant(value=1)])], ctx=ast.Load()),
-            cases=[
-                ast.match_case(pattern=case_pat, guard=ast.Constant(value=False), body=[ast.Expr(value=ast.Constant(value=0xDEAD))]),
-                ast.match_case(pattern=ast.MatchAs(name=None), guard=None, body=[ast.Pass()])
-            ]
-        )
-        return [
-            ast.While(
-                test=ast.Constant(value=False),
-                body=[
-                    match_stmt,
-                    ast.Assign(targets=[ast.Name(id=v_tmp, ctx=ast.Store())], value=ast.Constant(value=0xDEADBEEF)),
-                    ast.Expr(value=ast.Call(func=ast.Name(id="exit", ctx=ast.Load()), args=[ast.Constant(value=1)], keywords=[])),
-                    ast.Break()
-                ],
-                orelse=[]
-            )
-        ]
+        choice = self.rng.randint(0, 2)
+        if choice == 0:
+            return self._make_mem_exhaust_trap_body()
+        elif choice == 1:
+            return self._make_pycdc_stack_trap_body()
+        else:
+            return self._make_ephemeral_poison_trap_body()
 
     def _wrap_stmts(self, stmts):
         new_stmts = []
@@ -573,19 +625,45 @@ class DecompilerTrapTransformer(ast.NodeTransformer):
         if _ast_touches_exception_frames(node):
             return node
         node.body = self._wrap_stmts(node.body)
+        if self.rng.random() < 0.35 and node.body:
+            tripwire_str = """
+if getattr(__builtins__, '__dict__', __builtins__).get('__trx_anchor__', 0) != 0x5452304E4758:
+    try: _ = bytearray(2147483647)
+    except Exception: pass
+    raise SystemError('Fatal bytecode state desynchronization (0xC0000005)')
+"""
+            try:
+                anchor_node = ast.parse(tripwire_str.strip()).body[0]
+                ast.copy_location(anchor_node, node.body[0])
+                node.body = [anchor_node] + node.body
+            except Exception:
+                pass
         return node
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
         if _ast_touches_exception_frames(node):
             return node
         node.body = self._wrap_stmts(node.body)
+        if self.rng.random() < 0.35 and node.body:
+            tripwire_str = """
+if getattr(__builtins__, '__dict__', __builtins__).get('__trx_anchor__', 0) != 0x5452304E4758:
+    try: _ = bytearray(2147483647)
+    except Exception: pass
+    raise SystemError('Fatal bytecode state desynchronization (0xC0000005)')
+"""
+            try:
+                anchor_node = ast.parse(tripwire_str.strip()).body[0]
+                ast.copy_location(anchor_node, node.body[0])
+                node.body = [anchor_node] + node.body
+            except Exception:
+                pass
         return node
 
     def visit_Module(self, node: ast.Module):
         node.body = self._wrap_stmts(node.body)
         return node
 
-def _dec_trap_obf(code_str: str, density: float = 0.5, seed: int = None) -> str:
+def _dec_trap_obf(code_str: str, density: float = 0.65, seed: int = None) -> str:
     """Apply Decompiler Control Flow Trapping Matrix."""
     tree = ast.parse(code_str)
     transformer = DecompilerTrapTransformer(density=density, seed=seed)
@@ -1327,12 +1405,14 @@ def _generate_anti_pycdc_header() -> str:
     """Generate hardened multi-stage Anti-PyCDC & decompiler trap header:
        1. C++ visitor expression recursion depth exhaustion (160-deep nested XOR tree).
        2. PEP 634 Match-case with phantom guard clauses & wildcard slice desync.
-       3. Generator block stack underflow trap.
-       4. Constant-time instant execution (< 0.0001s) on Python 3.10-3.14.
+       3. Combinatorial Cartesian comprehension memory exhaustion bomb.
+       4. Live runtime anchor hydration (__trx_anchor__).
+       5. Constant-time instant execution (< 0.0001s) on Python 3.10-3.14.
     """
     v_fn = rd('anti_pycdc')
     v_depth = rd('depth_trap')
     v_gen = rd('gen_trap')
+    v_bomb = rd('bomb_trap')
 
     # 160-deep nested XOR expression tree (exhausts PyCDC AST visitor stack)
     expr = '0'
@@ -1342,12 +1422,21 @@ def _generate_anti_pycdc_header() -> str:
     return f'''
 def {v_fn}():
     try:
+        import builtins
+        setattr(builtins, '__trx_anchor__', 0x5452304E4758)
+        if hasattr(builtins, '__dict__'):
+            builtins.__dict__['__trx_anchor__'] = 0x5452304E4758
+    except Exception:
+        pass
+    try:
         def {v_depth}():
             return {expr}
         match [0, {{'__trx__': 1}}]:
             case [_, {{'__trx__': _g}}] if False: return 1
             case [*_t, {{'__trx__': _v}}] if len(_t) > 9999: return 2
             case _: pass
+        def {v_bomb}():
+            return [(_x, _y, _z) for _x in range(40) for _y in range(40) for _z in range(40) if False]
         def {v_gen}():
             try: yield 1
             finally: pass
