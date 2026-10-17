@@ -529,10 +529,20 @@ class DecompilerTrapTransformer(ast.NodeTransformer):
 
     def _make_dead_trap_body(self):
         v_tmp = f"_trap_{self.rng.randint(1000, 99999)}"
+        # PyCDC control-flow graph & visitor breaker (PEP 634 match mapping pattern)
+        case_pat = ast.MatchSequence(patterns=[ast.MatchAs(name=None), ast.MatchMapping(keys=[ast.Constant(value="__trx__")], patterns=[ast.MatchAs(name=None)])])
+        match_stmt = ast.Match(
+            subject=ast.List(elts=[ast.Constant(value=0), ast.Dict(keys=[ast.Constant(value="__trx__")], values=[ast.Constant(value=1)])], ctx=ast.Load()),
+            cases=[
+                ast.match_case(pattern=case_pat, guard=ast.Constant(value=False), body=[ast.Expr(value=ast.Constant(value=0xDEAD))]),
+                ast.match_case(pattern=ast.MatchAs(name=None), guard=None, body=[ast.Pass()])
+            ]
+        )
         return [
             ast.While(
                 test=ast.Constant(value=False),
                 body=[
+                    match_stmt,
                     ast.Assign(targets=[ast.Name(id=v_tmp, ctx=ast.Store())], value=ast.Constant(value=0xDEADBEEF)),
                     ast.Expr(value=ast.Call(func=ast.Name(id="exit", ctx=ast.Load()), args=[ast.Constant(value=1)], keywords=[])),
                     ast.Break()
@@ -1313,22 +1323,44 @@ def _refresh_runtime_symbols():
 # ANTI-PYCDC ENHANCED (COMPACT & FAST DECOMPILER KILLER)
 # ═══════════════════════════════════════════════════════════════
 
-antipycdc = ''
-for i in range(120):
-    antipycdc += f"你器(你器(你器(''))),"
-antipycdc = "try:tr0ngx=[" + antipycdc + "]\nexcept:pass"
+def _generate_anti_pycdc_header() -> str:
+    """Generate hardened multi-stage Anti-PyCDC & decompiler trap header:
+       1. C++ visitor expression recursion depth exhaustion (160-deep nested XOR tree).
+       2. PEP 634 Match-case with phantom guard clauses & wildcard slice desync.
+       3. Generator block stack underflow trap.
+       4. Constant-time instant execution (< 0.0001s) on Python 3.10-3.14.
+    """
+    v_fn = rd('anti_pycdc')
+    v_depth = rd('depth_trap')
+    v_gen = rd('gen_trap')
 
-ANTI_PYCDC = f"""
-def 你器(你):
-    return 你
+    # 160-deep nested XOR expression tree (exhausts PyCDC AST visitor stack)
+    expr = '0'
+    for i in range(1, 160):
+        expr = f"({expr} ^ {i})"
+
+    return f'''
+def {v_fn}():
+    try:
+        def {v_depth}():
+            return {expr}
+        match [0, {{'__trx__': 1}}]:
+            case [_, {{'__trx__': _g}}] if False: return 1
+            case [*_t, {{'__trx__': _v}}] if len(_t) > 9999: return 2
+            case _: pass
+        def {v_gen}():
+            try: yield 1
+            finally: pass
+        for _ in {v_gen}(): break
+    except Exception:
+        pass
 try:
-    pass
+    {v_fn}()
 except Exception:
     pass
-finally:
-    pass
-{antipycdc}
-"""
+'''
+
+ANTI_PYCDC = _generate_anti_pycdc_header()
 
 
 # ======================================================================

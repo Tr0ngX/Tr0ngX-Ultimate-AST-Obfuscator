@@ -3321,6 +3321,8 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
     async def {v['eval_frame_async_fn']}(_frame):
         _c_arr = _frame.code_obj.code
         _c_len = _sys_len(_c_arr)
+        _cross_attest = _g_env.get('_trx_cross_attest', None)
+        _step_k = 0
         {v['async_depth']}[0] += 1
         {_DBG_AE}
         try:
@@ -3333,6 +3335,9 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
                     _op = _c_arr[_frame.pc]
                     _arg = (_c_arr[_frame.pc+1] << 8) | _c_arr[_frame.pc+2]
                     _frame.pc += 3
+                    _step_k += 1
+                    if (_step_k & 63) == 0 and _cross_attest is not None:
+                        _cross_attest(_op ^ _c_arr[_step_k % _c_len])
 
                     # PERF G1: precomputed slot + type() is tuple (see sync loop)
                     _h = {v['dispatch_tbl_async']}[_frame._slot[_op]]
@@ -3375,6 +3380,8 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
     def {v['eval_frame_fn']}(_frame):
         _c_arr = _frame.code_obj.code
         _c_len = _sys_len(_c_arr)
+        _cross_attest = _g_env.get('_trx_cross_attest', None)
+        _step_k = 0
         try:
             while _frame.pc < _c_len:
                 try:
@@ -3385,6 +3392,9 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
                     _op = _c_arr[_frame.pc]
                     _arg = (_c_arr[_frame.pc+1] << 8) | _c_arr[_frame.pc+2]
                     _frame.pc += 3
+                    _step_k += 1
+                    if (_step_k & 63) == 0 and _cross_attest is not None:
+                        _cross_attest(_op ^ _c_arr[_step_k % _c_len])
 
                     # PERF G1: slot precomputed at frame attach; type() is tuple
                     # avoids the isinstance virtual-call overhead in this loop.

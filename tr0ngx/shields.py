@@ -8,7 +8,22 @@ from .names import rd
 anti = r"""
 import traceback, marshal, sys, os, threading, time, struct, types, gc, random
 
-_SHIELD = type('Shield', (), {'_active': True, '_checks': 0})()
+_SHIELD = type('Shield', (), {'_active': True, '_checks': 0, '_rolling_h': 0x811C9DC5, '_pulse': 0})()
+
+def _trx_cross_attest(_val=0):
+    '''Non-blocking O(1) cross-attestation hook between VM opcode loop and shield'''
+    try:
+        if sys.gettrace() is not None:
+            _obliterate()
+        _cur = getattr(_SHIELD, '_rolling_h', 0x811C9DC5)
+        _nxt = (((_cur ^ int(_val)) * 16777619) & 0xFFFFFFFF)
+        _SHIELD._rolling_h = _nxt
+        _SHIELD._checks += 1
+        _SHIELD._pulse += 1
+        return _nxt
+    except Exception:
+        return 0
+
 _ORIGINAL_BUILTINS = {}
 # Registry of Tr0ngX's OWN hardening wrappers. id() is the fast path, but the
 # shield source can be exec'd into more than one module namespace (builtins are
@@ -682,18 +697,21 @@ def _start_watchdog():
         while _SHIELD._active:
             try:
                 _check_count += 1
-                _anti_debugger()
+                if sys.gettrace() is not None:
+                    _obliterate()
                 _verify_builtins()
                 _self_verify()
                 if '_hidden_check' in dir() and callable(_hidden_check):
                     _hidden_check()
 
-                # Periodic deep scan every 10 checks
-                if _check_count % 10 == 0:
+                # Heavy OS process snapshots & window enum run amortized every 20 checks
+                # to prevent thread freezing, GIL contention and execution bottlenecks
+                if _check_count % 20 == 0:
+                    _anti_debugger()
                     _anti_memory_analysis()
 
-                # Randomize sleep to avoid timing-based bypass
-                time.sleep(random.uniform(0.3, 1.5))
+                # Distributed jittered sleep: prevents thread CPU hogging
+                time.sleep(random.uniform(1.0, 2.5))
             except SystemExit:
                 os._exit(1)
             except Exception:
