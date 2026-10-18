@@ -73,12 +73,14 @@ from .packagers import (
 )
 
 
-def _write_final_output(output_file: str, code: str, out_format: str, src_file: str = None) -> None:
+def _write_final_output(output_file: str, code: str, out_format: str, src_file: str = None, options: dict = None) -> None:
     """Dispatch final-artifact write based on --out-format.
 
     py  (default): atomic text write (existing behavior, zero change).
     pyc: compile to .pyc bytecode (PEP 554 header + marshal).
     exe: wrap the .py artifact into a standalone Windows .exe via PyInstaller.
+    pyd / native: Native C-Extension DLL (.pyd).
+    native-exe: Native C++ Standalone Executable (.exe) with Anti-IDA/Ghidra stealth armor.
     """
     import os
     import tempfile
@@ -100,13 +102,19 @@ def _write_final_output(output_file: str, code: str, out_format: str, src_file: 
     if out_format in ("pyd", "native"):
         from .packagers_native import package_native_pyd
         mod_name = os.path.splitext(os.path.basename(output_file))[0]
-        package_native_pyd(str(code), output_file, module_name=mod_name)
+        stealth_pe = True
+        if options and "stealth_pe" in options:
+            stealth_pe = str(options["stealth_pe"]).upper() == "Y"
+        package_native_pyd(str(code), output_file, module_name=mod_name, stealth_pe=stealth_pe)
         return
 
     if out_format == "native-exe":
         from .packagers_native import package_native_exe
         app_name = os.path.splitext(os.path.basename(output_file))[0]
-        package_native_exe(str(code), output_file, app_name=app_name)
+        stealth_pe = True
+        if options and "stealth_pe" in options:
+            stealth_pe = str(options["stealth_pe"]).upper() == "Y"
+        package_native_exe(str(code), output_file, app_name=app_name, stealth_pe=stealth_pe)
         return
 
     # default: py
@@ -736,7 +744,7 @@ except Exception as _e:
         code = _gen_tr0ngx_header() + "\n" + _blank_pad + code
 
     # Write output atomically (format dispatch: py/pyc/exe)
-    _write_final_output(output_file, str(code), out_format, src_file=src_file)
+    _write_final_output(output_file, str(code), out_format, src_file=src_file, options=options)
     elapsed = time.time() - start_time
     file_size = os.path.getsize(output_file)
     ratio = file_size / original_size if original_size > 0 else 0

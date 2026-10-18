@@ -224,6 +224,9 @@ python main.py -i input.py -o output.py -m 3 \
 | `-r`, `--recursive` | Recursively scan all subdirectories when batch obfuscating | Flag |
 | `-w`, `--workers`, `-j` | Number of parallel worker threads for concurrent batch obfuscation | e.g. `4`, `8` |
 | `-o`, `--output` | Custom destination output path (or destination folder for batch) | `<filepath / dirpath>` |
+| `--out-format` | Output artifact format: `py`, `pyc`, `exe`, `pyd` / `native`, `native-exe` | `py`, `pyc`, `exe`, `pyd`, `native`, `native-exe` |
+| `--native` | Direct native C/C++ AOT compilation flag (aliases `--out-format native-exe` or `pyd`) | Flag |
+| `--stealth-pe` | Hostile Native PE Armor: Anti-IDA Hex-Rays F5 & Anti-Ghidra crashers (giant RSP stack offset bomb, flow overlaps), dynamic PEB EAT MurmurHash3 API resolver, VEH trap dispatcher (`ud2`), silent poison matrix, and binary PE armorer | `y` / `n` |
 | `-m`, `--mode` | Obfuscation complexity level | `1`, `2`, `3` |
 | `--moreobf` | Extra string & integer mutation pass | `y` / `n` |
 | `--antidebug` | Inject multi-vector Anti-Debug watchdog shield | `y` / `n` |

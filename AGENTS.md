@@ -83,6 +83,9 @@ graph TD
 | `-r`, `--recursive` | IO | Recursively scan all subdirectories when batch obfuscating | Flag |
 | `-w`, `--workers`, `-j` | Resource | Number of parallel worker threads for concurrent batch obfuscation | e.g. `4`, `8` |
 | `-o`, `--output` | IO | Custom output file destination (or output directory for batch) | `<filepath / dirpath>` |
+| `--out-format` | Packager | Output artifact format: `py`, `pyc`, `exe`, `pyd` / `native`, `native-exe` | `py`, `pyc`, `exe`, `pyd`, `native`, `native-exe` |
+| `--native` | Packager | Direct native C/C++ AOT compilation flag (aliases `--out-format native-exe` or `pyd`) | Flag |
+| `--stealth-pe` | Protection | Hostile Native PE Armor: Anti-IDA Hex-Rays F5 & Anti-Ghidra crashers (giant RSP stack offset bomb, flow overlaps), dynamic PEB EAT MurmurHash3 API resolver, VEH trap dispatcher (`ud2`), silent poison matrix, and binary PE armorer | `y` / `n` |
 | `-m`, `--mode` | Core AST | AST obfuscation complexity level | `1`, `2`, `3` |
 | `--moreobf` | Core AST | Inject extra AST dead code and try-except decoy blocks | `y` / `n` |
 | `--antidebug` | Protection | Inject anti-debugging watchdog daemon, Win32 PEB/remote debug checks, and hook blockers | `y` / `n` |

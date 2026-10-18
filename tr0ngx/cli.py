@@ -368,6 +368,7 @@ any preset. Docs: README.md / AGENTS.md""",
     parser.add_argument("--shared-symbols", choices=["y", "n", "Y", "N"], help="Batch mode: two-phase cross-module symbol sync with frozen deterministic rename map (y/n)", default=None)
     parser.add_argument("--vm-annotations", choices=["y", "n", "Y", "N"], help="Preserve type annotations in VM bytecode: enables dataclasses/pydantic/FastAPI under virtualization. Default off to reduce size (y/n)", default=None)
     parser.add_argument("--anti-intercept", choices=["y", "n", "Y", "N"], help="Deep Anti-Read Shield: 5-layer network/memory/introspection protection - module import block, socket encrypted I/O, SSL CA pinning, GC scrub, process watchdog (y/n)", default=None)
+    parser.add_argument("--stealth-pe", choices=["y", "n", "Y", "N"], help="Stealth PE armor: Anti-IDA Hex-Rays F5 & Anti-Ghidra crashers, VEH trap dispatch, PEB API hashing, silent key poison (y/n)", default=None)
 
     cli_args, unknown = parser.parse_known_args()
     if unknown:
@@ -538,6 +539,17 @@ any preset. Docs: README.md / AGENTS.md""",
     _trx_cfg._EngineState.vm_annotations = vm_annotations_choice.upper() == "Y"
     _trx_cfg._EngineState.anti_intercept = anti_intercept_choice.upper() == "Y"
 
+    stealth_pe_arg = getattr(cli_args, 'stealth_pe', None)
+    if stealth_pe_arg is not None:
+        stealth_pe_choice = "Y" if stealth_pe_arg.upper() == "Y" else "N"
+    else:
+        if mode == 3 and out_format_resolved in ("pyd", "native", "native-exe"):
+            stealth_pe_choice = "Y"
+        elif is_cli_mode:
+            stealth_pe_choice = "Y" if out_format_resolved in ("pyd", "native", "native-exe") else "N"
+        else:
+            stealth_pe_choice = "Y"
+
     # Force Python version
     if cli_args.force_py is not None:
         if cli_args.force_py.lower() in ["n", "no", "off", "none"]:
@@ -656,6 +668,7 @@ any preset. Docs: README.md / AGENTS.md""",
         "force_py_choice": force_py_choice,
         "forced_py_ver": forced_py_ver,
         "out_format": out_format_resolved,
+        "stealth_pe": stealth_pe_choice,
         "debug_map": debug_map_arg,
         "max_ram": max_ram,
         "max_cores": max_cores,
