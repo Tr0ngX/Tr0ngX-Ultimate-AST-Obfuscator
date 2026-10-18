@@ -298,8 +298,9 @@ any preset. Docs: README.md / AGENTS.md""",
     parser.add_argument("-D", "--dir", "--directory", help="Directory containing Python files for batch obfuscation", default=None)
     parser.add_argument("-r", "--recursive", action="store_true", help="Recurse into subdirectories when batch-obfuscating a directory")
     parser.add_argument("-o", "--output", help="Output file (single input) or output directory (batch)", default=None)
-    parser.add_argument("--out-format", choices=["py", "pyc", "exe"], default=None,
-                        help="Output format: py (default), pyc (compiled bytecode), exe (standalone Windows executable)")
+    parser.add_argument("--out-format", choices=["py", "pyc", "exe", "pyd", "native", "native-exe"], default=None,
+                        help="Output format: py (default), pyc (compiled bytecode), exe (standalone Windows executable), pyd/native (Native C-Extension DLL), native-exe (Native C++ executable)")
+    parser.add_argument("--native", action="store_true", help="Compile obfuscated payload directly to Native Windows C-Extension (.pyd) or Native Executable (.exe)")
     parser.add_argument("-w", "--workers", "--jobs", "-j", type=int, default=None, help="Parallel worker threads for batch obfuscation")
     
     # Engine modes
@@ -427,12 +428,19 @@ any preset. Docs: README.md / AGENTS.md""",
     max_ram = cli_args.max_ram
     max_cores = cli_args.cores
 
-    # Output format resolution: explicit flag wins; else infer from -o suffix; default py
+    # Output format resolution: explicit flag wins; else infer from -o suffix or --native flag; default py
     out_format_resolved = cli_args.out_format
+    if out_format_resolved is None and getattr(cli_args, 'native', False):
+        if cli_args.output and cli_args.output.lower().endswith(".exe"):
+            out_format_resolved = "native-exe"
+        else:
+            out_format_resolved = "pyd"
     if out_format_resolved is None and cli_args.output:
         _ol = cli_args.output.lower()
         if _ol.endswith(".pyc"):
             out_format_resolved = "pyc"
+        elif _ol.endswith(".pyd"):
+            out_format_resolved = "pyd"
         elif _ol.endswith(".exe"):
             out_format_resolved = "exe"
     if out_format_resolved is None:

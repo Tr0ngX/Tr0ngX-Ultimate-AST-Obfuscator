@@ -167,8 +167,10 @@ class MathOpaqueTransformer(ast.NodeTransformer):
             return node
         
         new_body = []
+        wrapped_count = 0
         for stmt in node.body:
-            if _trx_rand(100) < 60 and not isinstance(stmt, (ast.Return, ast.Yield, ast.YieldFrom, ast.Global, ast.Nonlocal, ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef)):
+            if wrapped_count < 10 and _trx_rand(100) < 60 and not isinstance(stmt, (ast.Return, ast.Yield, ast.YieldFrom, ast.Global, ast.Nonlocal, ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef)):
+                wrapped_count += 1
                 bogus_var = rd('biopaque')
                 bogus_stmt = ast.Assign(
                     targets=[ast.Name(id=bogus_var)],

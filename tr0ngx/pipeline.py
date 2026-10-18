@@ -80,6 +80,9 @@ def _write_final_output(output_file: str, code: str, out_format: str, src_file: 
     pyc: compile to .pyc bytecode (PEP 554 header + marshal).
     exe: wrap the .py artifact into a standalone Windows .exe via PyInstaller.
     """
+    import os
+    import tempfile
+
     if out_format == "pyc":
         from .packagers_pyc import package_pyc
         package_pyc(str(code), output_file)
@@ -87,12 +90,23 @@ def _write_final_output(output_file: str, code: str, out_format: str, src_file: 
 
     if out_format == "exe":
         from .packagers_exe import package_exe
-        import tempfile, os
         work_dir = tempfile.mkdtemp(prefix="trx_exe_")
         # First write the .py artifact, then wrap it
         py_path = os.path.join(work_dir, "_trx_entry.py")
         _safe_atomic_write(py_path, str(code), input_file=src_file)
         package_exe(str(code), work_dir, output_file)
+        return
+
+    if out_format in ("pyd", "native"):
+        from .packagers_native import package_native_pyd
+        mod_name = os.path.splitext(os.path.basename(output_file))[0]
+        package_native_pyd(str(code), output_file, module_name=mod_name)
+        return
+
+    if out_format == "native-exe":
+        from .packagers_native import package_native_exe
+        app_name = os.path.splitext(os.path.basename(output_file))[0]
+        package_native_exe(str(code), output_file, app_name=app_name)
         return
 
     # default: py

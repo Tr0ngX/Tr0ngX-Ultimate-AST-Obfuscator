@@ -268,45 +268,50 @@ class BiOpaqueTransformer():
 
 def _gen_opaque_zero_ast():
     """Generates an AST node evaluating to 0 at runtime using non-literal invariant constructs that break static AST constant folding (TRX-AST-B1)."""
+    def _nc(v):
+        c = ast.Constant(value=v)
+        c._no_mutate = True
+        return c
+
     kind = _trx_rand(4)
     if kind == 0:
         k_val = _trx_rand(300) + 12
         return ast.BinOp(
             left=ast.BinOp(
-                left=ast.BinOp(left=ast.Constant(value=k_val), op=ast.Pow(), right=ast.Constant(value=3)),
+                left=ast.BinOp(left=_nc(k_val), op=ast.Pow(), right=_nc(3)),
                 op=ast.Sub(),
-                right=ast.Constant(value=k_val)
+                right=_nc(k_val)
             ),
             op=ast.Mod(),
-            right=ast.Constant(value=6)
+            right=_nc(6)
         )
     elif kind == 1:
         return ast.BinOp(
             left=ast.Call(
                 func=ast.Name(id='len'),
-                args=[ast.Attribute(value=ast.Call(func=ast.Name(id='type'), args=[ast.Constant(value=0)], keywords=[]), attr='__name__')],
+                args=[ast.Attribute(value=ast.Call(func=ast.Name(id='type'), args=[_nc(0)], keywords=[]), attr='__name__')],
                 keywords=[]
             ),
             op=ast.Sub(),
-            right=ast.Constant(value=3)
+            right=_nc(3)
         )
     elif kind == 2:
         n_val = _trx_rand(300) + 15
         return ast.BinOp(
             left=ast.BinOp(
-                left=ast.Constant(value=n_val),
+                left=_nc(n_val),
                 op=ast.Mult(),
-                right=ast.BinOp(left=ast.Constant(value=n_val), op=ast.Add(), right=ast.Constant(value=1))
+                right=ast.BinOp(left=_nc(n_val), op=ast.Add(), right=_nc(1))
             ),
             op=ast.Mod(),
-            right=ast.Constant(value=2)
+            right=_nc(2)
         )
     else:
         x_val = _trx_rand(0xFFFF) + 200
         return ast.BinOp(
-            left=ast.Constant(value=x_val),
+            left=_nc(x_val),
             op=ast.BitAnd(),
-            right=ast.UnaryOp(op=ast.Invert(), operand=ast.Constant(value=x_val))
+            right=ast.UnaryOp(op=ast.Invert(), operand=_nc(x_val))
         )
 
 
@@ -617,15 +622,17 @@ class ControlFlowUtils:
             fixed_body = node.body
             if len(fixed_body) > 1:
                 choice = random.choice(fixed_body)
-                if isinstance(choice, (ast.Global, ast.Nonlocal)):
-                    choice = ast.Pass()
-                elif isinstance(choice, list):
+                if isinstance(choice, (ast.Global, ast.Nonlocal, list)):
                     choice = ast.Pass()
                 elif isinstance(choice, ast.Expr) and isinstance(choice.value, ast.Call):
-                    # Skip call expressions that might contain lambdas
                     choice = ast.Pass()
+                elif isinstance(choice, (ast.Assign, ast.AugAssign, ast.Pass)):
+                    try:
+                        choice = ast.parse(ast.unparse(choice)).body[0]
+                    except Exception:
+                        choice = ast.Pass()
                 else:
-                    choice = copy.deepcopy(choice)
+                    choice = ast.Pass()
                 case.body.append(choice)
             cases.append(case)
         return cases
@@ -805,12 +812,14 @@ class MutatorTransformer():
         return self.tree
 
     class _Inner(ast.NodeTransformer):
-        def __init__(self, ladder):
+        def __init__(self, ladder, budget=75):
             self.ladder = ladder
             self._depth = 0
+            self._budget = budget
+            self._count = 0
 
         def visit_Constant(self, node: ast.Constant):
-            if self._depth > 0:
+            if self._depth > 0 or self._count >= self._budget:
                 return node
             # Skip if marked as no_mutate
             if getattr(node, '_no_mutate', False):
@@ -837,12 +846,14 @@ class MutatorTransformer():
                 if isinstance(node.value, int) and abs(node.value) > 0 and abs(node.value) < 0xFFFFFFF:
                     if random.random() > 0.4:
                         self._depth += 1
+                        self._count += 1
                         result = MutatorUtils.proceed_int_constant(node, self.ladder)
                         self._depth -= 1
                         return result
                 elif isinstance(node.value, float) and abs(node.value) < 0xFFFFFFF:
                     if random.random() > 0.6:
                         self._depth += 1
+                        self._count += 1
                         result = MutatorUtils.proceed_float_constant(node, self.ladder)
                         self._depth -= 1
                         return result
