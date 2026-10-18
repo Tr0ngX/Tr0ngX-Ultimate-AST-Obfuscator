@@ -1,5 +1,6 @@
 # AUTO-SPLIT from tr0ngx_obfuscator.py (mechanical slice, imports pending repair)
 import sys
+import time
 import random
 import zlib
 import bz2
@@ -797,25 +798,18 @@ def _fused_matrix_wrap(payload_code: str, key: int = None, already_packaged: boo
     v_j = rd()
     v_n1 = rd()
 
-    ref_n7 = f"self.{glob['n_7']}"
+    _k_trans = {}
+    for ch_code in range(32, 127):
+        c = chr(ch_code)
+        if c in _n7_:
+            idx = _n7_.index(c)
+            enc_code = ord(_n7_[(idx - 1) % _n7_len]) + _k_shift
+            _k_trans[enc_code] = c
+        else:
+            _k_trans[ch_code + _k_shift] = c
+    _k_trans_repr = repr(_k_trans)
 
-    rec_lambda = (
-        fr"""lambda {v_k},{v_e},{v_w},{v_tot}={_b85_len},{v_key}={key},{v_eb}={_EMOJI_BASE}: """
-        fr"""(lambda {v_dk}=[{ref_n7}[{ref_n7}.index({v_c})+1 if {ref_n7}.index({v_c})+1<len({ref_n7}) else 0] if {v_c} in {ref_n7} else {v_c} """
-        fr"""for {v_c} in [chr(ord({v_c})-({v_key}%10000)) for {v_c} in {v_k}]], """
-        fr"""{v_de}=[chr((ord({v_c})-{v_eb})^({v_key}&0x3F)) for {v_c} in {v_e}], """
-        fr"""{v_dw}=[chr(int(''.join('1' if ord({v_c})==9 else '0' for {v_c} in {v_w}[{v_j}:{v_j}+8]), 2)) for {v_j} in range(0, len({v_w}), 8)], """
-        fr"""{v_s}=[(({v_key}^0x9E3779B97F4A7C15)&0xFFFFFFFFFFFFFFFF)], """
-        fr"""{v_ik}=[0], {v_ie}=[0], {v_iw}=[0], {v_res}=[]: """
-        fr"""[({v_res}.append({v_dk}[{v_ik}[0]]) or {v_ik}.__setitem__(0, {v_ik}[0]+1)) """
-        fr"""if ([{v_s}.__setitem__(0, ({v_s}[0]*6364136223846793005+1442695040888963407)&0xFFFFFFFFFFFFFFFF), {v_s}[0]][1]>>32)%3==0 """
-        fr"""else (({v_res}.append({v_de}[{v_ie}[0]]) or {v_ie}.__setitem__(0, {v_ie}[0]+1)) """
-        fr"""if ({v_s}[0]>>32)%3==1 """
-        fr"""else ({v_res}.append({v_dw}[{v_iw}[0]]) or {v_iw}.__setitem__(0, {v_iw}[0]+1))) """
-        fr"""for _ in range({v_tot})] and ''.join({v_res}))()"""
-    )
-
-    _1_ = (fr"""self.{glob['n_5']}""", rec_lambda)
+    _1_ = (fr"""self.{glob['n_5']}""", fr"""self.{glob['n_5']}""")
     if already_packaged:
         # TEXT-MODE finalizer: the payload is sealed loader SOURCE (not raw
         # marshal), so after the identical 3-track decode we exec the
@@ -856,6 +850,23 @@ def _fused_matrix_wrap(payload_code: str, key: int = None, already_packaged: boo
     loader = fr"""class {c_name}():
  def {m_decoy1}(self,*_a:{random.choice(_types_)},**_kw:{random.choice(_types_)})->{random.choice(_types_)}:
   return (_a[0] if _a else 0)
+ def {glob['n_5']}(self,{v_k},{v_e},{v_w}):
+  _dw=int({v_w}.translate({{9:'1',32:'0'}}),2).to_bytes(len({v_w})>>3,'big').decode(bytes([108,97,116,105,110,49]).decode()) if {v_w} else ''
+  _dk={v_k}.translate({_k_trans_repr})
+  _de=bytes((ord(_c)-{_EMOJI_BASE})^({key}&0x3F) for _c in {v_e}).decode(bytes([108,97,116,105,110,49]).decode())
+  _s=({key}^0x9E3779B97F4A7C15)&0xFFFFFFFFFFFFFFFF
+  _ik=_ie=_iw=0
+  _res=[]
+  for _ in range({_b85_len}):
+   _s=(_s*6364136223846793005+1442695040888963407)&0xFFFFFFFFFFFFFFFF
+   _m=(_s>>32)%3
+   if _m==0:
+    _res.append(_dk[_ik]);_ik+=1
+   elif _m==1:
+    _res.append(_de[_ie]);_ie+=1
+   else:
+    _res.append(_dw[_iw]);_iw+=1
+  return ''.join(_res)
  def {m_dec}(self,*_n2_:{random.choice(_types_)},**_n4_:{random.choice(_types_)})->exec:
   {_vars_}
   return self.{glob['n_8']}(_n2_[0], _n2_[1], _n2_[2])

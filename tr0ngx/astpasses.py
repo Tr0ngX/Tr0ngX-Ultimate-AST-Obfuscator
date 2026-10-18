@@ -1391,11 +1391,8 @@ def _refresh_runtime_symbols():
     _exp = rd()
     _generate_var_block()
 
-# NOTE (determinism fix): the legacy module-import-time call above made the var
-# block bake OS entropy into a template BEFORE --seed could influence it, so two
-# seeded processes produced different artifacts. The block is now regenerated
-# inside obfuscate_single_target() AFTER per-file seeding; import-time call kept
-# only as fallback for direct-API users that skip the pipeline entry.
+# Initialize symbols and var block at import time as fallback
+_refresh_runtime_symbols()
 
 # ═══════════════════════════════════════════════════════════════
 # ANTI-PYCDC ENHANCED (COMPACT & FAST DECOMPILER KILLER)

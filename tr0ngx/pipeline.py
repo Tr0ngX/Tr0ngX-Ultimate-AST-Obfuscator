@@ -142,7 +142,11 @@ def obfuscate_single_target(src_file: str, output_file: str, options: dict, quie
                 pass
         else:
             _nm._SEEDED_RNG = None
-        return _obfuscate_single_target_core(src_file, output_file, options, quiet_progress=quiet_progress)
+            try:
+                _refresh_runtime_symbols()
+                _generate_var_block()
+            except Exception:
+                pass
         return _obfuscate_single_target_core(src_file, output_file, options, quiet_progress=quiet_progress)
 
 def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict, quiet_progress: bool = False) -> dict:

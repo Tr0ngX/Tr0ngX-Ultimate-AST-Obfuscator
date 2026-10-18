@@ -274,13 +274,18 @@ def encode_base4096(data: bytes, rng: random.Random) -> Tuple[str, Dict[str, obj
     """
     alphabet = _build_alphabet(4096, BASE4096_ALPHABET_RANGES, rng)
     size = len(data)
-    group_count = (size * 8 + 11) // 12
-    pad_bits = group_count * 12 - size * 8
-    value = (int.from_bytes(data, "big") << pad_bits) if size else 0
     pieces: List[str] = []
-    for i in range(group_count):
-        shift = (group_count - 1 - i) * 12
-        pieces.append(alphabet[(value >> shift) & 0xFFF])
+    acc = 0
+    nb = 0
+    for b in data:
+        acc = (acc << 8) | b
+        nb += 8
+        while nb >= 12:
+            nb -= 12
+            pieces.append(alphabet[(acc >> nb) & 0xFFF])
+        acc &= (1 << nb) - 1
+    if nb > 0:
+        pieces.append(alphabet[(acc << (12 - nb)) & 0xFFF])
     meta: Dict[str, object] = {"alphabet": alphabet, "size": size}
     return "".join(pieces), meta
 
@@ -307,9 +312,8 @@ def base4096_decoder_source(meta: Dict[str, object]) -> str:
         "        while _nb >= 8:\n"
         "            _nb -= 8\n"
         "            _out.append((_acc >> _nb) & 255)\n"
-        "            if len(_out) >= _size:\n"
-        "                return bytes(_out)\n"
-        "    return bytes(_out)\n"
+        "        _acc &= (1 << _nb) - 1\n"
+        "    return bytes(_out[:_size])\n"
     ) % (alphabet, size)
 
 
