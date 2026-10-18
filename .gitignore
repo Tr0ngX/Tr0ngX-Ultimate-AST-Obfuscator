@@ -48,6 +48,13 @@ diff_*.patch
 *.log
 *.tmp
 *.bak
+*.exe
+*.i64
+*.id0
+*.id1
+*.id2
+*.nam
+*.til
 
 # ==========================================
 # IDE & System Files
