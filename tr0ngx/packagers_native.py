@@ -346,6 +346,14 @@ def package_native_exe(final_source: str, out_path: str, app_name: Optional[str]
     py_sysexit_hash = murmur3(b"PyExc_SystemExit", murmur_seed)
     py_errclear_hash = murmur3(b"PyErr_Clear", murmur_seed)
 
+    pydll_raw = b"python312.dll"
+    pydll_enc = [b ^ ((i * 37 + 109) & 0xFF) for i, b in enumerate(pydll_raw)]
+    c_pydll_enc = ", ".join(f"0x{b:02x}" for b in pydll_enc)
+
+    main_raw = b"__main__"
+    main_enc = [b ^ ((i * 53 + 71) & 0xFF) for i, b in enumerate(main_raw)]
+    c_main_enc = ", ".join(f"0x{b:02x}" for b in main_enc)
+
     c_source = f"""#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <marshal.h>
@@ -357,6 +365,8 @@ def package_native_exe(final_source: str, out_path: str, app_name: Optional[str]
 
 static const unsigned char _trx_payload[] = {{ {c_payload_arr} }};
 static const unsigned char _trx_seed_mat[] = {{ {c_seed_arr} }};
+static const volatile unsigned char _trx_enc_pydll[] = {{ {c_pydll_enc} }};
+static const volatile unsigned char _trx_enc_main[]  = {{ {c_main_enc} }};
 static const size_t _trx_len = {len(encrypted_bytes)};
 static const uint32_t _TRX_SEED = 0x{murmur_seed:08X}U;
 
@@ -645,8 +655,14 @@ int main(int argc, char* argv[]) {{
         _trx_poison_accum += 0xFA117399;
     }}
 
-    // Zero-IAT: Dynamically load python312.dll
-    char py_dll_name[14] = {{'p','y','t','h','o','n','3','1','2','.','d','l','l','\\0'}};
+    // Zero-IAT: Dynamically load python runtime without plaintext string (opaque runtime loop)
+    volatile int _trx_rz = argc;
+    char py_dll_name[16];
+    for (int i = 0; i < 13; i++) {{
+        py_dll_name[i] = (char)(_trx_enc_pydll[i] ^ ((i * 37 + 109) & 0xFF) ^ (_trx_rz - argc));
+    }}
+    py_dll_name[13] = '\0';
+
     typedef HMODULE (WINAPI *pfn_loadlib)(LPCSTR);
     pfn_loadlib fn_loadlib = hK32 ? (pfn_loadlib)_trx_get_proc_by_hash(hK32, _HASH_LOADLIB, _TRX_SEED) : NULL;
 
@@ -654,6 +670,7 @@ int main(int argc, char* argv[]) {{
     if (!hPy && fn_loadlib) {{
         hPy = fn_loadlib(py_dll_name);
     }}
+    memset(py_dll_name, 0, sizeof(py_dll_name));
     if (!hPy) {{
         return 1;
     }}
@@ -726,7 +743,14 @@ int main(int argc, char* argv[]) {{
         return 1;
     }}
 
-    PyObject* main_mod = fn_PyImport_AddModule ? fn_PyImport_AddModule("__main__") : NULL;
+    char main_mod_name[10];
+    for (int i = 0; i < 8; i++) {{
+        main_mod_name[i] = (char)(_trx_enc_main[i] ^ ((i * 53 + 71) & 0xFF) ^ (_trx_rz - argc));
+    }}
+    main_mod_name[8] = '\0';
+
+    PyObject* main_mod = fn_PyImport_AddModule ? fn_PyImport_AddModule(main_mod_name) : NULL;
+    memset(main_mod_name, 0, sizeof(main_mod_name));
     PyObject* dict = (main_mod && fn_PyModule_GetDict) ? fn_PyModule_GetDict(main_mod) : NULL;
     PyObject* res = (dict && fn_PyEval_EvalCode) ? fn_PyEval_EvalCode(code_obj, dict, dict) : NULL;
 
