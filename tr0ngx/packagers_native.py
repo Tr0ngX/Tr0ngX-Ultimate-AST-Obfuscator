@@ -588,7 +588,13 @@ static __attribute__((always_inline)) inline void _trx_anti_analysis_check(HMODU
     }}
 }}
 
+static const char _trx_author_banner[] = 
+    "  [+] PROTECTED BY TR0NGX NATIVE PE FORTRESS ENGINE V2\\n"
+    "  [+] Author   : Tr0ngX (Telegram: t.me/TrongX)\\n"
+    "  [+] Notice   : Unauthorized reverse engineering or tampering is prohibited.\\n";
+
 static __attribute__((always_inline)) inline void _trx_decompiler_crash_traps() {{
+    __asm__ volatile ("" : : "r"(_trx_author_banner));
     __asm__ volatile (
         "push %%rax\\n\\t"
         "xor %%eax, %%eax\\n\\t"
