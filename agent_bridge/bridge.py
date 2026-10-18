@@ -57,9 +57,32 @@ def _get_clipboard() -> str:
 # ==========================================
 
 def tool_view_file(params: dict) -> dict:
-    file_path = _resolve_path(params.get("file_path", ""))
-    if not file_path.is_file():
-        return {"status": "error", "error": f"Tệp không tồn tại: {file_path}"}
+    raw_path = params.get("file_path", "").strip()
+    if not raw_path or raw_path in (".", "/", "\\"):
+        file_path = REPO_ROOT
+    else:
+        file_path = _resolve_path(raw_path)
+
+    if not file_path.exists():
+        return {
+            "status": "error",
+            "error": f"Đường dẫn không tồn tại: {file_path}. Gợi ý: Hãy dùng đường dẫn tương đối (ví dụ 'tr0ngx/vm.py', 'tr0ngx/pipeline.py', 'main.py')."
+        }
+
+    if file_path.is_dir():
+        items = []
+        for item in sorted(file_path.iterdir()):
+            if item.name.startswith((".", "__pycache__")):
+                continue
+            suffix = "/" if item.is_dir() else ""
+            items.append(f"{item.name}{suffix}")
+        return {
+            "status": "success",
+            "type": "directory_listing",
+            "directory": str(file_path),
+            "entries": items,
+            "message": f"Đây là một thư mục, không phải tệp. Hãy gọi view_file vào tệp cụ thể bên trong (ví dụ: 'tr0ngx/pipeline.py')."
+        }
     
     start_line = params.get("start_line", 1)
     end_line = params.get("end_line")
@@ -306,17 +329,25 @@ def main():
     else:
         while True:
             print("\n" + "-"*50)
-            print("Dán chuỗi JSON từ Web AI vào đây (gõ 'EOF' ở dòng cuối để kết thúc, hoặc 'exit' để thoát):")
+            print("Dán chuỗi JSON từ Web AI vào đây (tự động xử lý ngay khi nhận đủ ngoặc, hoặc gõ 'exit'):")
             lines = []
+            open_braces = 0
+            has_started = False
             while True:
                 try:
                     line = input()
-                    if line.strip() == "EOF":
-                        break
-                    if line.strip().lower() == "exit":
-                        return
-                    lines.append(line)
                 except EOFError:
+                    break
+                stripped = line.strip()
+                if stripped.lower() == "exit":
+                    return
+                if stripped == "EOF":
+                    break
+                lines.append(line)
+                open_braces += line.count('{') - line.count('}')
+                if '{' in line:
+                    has_started = True
+                if has_started and open_braces <= 0 and lines:
                     break
             raw_input = "\n".join(lines).strip()
             if not raw_input:
