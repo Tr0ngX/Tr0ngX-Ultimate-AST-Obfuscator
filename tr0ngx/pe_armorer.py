@@ -124,23 +124,41 @@ def armor_pe_binary(pe_path: str, stealth_level: int = 1) -> bool:
                     data[j] = 0
                 m_idx += len(marker)
 
-        # 7. Scramble Section Names (.text, .rdata, .data -> .trxN)
-        sec_table_offset = opt_header_offset + opt_header_size
-        sec_names = [
-            b".trx0\x00\x00\x00",
-            b".trx1\x00\x00\x00",
-            b".trx2\x00\x00\x00",
-            b".trx3\x00\x00\x00",
-            b".trx4\x00\x00\x00",
-            b".trx5\x00\x00\x00"
+        # 7. Map Compiler Sections to Standard MSVC Sections (Section Merging & Stealth Cloak)
+        MSVC_STANDARD_SECTIONS = [
+            b".text\x00\x00\x00",
+            b".rdata\x00\x00",
+            b".data\x00\x00\x00",
+            b".pdata\x00\x00",
+            b".rsrc\x00\x00\x00",
+            b".reloc\x00\x00",
         ]
 
+        MINGW_TO_MSVC_MAP = {
+            b".eh_fram": b".pdata\x00\x00",
+            b".CRT": b".rdata\x00\x00",
+            b".tls": b".data\x00\x00\x00",
+            b".bss": b".data\x00\x00\x00",
+            b".idata": b".rdata\x00\x00",
+            b".xdata": b".pdata\x00\x00",
+        }
+
+        sec_table_offset = opt_header_offset + opt_header_size
         for i in range(num_sections):
             cur_sec_offset = sec_table_offset + (i * 40)
             if cur_sec_offset + 40 > len(data):
                 break
-            new_name = sec_names[i % len(sec_names)]
-            data[cur_sec_offset:cur_sec_offset + 8] = new_name
+            raw_name = bytes(data[cur_sec_offset:cur_sec_offset + 8])
+            mapped = False
+            for old_pat, new_pat in MINGW_TO_MSVC_MAP.items():
+                if raw_name.startswith(old_pat):
+                    data[cur_sec_offset:cur_sec_offset + 8] = new_pat
+                    mapped = True
+                    break
+            if not mapped:
+                is_std = any(raw_name == std_name for std_name in MSVC_STANDARD_SECTIONS)
+                if not is_std:
+                    data[cur_sec_offset:cur_sec_offset + 8] = b".rdata\x00\x00"
 
         # 8. Recalculate and update valid PE Checksum
         checksum_offset = opt_header_offset + 64
