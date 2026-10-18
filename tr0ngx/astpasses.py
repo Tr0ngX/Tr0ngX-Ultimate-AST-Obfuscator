@@ -20,22 +20,33 @@ class MathOpaqueTransformer(ast.NodeTransformer):
         self.alphabet = alphabet or string.ascii_lowercase
         self.length = length
 
-    def _gen_opaque_true_test(self) -> ast.AST:
-        """Generates an expression that is mathematically proven to be ALWAYS TRUE at runtime.
+    def _runtime_int(self, min_val: int = 11) -> ast.AST:
+        """Emits a dynamic, non-constant integer expression bound to runtime properties:
+        (len(__name__) + offset) where __name__ is guaranteed to exist at runtime.
+        This completely defeats AST Constant Folding because AST optimizers cannot
+        evaluate runtime calls statically."""
+        offset = _trx_rand(500) + min_val
+        return ast.BinOp(
+            left=ast.Call(
+                func=ast.Name(id='len', ctx=ast.Load()),
+                args=[ast.Name(id='__name__', ctx=ast.Load())],
+                keywords=[]
+            ),
+            op=ast.Add(),
+            right=ast.Constant(value=offset)
+        )
 
-        Predicate families (7): QNR mod 7, Fermat/Euler k^3-k, n(n+1) parity,
-        Carmichael composites (Fermat pseudoprime for ALL bases), MBA bitwise
-        identity (x+y == (x^y)+2(x&y)), Collatz odd-step parity, modular inverse
-        via Fermat little theorem. Family breadth modeled after the opaque-predicate
-        library in bedrock-obfuscator (Apache-2.0, research note); implementation
-        here is independent.
+    def _gen_opaque_true_test(self) -> ast.AST:
+        """Generates an expression mathematically guaranteed to be ALWAYS TRUE at runtime,
+        bound to runtime variables (len(__name__)) to defeat AST Constant Folding and Symbolic Simplifiers.
         """
-        pick = _trx_rand(7)
+        pick = _trx_rand(6)
         if pick == 0:
-            x_val = _trx_rand(1000) + 11
+            # QNR mod 7: 3 is a quadratic non-residue mod 7, so x^2 % 7 != 3 for all integers x.
+            x_node = self._runtime_int(11)
             return ast.Compare(
                 left=ast.BinOp(
-                    left=ast.BinOp(left=ast.Constant(value=x_val), op=ast.Mult(), right=ast.Constant(value=x_val)),
+                    left=ast.BinOp(left=x_node, op=ast.Mult(), right=x_node),
                     op=ast.Mod(),
                     right=ast.Constant(value=7)
                 ),
@@ -43,13 +54,14 @@ class MathOpaqueTransformer(ast.NodeTransformer):
                 comparators=[ast.Constant(value=3)]
             )
         elif pick == 1:
-            k_val = _trx_rand(500) + 13
+            # Euler k^3 - k = (k-1)k(k+1) is product of 3 consecutive integers, always divisible by 6.
+            k_node = self._runtime_int(13)
             return ast.Compare(
                 left=ast.BinOp(
                     left=ast.BinOp(
-                        left=ast.BinOp(left=ast.Constant(value=k_val), op=ast.Pow(), right=ast.Constant(value=3)),
+                        left=ast.BinOp(left=k_node, op=ast.Pow(), right=ast.Constant(value=3)),
                         op=ast.Sub(),
-                        right=ast.Constant(value=k_val)
+                        right=k_node
                     ),
                     op=ast.Mod(),
                     right=ast.Constant(value=6)
@@ -58,13 +70,14 @@ class MathOpaqueTransformer(ast.NodeTransformer):
                 comparators=[ast.Constant(value=0)]
             )
         elif pick == 2:
-            n_val = _trx_rand(500) + 9
+            # Parity: n(n + 1) is always even for all integers n.
+            n_node = self._runtime_int(9)
             return ast.Compare(
                 left=ast.BinOp(
                     left=ast.BinOp(
-                        left=ast.Constant(value=n_val),
+                        left=n_node,
                         op=ast.Mult(),
-                        right=ast.BinOp(left=ast.Constant(value=n_val), op=ast.Add(), right=ast.Constant(value=1))
+                        right=ast.BinOp(left=n_node, op=ast.Add(), right=ast.Constant(value=1))
                     ),
                     op=ast.Mod(),
                     right=ast.Constant(value=2)
@@ -73,47 +86,34 @@ class MathOpaqueTransformer(ast.NodeTransformer):
                 comparators=[ast.Constant(value=0)]
             )
         elif pick == 3:
-            # Carmichael number: a^n ≡ a (mod n) holds for EVERY integer a when n
-            # is a Carmichael composite (561, 1105, 1729, 2465, 2821, 6601).
-            carmichael = (561, 1105, 1729, 2465, 2821, 6601)[_trx_rand(6)]
-            base = _trx_rand(97) + 2
+            # MBA bitwise identity: (x ^ y) + ((x & y) << 1) == x + y for all integers.
+            a_node = self._runtime_int(7)
+            b_node = self._runtime_int(3)
             return ast.Compare(
                 left=ast.BinOp(
-                    left=ast.BinOp(
-                        left=ast.BinOp(left=ast.Constant(value=base), op=ast.Pow(), right=ast.Constant(value=carmichael)),
-                        op=ast.Sub(),
-                        right=ast.Constant(value=base)
-                    ),
-                    op=ast.Mod(),
-                    right=ast.Constant(value=carmichael)
-                ),
-                ops=[ast.Eq()],
-                comparators=[ast.Constant(value=0)]
-            )
-        elif pick == 4:
-            # MBA identity: (x ^ y) + ((x & y) << 1) == x + y for all non-negative ints.
-            a = _trx_rand(0xFFFFF) + 7
-            b = _trx_rand(0xFFFFF) + 3
-            return ast.Compare(
-                left=ast.BinOp(
-                    left=ast.BinOp(left=ast.Constant(value=a), op=ast.BitXor(), right=ast.Constant(value=b)),
+                    left=ast.BinOp(left=a_node, op=ast.BitXor(), right=b_node),
                     op=ast.Add(),
                     right=ast.BinOp(
-                        left=ast.BinOp(left=ast.Constant(value=a), op=ast.BitAnd(), right=ast.Constant(value=b)),
+                        left=ast.BinOp(left=a_node, op=ast.BitAnd(), right=b_node),
                         op=ast.LShift(),
                         right=ast.Constant(value=1)
                     )
                 ),
                 ops=[ast.Eq()],
-                comparators=[ast.BinOp(left=ast.Constant(value=a), op=ast.Add(), right=ast.Constant(value=b))]
+                comparators=[ast.BinOp(left=a_node, op=ast.Add(), right=b_node)]
             )
-        elif pick == 5:
-            # Collatz odd step: for any odd m, (3m + 1) is even.
-            m = 2 * (_trx_rand(9999) + 1) + 1
+        elif pick == 4:
+            # Collatz odd step: 3*(2m + 1) + 1 is always even.
+            m_base = self._runtime_int(5)
+            m_odd = ast.BinOp(
+                left=ast.BinOp(left=ast.Constant(value=2), op=ast.Mult(), right=m_base),
+                op=ast.Add(),
+                right=ast.Constant(value=1)
+            )
             return ast.Compare(
                 left=ast.BinOp(
                     left=ast.BinOp(
-                        left=ast.BinOp(left=ast.Constant(value=m), op=ast.Mult(), right=ast.Constant(value=3)),
+                        left=ast.BinOp(left=m_odd, op=ast.Mult(), right=ast.Constant(value=3)),
                         op=ast.Add(),
                         right=ast.Constant(value=1)
                     ),
@@ -124,22 +124,42 @@ class MathOpaqueTransformer(ast.NodeTransformer):
                 comparators=[ast.Constant(value=0)]
             )
         else:
-            # Modular inverse via Fermat's little theorem: a * a^(p-2) ≡ 1 (mod p), p prime.
-            p = (101, 103, 107, 109, 113, 127, 131, 137, 139, 149)[_trx_rand(10)]
-            inv_a = _trx_rand(p - 2) + 2
+            # MBA XOR identity: (a | b) - (a & b) == (a ^ b) for all integers.
+            a_node = self._runtime_int(15)
+            b_node = self._runtime_int(19)
             return ast.Compare(
                 left=ast.BinOp(
-                    left=ast.BinOp(
-                        left=ast.Constant(value=inv_a),
-                        op=ast.Mult(),
-                        right=ast.BinOp(left=ast.Constant(value=inv_a), op=ast.Pow(), right=ast.Constant(value=p - 2))
-                    ),
-                    op=ast.Mod(),
-                    right=ast.Constant(value=p)
+                    left=ast.BinOp(left=a_node, op=ast.BitOr(), right=b_node),
+                    op=ast.Sub(),
+                    right=ast.BinOp(left=a_node, op=ast.BitAnd(), right=b_node)
                 ),
                 ops=[ast.Eq()],
-                comparators=[ast.Constant(value=1)]
+                comparators=[ast.BinOp(left=a_node, op=ast.BitXor(), right=b_node)]
             )
+
+    def visit_BinOp(self, node: ast.BinOp):
+        self.generic_visit(node)
+        # Rewrite integer arithmetic with Mixed Boolean-Arithmetic (MBA) identities
+        if isinstance(node.op, ast.Add):
+            if (isinstance(node.left, ast.Constant) and isinstance(node.left.value, int)) or                (isinstance(node.right, ast.Constant) and isinstance(node.right.value, int)):
+                if _trx_rand(100) < 35:
+                    a, b = node.left, node.right
+                    xor_part = ast.BinOp(left=a, op=ast.BitXor(), right=b)
+                    and_part = ast.BinOp(
+                        left=ast.BinOp(left=a, op=ast.BitAnd(), right=b),
+                        op=ast.LShift(),
+                        right=ast.Constant(value=1)
+                    )
+                    new_node = ast.BinOp(left=xor_part, op=ast.Add(), right=and_part)
+                    return ast.copy_location(new_node, node)
+        elif isinstance(node.op, ast.BitXor):
+            if _trx_rand(100) < 35:
+                a, b = node.left, node.right
+                or_part = ast.BinOp(left=a, op=ast.BitOr(), right=b)
+                and_part = ast.BinOp(left=a, op=ast.BitAnd(), right=b)
+                new_node = ast.BinOp(left=or_part, op=ast.Sub(), right=and_part)
+                return ast.copy_location(new_node, node)
+        return node
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         self.generic_visit(node)

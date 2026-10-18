@@ -14,6 +14,23 @@ import subprocess
 import sys
 
 
+def _wrap_exception_flow(source_code: str) -> str:
+    """Wraps entry point into non-linear exception-driven dispatch table.
+    Decompilers (pycdc, uncompyle6) traversing standard basic blocks
+    fail on nested exception tables (co_exceptiontable in Python 3.11+)."""
+    indented = "\n".join("            " + line for line in source_code.splitlines())
+    return (
+        "try:\n"
+        "    _d = 1 // 0\n"
+        "except ZeroDivisionError:\n"
+        "    try:\n"
+        "        raise KeyError(0x5452304E)\n"
+        "    except KeyError as _e:\n"
+        "        if _e.args[0] == 0x5452304E:\n"
+        f"{indented}\n"
+    )
+
+
 def package_pyc(final_source: str, out_path: str, source_name: str = "<tr0ngx>", optimize: int = 0) -> str:
     """Compile final_source and write a runnable .pyc to out_path.
 
@@ -24,7 +41,8 @@ def package_pyc(final_source: str, out_path: str, source_name: str = "<tr0ngx>",
       - 4-byte source size (0)
     Followed by marshal.dumps() of the compiled code object.
     """
-    code_object = compile(final_source, source_name, 'exec', optimize=optimize)
+    wrapped_source = _wrap_exception_flow(final_source)
+    code_object = compile(wrapped_source, source_name, 'exec', optimize=optimize)
 
     # Arm .pyc with decompiler memory exhaustion bombs embedded in co_consts.
     # CPython ignores inert constants at runtime (<0.001s), but decompilers (PyCDC/uncompyle)

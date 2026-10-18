@@ -32,15 +32,8 @@ def _derive_keys_argon2_or_pbkdf2(password: bytes, salt: bytes) -> tuple[bytes, 
         ke = hashlib.pbkdf2_hmac('sha256', password, salt + b'__enc__', 600000, 32)
         return ke, None
 
-def _derive_runtime_keys(salt: bytes):
-    """Derive encryption key from salt + runtime environment (obfuscation-only mode).
-
-    FIX (crypto P0): returns km=None so TRXH tags always use the SAME derivation
-    formula as every emitted loader (sha256(ke + b'__mac__')). Previously this
-    function derived km via pbkdf2 while loaders verified with sha256(ke|__mac__),
-    producing artifacts that always failed HMAC verification when built on a
-    machine without 'cryptography'.
-    """
+def _derive_runtime_keys(salt: bytes, code_hash: bytes = b''):
+    """Derive encryption key from salt + runtime environment + code integrity."""
     import platform
     parts = []
     parts.append(sys.version[:5].encode())
@@ -48,6 +41,8 @@ def _derive_runtime_keys(salt: bytes):
     parts.append(salt)
     parts.append(str(sys.maxsize).encode())
     parts.append(sys.byteorder.encode())
+    if code_hash:
+        parts.append(code_hash)
     combined = b''.join(parts)
     enc_k = hashlib.sha256(combined + b'__enc__').digest()
     ke = hashlib.pbkdf2_hmac('sha256', salt, enc_k, 50000, 32)
@@ -122,7 +117,7 @@ def _hw_fingerprint() -> bytes:
     return hashlib.sha256(parts.encode('utf-8', 'replace')).digest()
 
 
-def _multi_layer_encrypt(data: bytes, password: str = None):
+def _multi_layer_encrypt(data: bytes, password: str = None, code_hash: bytes = b''):
     """Apply AEAD v3 encryption with Argon2id/PBKDF2 (if password provided) or environment-derived keys.
 
     Returns (armored_string, salt, armor_meta) where armor_meta describes the
@@ -163,7 +158,7 @@ def _multi_layer_encrypt(data: bytes, password: str = None):
     if password:
         ke, km = _derive_keys_argon2_or_pbkdf2(password.encode('utf-8'), salt)
     else:
-        ke, km = _derive_runtime_keys(salt)
+        ke, km = _derive_runtime_keys(salt, code_hash=code_hash)
 
     packed, nonce = _auth_stream_encrypt(data, salt, ke, km)
     if not password and _cfg._EngineState.env_key_lock:

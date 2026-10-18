@@ -3322,6 +3322,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         _c_arr = _frame.code_obj.code
         _c_len = _sys_len(_c_arr)
         _cross_attest = _g_env.get('_trx_cross_attest', None)
+        _attest_mask = 0 if _cross_attest is None else ((_cross_attest(0) ^ 0x5452304E) & 0xFF)
         _step_k = 0
         {v['async_depth']}[0] += 1
         {_DBG_AE}
@@ -3337,10 +3338,10 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
                     _frame.pc += 3
                     _step_k += 1
                     if (_step_k & 63) == 0 and _cross_attest is not None:
-                        _cross_attest(_op ^ _c_arr[_step_k % _c_len])
+                        _attest_mask = (_cross_attest(_op ^ _c_arr[_step_k % _c_len]) ^ 0x5452304E) & 0xFF
 
                     # PERF G1: precomputed slot + type() is tuple (see sync loop)
-                    _h = {v['dispatch_tbl_async']}[_frame._slot[_op]]
+                    _h = {v['dispatch_tbl_async']}[(_frame._slot[_op] ^ _attest_mask) & 0xFF]
                     _sig = _h(_frame, _arg)
                     if _sig is not None:
                         if _sig is {v['halt_sig']}:
@@ -3381,6 +3382,7 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
         _c_arr = _frame.code_obj.code
         _c_len = _sys_len(_c_arr)
         _cross_attest = _g_env.get('_trx_cross_attest', None)
+        _attest_mask = 0 if _cross_attest is None else ((_cross_attest(0) ^ 0x5452304E) & 0xFF)
         _step_k = 0
         try:
             while _frame.pc < _c_len:
@@ -3394,11 +3396,11 @@ def {v['interp_fn']}(_root_packet, _master_seed, _runtime_salt):
                     _frame.pc += 3
                     _step_k += 1
                     if (_step_k & 63) == 0 and _cross_attest is not None:
-                        _cross_attest(_op ^ _c_arr[_step_k % _c_len])
+                        _attest_mask = (_cross_attest(_op ^ _c_arr[_step_k % _c_len]) ^ 0x5452304E) & 0xFF
 
                     # PERF G1: slot precomputed at frame attach; type() is tuple
                     # avoids the isinstance virtual-call overhead in this loop.
-                    _h = {v['dispatch_tbl']}[_frame._slot[_op]]
+                    _h = {v['dispatch_tbl']}[(_frame._slot[_op] ^ _attest_mask) & 0xFF]
                     _sig = _h(_frame, _arg)
                     if _sig is not None:
                         if _sig is {v['halt_sig']}:

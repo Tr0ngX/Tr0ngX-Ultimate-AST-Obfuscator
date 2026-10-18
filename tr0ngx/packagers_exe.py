@@ -15,6 +15,26 @@ import sys
 __all__ = ["package_exe"]
 
 
+def _wrap_exe_entry_shield(source_code: str) -> str:
+    """Wraps script in an anti-dump / anti-pyinstxtractor guard.
+    When extracted via pyinstxtractor, the extracted script runs outside
+    a legitimate PyInstaller container and aborts immediately."""
+    guard = '''# [Tr0ngX EXE Anti-Extract Guard]
+import sys as _sys, os as _os
+
+if not getattr(_sys, 'frozen', False):
+    _os._exit(1)
+
+_exe_name = _os.path.basename(_sys.executable).lower()
+if not _exe_name.endswith('.exe') or 'python' in _exe_name:
+    _os._exit(1)
+
+if '_MEI' not in getattr(_sys, '_MEIPASS', ''):
+    _os._exit(1)
+'''
+    return guard + "\n" + source_code
+
+
 def package_exe(source_code: str, work_dir: str, out_path: str, app_name: str = None) -> str:
     """Package ``source_code`` into a standalone console .exe.
 
@@ -59,10 +79,11 @@ def package_exe(source_code: str, work_dir: str, out_path: str, app_name: str = 
     if app_name is None or not app_name:
         app_name = os.path.splitext(os.path.basename(out_path))[0]
 
-    # Write the final payload as the temporary entry script.
+    # Write the hardened payload as the temporary entry script.
     entry_path = os.path.join(work_dir, "_trx_entry.py")
+    hardened_source = _wrap_exe_entry_shield(source_code)
     with open(entry_path, "w", encoding="utf-8") as fh:
-        fh.write(source_code)
+        fh.write(hardened_source)
 
     build_workpath = os.path.join(work_dir, "_build")
 

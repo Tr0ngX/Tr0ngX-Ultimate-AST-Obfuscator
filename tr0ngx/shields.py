@@ -17,17 +17,20 @@ try:
 except Exception:
     pass
 
+_TRX_VM_KEY = 0x5452304E
+
 def _trx_cross_attest(_val=0):
     '''Non-blocking O(1) cross-attestation hook between VM opcode loop and shield'''
     try:
-        if sys.gettrace() is not None:
+        if sys.gettrace() is not None or sys.getprofile() is not None:
             _obliterate()
+            return 0xDEADBEEF
         _cur = getattr(_SHIELD, '_rolling_h', 0x811C9DC5)
         _nxt = (((_cur ^ int(_val)) * 16777619) & 0xFFFFFFFF)
         _SHIELD._rolling_h = _nxt
         _SHIELD._checks += 1
         _SHIELD._pulse += 1
-        return _nxt
+        return _TRX_VM_KEY
     except Exception:
         return 0
 

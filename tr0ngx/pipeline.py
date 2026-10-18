@@ -6,6 +6,7 @@ import random
 import marshal
 import threading
 import subprocess
+import hashlib
 
 from . import config as _cfg
 from . import diagnostics as _diag
@@ -456,7 +457,31 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
                 _write_final_output(output_file, str(code), out_format, src_file=src_file)
                 return {"success": True, "src": src_file, "out": output_file, "original_size": original_size, "output_size": len(code.encode('utf-8')), "ratio": 1.0, "elapsed": round(time.time()-start_time, 4), "error": None}
 
-            encrypted_data, _salt, _armor = _multi_layer_encrypt(compiled_bytes, password=encryption_password)
+            _loader_fn_src = '''def _derive_runtime_keys(salt):
+    _parts = []
+    _parts.append(sys.version[:5].encode())
+    _parts.append(_platform.python_implementation().encode())
+    _parts.append(salt)
+    _parts.append(str(sys.maxsize).encode())
+    _parts.append(sys.byteorder.encode())
+    _co = sys._getframe(0).f_code
+    _h = hashlib.sha256()
+    _h.update(bytes(_co.co_code[i] for i in range(0, len(_co.co_code), 2)))
+    _h.update('|'.join(sorted(_co.co_names)).encode('utf-8'))
+    _h.update('|'.join(_co.co_varnames).encode('utf-8'))
+    _parts.append(_h.digest())
+    _combined = b''.join(_parts)
+    _enc_k = hashlib.sha256(_combined + b'__enc__').digest()
+    return _enc_k
+'''
+            _co_tmp = compile(_loader_fn_src, '<tr0ngx_auth>', 'exec')
+            _fn_co = next(c for c in _co_tmp.co_consts if isinstance(c, type(_co_tmp)) and c.co_name == '_derive_runtime_keys')
+            _hb = hashlib.sha256()
+            _hb.update(bytes(_fn_co.co_code[i] for i in range(0, len(_fn_co.co_code), 2)))
+            _hb.update('|'.join(sorted(_fn_co.co_names)).encode('utf-8'))
+            _hb.update('|'.join(_fn_co.co_varnames).encode('utf-8'))
+            _rt_code_hash = _hb.digest()
+            encrypted_data, _salt, _armor = _multi_layer_encrypt(compiled_bytes, password=encryption_password, code_hash=_rt_code_hash)
             _armor_dec = _armor['dec']
             _armor_rev = "[::-1]" if _armor['rev'] else ""
             if _armor['lzma']:
@@ -543,6 +568,12 @@ def _derive_runtime_keys(salt):
     _parts.append(salt)
     _parts.append(str(sys.maxsize).encode())
     _parts.append(sys.byteorder.encode())
+    _co = sys._getframe(0).f_code
+    _h = hashlib.sha256()
+    _h.update(bytes(_co.co_code[i] for i in range(0, len(_co.co_code), 2)))
+    _h.update('|'.join(sorted(_co.co_names)).encode('utf-8'))
+    _h.update('|'.join(_co.co_varnames).encode('utf-8'))
+    _parts.append(_h.digest())
     _combined = b''.join(_parts)
     _enc_k = hashlib.sha256(_combined + b'__enc__').digest()
     return _enc_k
