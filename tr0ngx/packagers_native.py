@@ -768,13 +768,6 @@ def package_native_exe(final_source: str, out_path: str, app_name: Optional[str]
     if not app_name:
         app_name = os.path.splitext(os.path.basename(out_path))[0]
 
-    if not password:
-        raise RuntimeError(
-            "Native executable packaging requires a password (--password / --password-file / "
-            "TR0NGX_PASSWORD). A password-less native build cannot provide confidentiality: "
-            "any key that can be recomputed from the binary is readable by an analyst."
-        )
-
     # Split-Key Handshake: Python Half + Native VEH Half
     py_half_secret = secrets.token_bytes(16)
     py_half_arr = ", ".join(f"0x{b:02x}" for b in py_half_secret)
@@ -826,10 +819,24 @@ except Exception:
     # never embedded. The embedded stub re-derives the very same key inside
     # the target interpreter at runtime.
     # ------------------------------------------------------------------
-    kdf_id = native_kdf_id()
-    kdf_salt = salt if salt is not None else secrets.token_bytes(16)
-    master_key = native_derive_key(password, kdf_salt, kdf_id)
-    stub_blob = native_key_stub_blob(kdf_salt, kdf_id, allow_prompt=True)
+    if password:
+        kdf_id = native_kdf_id()
+        kdf_salt = salt if salt is not None else secrets.token_bytes(16)
+        master_key = native_derive_key(password, kdf_salt, kdf_id)
+        # The key itself is never embedded - the stub re-derives it inside the target
+        # interpreter at runtime.
+        embedded_key = b"\x00" * 32
+        stub_blob = native_key_stub_blob(kdf_salt, kdf_id, allow_prompt=True)
+        key_mode = 1
+    else:
+        # No password: the key has to live in the artifact, so this build provides payload
+        # integrity only - never confidentiality.
+        master_key = secrets.token_bytes(32)
+        embedded_key = master_key
+        stub_blob = b"\x00"
+        key_mode = 0
+        print("[TR0NGX] [WARN] Native executable built WITHOUT a password: payload integrity only, "
+              "no confidentiality (the key is recoverable from the file).", flush=True)
 
     # Scramble marshal payload & poison tag so external dumpers fail (32-bit LCG stream
     # cipher). The seed is bound to the AEAD key (F-02) - no static seed in the image.
@@ -879,6 +886,7 @@ except Exception:
 
     c_mask_arr = ", ".join(f"0x{b:02x}" for b in xor_mask)
     c_stub_arr = ", ".join(f"0x{b:02x}" for b in _xor_mask(stub_blob, xor_mask))
+    c_key_arr = ", ".join(f"0x{b:02x}" for b in _xor_mask(embedded_key, xor_mask))
     c_banner_arr = ", ".join(f"0x{b:02x}" for b in _xor_mask(banner_bytes, xor_mask))
     c_hash_arr = ", ".join(f"0x{b:02x}" for b in _xor_mask(hash_blob, xor_mask))
     ct_len_masked = len(ciphertext) ^ mask32
@@ -1026,6 +1034,8 @@ static volatile uint32_t _trx_h_r1 = 13, _trx_h_r2 = 13;
 static volatile uint32_t _trx_cff_mask = 0;
 static const uint8_t _trx_enc_key_stub[] = {{ {c_stub_arr} }};
 static const size_t _trx_key_stub_len = {len(stub_blob)};
+static const uint8_t _trx_enc_key[32] = {{ {c_key_arr} }};
+static const int _TRX_KEY_MODE = {key_mode};
 static const uint8_t _trx_enc_banner[] = {{ {c_banner_arr} }};
 static const size_t _trx_banner_len = {len(banner_bytes)};
 static const uint8_t _trx_enc_hash_blob[32] = {{ {c_hash_arr} }};
@@ -2216,13 +2226,22 @@ __attribute__((optimize("O0"))) int main(int argc, char* argv[]) {{
                 /* The AEAD key is derived inside the target interpreter from the password.
                    It does not exist anywhere in the image. */
                 uint8_t runtime_key[32];
-                if (_trx_obtain_runtime_key(fn_PyMarshal_ReadObjectFromString, fn_PyEval_EvalCode, dict, runtime_key) != 0) {{
-                    RtlSecureZeroMemory(runtime_key, sizeof(runtime_key));
-                    fprintf(stderr, "[TR0NGX] Native key derivation failed: provide TR0NGX_PASSWORD "
-                                    "(or run on an interactive console) and make sure the 'cryptography' "
-                                    "package is available to the embedded interpreter.\\n");
-                    if (fn_Py_Finalize) fn_Py_Finalize();
-                    return 0x11;
+                if (_TRX_KEY_MODE) {{
+                    /* Password mode: the key is derived inside the target interpreter from the
+                       password. It does not exist anywhere in the image. */
+                    if (_trx_obtain_runtime_key(fn_PyMarshal_ReadObjectFromString, fn_PyEval_EvalCode, dict, runtime_key) != 0) {{
+                        RtlSecureZeroMemory(runtime_key, sizeof(runtime_key));
+                        fprintf(stderr, "[TR0NGX] Native key derivation failed: provide TR0NGX_PASSWORD "
+                                        "(or run on an interactive console) and make sure the 'cryptography' "
+                                        "package is available to the embedded interpreter.\\n");
+                        if (fn_Py_Finalize) fn_Py_Finalize();
+                        return 0x11;
+                    }}
+                }} else {{
+                    /* Password-less build: the key is embedded (masked) - integrity only. */
+                    for (int i = 0; i < 32; i++) {{
+                        runtime_key[i] = (uint8_t)(_trx_enc_key[i] ^ _trx_mask[i % 32]);
+                    }}
                 }}
 
                 /* F-02: the marshal descramble seed is bound to the runtime key */

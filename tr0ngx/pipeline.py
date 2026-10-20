@@ -122,13 +122,6 @@ def _write_final_output(output_file: str, code: str, out_format: str, src_file: 
             stealth_pe = str(options["stealth_pe"]).upper() == "Y"
         if options and options.get("password"):
             native_password = str(options["password"])
-        if not native_password:
-            raise RuntimeError(
-                "Native executable output (--out-format native-exe) requires a password "
-                "(--password / --password-file / TR0NGX_PASSWORD). A password-less native "
-                "build cannot provide confidentiality: any key recomputable from the binary "
-                "is readable by an analyst."
-            )
         _v(" [NATIVE] Compiling x86_64 PE Binary via GCC (Zero-IAT + CFF + AEAD)...")
         package_native_exe(str(code), output_file, app_name=app_name, stealth_pe=stealth_pe,
                            password=native_password)

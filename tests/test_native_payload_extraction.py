@@ -96,13 +96,23 @@ def test_native_requires_password_and_unlocks_with_it():
         assert "TR0NGX_EXTRACT_PROBE_OK" not in wrong.stderr
 
 
-def test_native_password_required_at_build_time():
-    """Building a native executable without a password must fail loudly."""
+def test_native_without_password_is_integrity_only(capsys):
+    """A password-less native build must still work, but it cannot provide confidentiality.
+
+    The key then lives in the artifact (masked), so an analyst can recover the payload -
+    that mode is explicitly labelled as integrity-only by the packager.
+    """
     with tempfile.TemporaryDirectory(prefix="trx_extract_") as tmpdir:
         out = os.path.join(tmpdir, "nopass.exe")
-        with pytest.raises(RuntimeError) as exc:
-            pn.package_native_exe(SRC, out, app_name="nopass", stealth_pe=False)
-        assert "password" in str(exc.value).lower()
+        path = pn.package_native_exe(SRC, out, app_name="nopass", stealth_pe=False)
+        assert os.path.isfile(path)
+
+        warning = capsys.readouterr().out
+        assert "integrity only" in warning.lower()
+
+        run = _run(path, password=None)
+        assert run.returncode == 0, run.stderr
+        assert "TR0NGX_EXTRACT_PROBE_OK" in run.stdout
 
 
 # ---------------------------------------------------------------------------

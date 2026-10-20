@@ -83,7 +83,7 @@ graph TD
 | `-r`, `--recursive` | IO | Recursively scan all subdirectories when batch obfuscating | Flag |
 | `-w`, `--workers`, `-j` | Resource | Number of parallel worker threads for concurrent batch obfuscation | e.g. `4`, `8` |
 | `-o`, `--output` | IO | Custom output file destination (or output directory for batch) | `<filepath / dirpath>` |
-| `--out-format` | Packager | Output artifact format: `py`, `pyc`, `exe`, `pyd` / `native`, `native-exe` (`native-exe` REQUIRES `--password`; `pyd` / `native` accept it optionally) | `py`, `pyc`, `exe`, `pyd`, `native`, `native-exe` |
+| `--out-format` | Packager | Output artifact format: `py`, `pyc`, `exe`, `pyd` / `native`, `native-exe` (native artifacts accept `--password`; without it they are integrity-only) | `py`, `pyc`, `exe`, `pyd`, `native`, `native-exe` |
 | `--native` | Packager | Direct native C/C++ AOT compilation flag (aliases `--out-format native-exe` or `pyd`) | Flag |
 | `--stealth-pe` | Protection | Hostile Native PE Armor: Anti-IDA Hex-Rays F5 & Anti-Ghidra crashers (giant RSP stack offset bomb, flow overlaps), dynamic PEB EAT MurmurHash3 API resolver, VEH trap dispatcher (`ud2`), silent poison matrix, and binary PE armorer | `y` / `n` |
 | `-m`, `--mode` | Core AST | AST obfuscation complexity level | `1`, `2`, `3` |
@@ -100,7 +100,7 @@ graph TD
 | `--debug-poison` | Protection | Deceptive debug poison state machine (silent key degradation on debugger/sandbox detection) | `y` / `n` |
 | `--spoof-meta` | Protection | Metadata & `co_filename` spoofing (camouflages stack traces to stdlib modules) | `y` / `n` |
 | `--compile` | Crypto | Multi-layer authenticated AEAD compilation (Marshal + XOR + Zlib + Bz2) | `y` / `n` |
-| `--password` | Crypto | Password for Argon2id + ChaCha20-Poly1305 AEAD / PBKDF2 (600k) payload encryption. Password mode REQUIRES the `cryptography` package and hard-fails otherwise (no silent downgrade). For `--out-format native-exe` it is MANDATORY - the native key is derived from it at runtime and never embedded | `<string>` |
+| `--password` | Crypto | Password for Argon2id + ChaCha20-Poly1305 AEAD / PBKDF2 (600k) payload encryption. Password mode REQUIRES the `cryptography` package and hard-fails otherwise (no silent downgrade). On native artifacts it turns the build into a password-protected container (key derived at runtime, never embedded); without it the build stays integrity-only | `<string>` |
 | `--password-file` | Crypto | Path to external file containing encryption password (missing/empty file aborts with exit 2) | `<filepath>` |
 | `--exotic-pools` | Identifiers | Identifiers drawn from rare Unicode script pools (Tangut, Egyptian Hieroglyphs+Ext-A, CJK Ext-G/H, Anatolian, Bamum, Glagolitic, Miao, Vedic); XID + NFKC validated via `tr0ngx_exotic.py` | `y` / `n` |
 | `--base4096` | Exotic Encoding | Pack payload into 12-bit groups mapped to a 4096-glyph exotic alphabet with standalone inline decoder | `y` / `n` |
@@ -298,13 +298,17 @@ complete payload from a native build with a *public, static* script. Root cause:
 native loader needed could be recomputed from the image itself. The hardening therefore follows one
 rule - **a value that can be recomputed from the binary is not a secret**.
 
-- **F-01 - password-derived key**: `package_native_exe` now REQUIRES a password and derives the
+- **F-01 - password-derived key**: with `--password`, `package_native_exe` derives the
   ChaCha20-Poly1305 key with `native_derive_key()` (Argon2id via `cryptography`, else PBKDF2-HMAC-
   SHA256 600k via stdlib `hashlib`). The key is **never embedded**. A masked, marshalled stub
   (`native_key_stub_blob`) is embedded instead and is evaluated by the target CPython at runtime; it
   re-derives the identical key and hands it to the loader. Runtime input order:
   `TR0NGX_PASSWORD` -> interactive console prompt (only when a real console is attached) -> fail.
   The old EDKD XOR schedule (`_trx_derive_key`, `_trx_seed_a`/`_trx_seed_b`) is gone.
+- **F-01 - two explicit modes**: `_TRX_KEY_MODE` selects the key source.
+  `1` = password mode (confidentiality: the key exists only in memory, derived at runtime).
+  `0` = password-less mode (integrity only: the key is embedded masked, therefore recoverable -
+  the packager prints a warning for every such build). The same split applies to the `.pyd` path.
 - **F-01 - tamper != key**: the anti-hook / anti-debug flags only decide *behaviour* (abort vs.
   silent failure). A wrong password and a tampered environment both end in exit code `0x11` with no
   distinguishing message, so there is no oracle.
@@ -336,9 +340,10 @@ Invariants for future edits:
 - `TRXA` payload magic = ChaCha20-Poly1305 AEAD; `TRXH` = legacy HMAC-SHA256-CTR fallback (obfuscation-only, no-password builds without `cryptography`).
 - Argon2id t=3 m=64MiB p=2; PBKDF2-HMAC-SHA256 600,000 iterations.
 - No-password mode derives keys from interpreter environment: tamper-resistance, NOT confidentiality.
-- Native builds are stricter: `native-exe` REQUIRES a password (build fails otherwise), `pyd` /
-  `native` accept one optionally. Without a password the native payload key is embedded and
-  therefore recoverable - that mode is integrity only, never confidentiality.
+- Native builds follow the same model as the Python layer: `--password` is optional. With it the
+  native payload key is derived at runtime and never embedded (confidentiality). Without it the key
+  is embedded and therefore recoverable - that mode is integrity only, and both the packager and
+  the CLI warn about it.
 - The native loader derives its key inside the *target* interpreter, so the runtime needs the
   `cryptography` package when Argon2id was used at build time. There is no silent downgrade: a
   missing package fails loudly instead of switching KDFs.

@@ -112,10 +112,15 @@ The native C/C++ loader was re-hardened after the 2026-10-20 offline reverse-eng
 audit extracted the full payload from a build with a public, static script; the loader now behaves
 like a password-protected container:
 
-- **Password-derived AEAD key (the key is never in the artifact)**: the ChaCha20-Poly1305 key is
-  derived at runtime by the *target interpreter itself* (Argon2id via `cryptography`, otherwise
-  PBKDF2-HMAC-SHA256 via stdlib `hashlib`) from a password that the user supplies. Only public
-  material is embedded: salt, KDF id, nonce, Poly1305 tag.
+- **Password-derived AEAD key (the key is never in the artifact)**: with `--password`, the
+  ChaCha20-Poly1305 key is derived at runtime by the *target interpreter itself* (Argon2id via
+  `cryptography`, otherwise PBKDF2-HMAC-SHA256 via stdlib `hashlib`) from the password the user
+  supplies. Only public material is embedded: salt, KDF id, nonce, Poly1305 tag.
+- **Two modes, clearly separated**:
+  - `--password` given -> *confidentiality*: the key never exists in the file, the artifact is
+    useless without the password.
+  - no password -> *integrity only*: the key has to live in the artifact (masked), so it is
+    recoverable by an analyst. The packager prints a warning for every such build.
 - **Tamper flags are not key material**: anti-hook / anti-debug findings raise a flag that decides
   *behaviour* (abort vs. silent failure). The key stays a pure function of (password, salt), so no
   static derivation can be inverted by an analyst.
@@ -133,19 +138,22 @@ like a password-protected container:
 Usage:
 
 ```powershell
-# Build (a password is mandatory for native-exe)
+# Build with a password (recommended: the artifact is then undecryptable without it)
 python main.py -i app.py -o app.exe --out-format native-exe -m 2 --password "S3cret-Pass"
 
 # Run: the password comes from the environment or from an interactive prompt
 $env:TR0NGX_PASSWORD = "S3cret-Pass"; .\app.exe
+
+# Build without a password (allowed - integrity only, the packager warns)
+python main.py -i app.py -o app.exe --out-format native-exe -m 2
 
 # A .pyd (library) never prompts on import - the host process must provide the secret
 $env:TR0NGX_PASSWORD = "S3cret-Pass"; python -c "import app_mod"
 ```
 
 **Security reality (read before marketing this loader)**
-- `native-exe` **requires** a password. A password-less native build cannot provide confidentiality:
-  any key that can be recomputed from the binary is not a secret.
+- Without a password the native payload key is embedded, so the artifact offers **integrity, not
+  confidentiality**. Use `--password` whenever the payload must stay secret.
 - A wrong password and a tampered environment both end in the same generic failure (exit code
   `0x11`, no distinguishing message), so the loader leaks nothing about the secret.
 - Hashed / Zero-IAT API resolution, CFF and framing raise the cost of *casual* static analysis.
@@ -268,7 +276,7 @@ python main.py -i input.py -o output.py -m 3 \
 | `-r`, `--recursive` | Recursively scan all subdirectories when batch obfuscating | Flag |
 | `-w`, `--workers`, `-j` | Number of parallel worker threads for concurrent batch obfuscation | e.g. `4`, `8` |
 | `-o`, `--output` | Custom destination output path (or destination folder for batch) | `<filepath / dirpath>` |
-| `--out-format` | Output artifact format: `py`, `pyc`, `exe`, `pyd` / `native`, `native-exe` (`native-exe` REQUIRES `--password`; `pyd` / `native` accept it optionally) | `py`, `pyc`, `exe`, `pyd`, `native`, `native-exe` |
+| `--out-format` | Output artifact format: `py`, `pyc`, `exe`, `pyd` / `native`, `native-exe` (native artifacts accept `--password`; without it they are integrity-only) | `py`, `pyc`, `exe`, `pyd`, `native`, `native-exe` |
 | `--native` | Direct native C/C++ AOT compilation flag (aliases `--out-format native-exe` or `pyd`) | Flag |
 | `--stealth-pe` | Hostile Native PE Armor: Anti-IDA Hex-Rays F5 & Anti-Ghidra crashers (giant RSP stack offset bomb, flow overlaps), dynamic PEB EAT MurmurHash3 API resolver, VEH trap dispatcher (`ud2`), silent poison matrix, and binary PE armorer | `y` / `n` |
 | `-m`, `--mode` | Obfuscation complexity level | `1`, `2`, `3` |
@@ -285,7 +293,7 @@ python main.py -i input.py -o output.py -m 3 \
 | `--debug-poison` | Deceptive debug poison state machine (silent key degradation on debugger/sandbox detection) | `y` / `n` |
 | `--spoof-meta` | Metadata & `co_filename` spoofing (camouflages stack traces to stdlib modules) | `y` / `n` |
 | `--compile` | Authenticated AEAD v3 bytecode compilation (ChaCha20-Poly1305) | `y` / `n` |
-| `--password` | Password for Argon2id + ChaCha20-Poly1305 / PBKDF2 authenticated payload encryption (required for real AEAD; `cryptography` package mandatory, no silent downgrade). For `--out-format native-exe` it is **mandatory**: the native key is derived from it at runtime | `<string>` |
+| `--password` | Password for Argon2id + ChaCha20-Poly1305 / PBKDF2 authenticated payload encryption (required for real AEAD; `cryptography` package mandatory, no silent downgrade). On native artifacts it turns the build into a password-protected container (key derived at runtime, never embedded); without it the build stays integrity-only | `<string>` |
 | `--password-file` | File path containing encryption password (missing/empty file now hard-fails with exit 2) | `<filepath>` |
 | `--exotic-pools` | Identifiers from rare Unicode script pools (Tangut/Egyptian/CJK Ext-G/H/Anatolian/Bamum/Glagolitic/Miao), XID+NFKC validated | `y` / `n` |
 | `--base4096` | Encode payload as 12-bit astral glyph stream (Base4096 exotic alphabet) | `y` / `n` |

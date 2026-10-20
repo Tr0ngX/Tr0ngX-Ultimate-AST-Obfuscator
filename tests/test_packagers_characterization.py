@@ -90,11 +90,20 @@ sys.exit(0)
         assert "TR0NGX_E2E_OK_12345" in proc.stdout
 
 
-def test_package_native_exe_requires_password():
-    """A password-less native build must be rejected - it cannot provide confidentiality."""
-    test_src = "print('nope')\n"
+def test_package_native_exe_password_is_optional():
+    """The password is a flag, not a requirement: without it the build stays integrity-only."""
+    test_src = """import sys
+print("TR0NGX_NOPASS_OK")
+sys.exit(0)
+"""
     with tempfile.TemporaryDirectory(prefix="trx_test_") as tmpdir:
         out_exe = os.path.join(tmpdir, "nopass_app.exe")
-        with pytest.raises(RuntimeError) as exc:
-            pn.package_native_exe(test_src, out_exe, app_name="nopass_app", stealth_pe=False)
-        assert "password" in str(exc.value).lower()
+        built_path = pn.package_native_exe(test_src, out_exe, app_name="nopass_app", stealth_pe=False)
+        assert os.path.isfile(built_path)
+
+        env = dict(os.environ)
+        env.pop("TR0NGX_PASSWORD", None)
+        proc = subprocess.run([built_path], capture_output=True, text=True, timeout=120,
+                              env=env, stdin=subprocess.DEVNULL)
+        assert proc.returncode == 0, proc.stderr
+        assert "TR0NGX_NOPASS_OK" in proc.stdout
