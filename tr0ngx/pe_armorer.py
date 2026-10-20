@@ -23,6 +23,70 @@ except ImportError:
     pefile = None
 
 
+def _rva_to_offset(rva, sections):
+    """Maps an RVA to a raw file offset using the PE section table."""
+    for va, vsize, raw_ptr, raw_size in sections:
+        if va <= rva < va + max(vsize, raw_size):
+            return raw_ptr + (rva - va)
+    return None
+
+
+def _protected_metadata_ranges(data, opt_header_offset, sections):
+    """Byte ranges that hold live import / export metadata.
+
+    Scrubbing those ranges would destroy the PE metadata (e.g. the 'python3' marker wipes
+    'python312.dll' from the import table, and a marker like '_trx_' truncates the
+    'PyInit_<module>' export name so the extension can no longer be imported), so they are
+    excluded from the string cleanser. Returns a list of (start, end) file offsets.
+    """
+    ranges = []
+    try:
+        # --- imports (DataDirectory index 1) ---
+        import_rva, import_size = struct.unpack_from("<II", data, opt_header_offset + 112 + (1 * 8))
+        if import_rva and import_size:
+            base = _rva_to_offset(import_rva, sections)
+            if base is not None:
+                ranges.append((base, base + import_size))
+                desc_off = base
+                while desc_off + 20 <= len(data):
+                    desc = data[desc_off:desc_off + 20]
+                    if desc == b"\x00" * 20:
+                        break
+                    name_rva = struct.unpack_from("<I", desc, 12)[0]
+                    if name_rva:
+                        name_off = _rva_to_offset(name_rva, sections)
+                        if name_off is not None:
+                            end = data.find(b"\x00", name_off)
+                            end = name_off + 64 if end == -1 else end + 1
+                            ranges.append((name_off, end))
+                    desc_off += 20
+
+        # --- exports (DataDirectory index 0) ---
+        export_rva, export_size = struct.unpack_from("<II", data, opt_header_offset + 112)
+        if export_rva and export_size:
+            base = _rva_to_offset(export_rva, sections)
+            if base is not None:
+                ranges.append((base, base + export_size))
+                num_names = struct.unpack_from("<I", data, base + 24)[0]
+                names_rva = struct.unpack_from("<I", data, base + 32)[0]
+                names_off = _rva_to_offset(names_rva, sections) if names_rva else None
+                for i in range(min(num_names, 4096)):
+                    if names_off is None:
+                        break
+                    name_rva = struct.unpack_from("<I", data, names_off + i * 4)[0]
+                    if not name_rva:
+                        continue
+                    name_off = _rva_to_offset(name_rva, sections)
+                    if name_off is None:
+                        continue
+                    end = data.find(b"\x00", name_off)
+                    end = name_off + 128 if end == -1 else end + 1
+                    ranges.append((name_off, end))
+    except Exception:
+        return ranges
+    return ranges
+
+
 def armor_pe_binary(pe_path: str, stealth_level: int = 1) -> bool:
     """
     Applies in-place post-processing armor to the compiled PE executable.
@@ -51,6 +115,20 @@ def armor_pe_binary(pe_path: str, stealth_level: int = 1) -> bool:
         opt_magic = struct.unpack_from("<H", data, opt_header_offset)[0]
         if opt_magic != 0x20B:
             return False
+
+        # Section table (RVA -> raw offset) and the import metadata ranges to protect
+        sections = []
+        sec_table_offset = opt_header_offset + opt_header_size
+        for i in range(num_sections):
+            cur = sec_table_offset + (i * 40)
+            if cur + 40 > len(data):
+                break
+            sec_va = struct.unpack_from("<I", data, cur + 12)[0]
+            sec_vsize = struct.unpack_from("<I", data, cur + 8)[0]
+            sec_raw_ptr = struct.unpack_from("<I", data, cur + 20)[0]
+            sec_raw_size = struct.unpack_from("<I", data, cur + 16)[0]
+            sections.append((sec_va, sec_vsize, sec_raw_ptr, sec_raw_size))
+        protected_ranges = _protected_metadata_ranges(data, opt_header_offset, sections)
 
         # 1. Zero out Compilation Timestamp in File Header (Anti-timeline analysis)
         struct.pack_into("<I", data, file_header_offset + 4, 0)
@@ -108,6 +186,24 @@ def armor_pe_binary(pe_path: str, stealth_level: int = 1) -> bool:
             b"Mingw-w64 runtime failure:",
             b"python3",
             b"__main__",
+            b"cpython",
+            b"PyEval",
+            b"sys.settrace",
+            b"sys.setprofile",
+            b"sys.monitoring",
+            b"_code_text",
+            b"Tangut",
+            b"co_code",
+            b"_auth_decrypt",
+            b"compute_signature",
+            b"_trx_",
+            b".file",
+            b".ident",
+            b"crtexe.c",
+            b"natstart.c",
+            b"pseudo-reloc.c",
+            b"tlssup.c",
+            b"libgcc",
         ]
 
         for marker in scrub_markers:
@@ -120,6 +216,10 @@ def armor_pe_binary(pe_path: str, stealth_level: int = 1) -> bool:
                 null_idx = data.find(b"\x00", m_idx)
                 if null_idx == -1 or null_idx - m_idx > 128:
                     null_idx = min(len(data), m_idx + len(marker) + 16)
+                # never touch live import metadata
+                if any(r_start <= m_idx < r_end for r_start, r_end in protected_ranges):
+                    m_idx += len(marker)
+                    continue
                 for j in range(m_idx, null_idx):
                     data[j] = 0
                 m_idx += len(marker)
@@ -143,9 +243,8 @@ def armor_pe_binary(pe_path: str, stealth_level: int = 1) -> bool:
             b".xdata": b".pdata\x00\x00",
         }
 
-        sec_table_offset = opt_header_offset + opt_header_size
         for i in range(num_sections):
-            cur_sec_offset = sec_table_offset + (i * 40)
+            cur_sec_offset = opt_header_offset + opt_header_size + (i * 40)
             if cur_sec_offset + 40 > len(data):
                 break
             raw_name = bytes(data[cur_sec_offset:cur_sec_offset + 8])

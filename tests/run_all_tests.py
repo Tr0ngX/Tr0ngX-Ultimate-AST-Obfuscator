@@ -50,7 +50,8 @@ TEST_FILES = [
     "tests/test_10_complex_realworld.py",
     "tests/test_11_negative_inputs.py",
     "tests/test_12_combo_matrix.py",
-    "tests/test_13_debugmap_roundtrip.py"
+    "tests/test_13_debugmap_roundtrip.py",
+    "tests/test_native_payload_extraction.py"
 ]
 
 STANDALONE_TESTS = [

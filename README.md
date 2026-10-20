@@ -107,6 +107,50 @@ graph TD
 - **Full async**: await hands off on the running loop (no nested pools, no deadlocks), async-for via a sentinel-free `__vm_anext__` tuple protocol, async-with, async generators, and async comprehensions compiled into inline awaited helpers.
 - **Native-faithful semantics**: positional defaults evaluated once at function creation, `import a.b as c` binds the submodule, `raise X from Y` chains `__cause__`, dict literals preserve insertion order, and user builtin-shadowing (e.g. `len = ...`) cannot break the interpreter.
 
+### 7c. Native Fortress V5 (`--out-format native-exe` / `pyd`)
+The native C/C++ loader was re-hardened after the 2026-10-20 offline reverse-engineering audit. The
+audit extracted the full payload from a build with a public, static script; the loader now behaves
+like a password-protected container:
+
+- **Password-derived AEAD key (the key is never in the artifact)**: the ChaCha20-Poly1305 key is
+  derived at runtime by the *target interpreter itself* (Argon2id via `cryptography`, otherwise
+  PBKDF2-HMAC-SHA256 via stdlib `hashlib`) from a password that the user supplies. Only public
+  material is embedded: salt, KDF id, nonce, Poly1305 tag.
+- **Tamper flags are not key material**: anti-hook / anti-debug findings raise a flag that decides
+  *behaviour* (abort vs. silent failure). The key stays a pure function of (password, salt), so no
+  static derivation can be inverted by an analyst.
+- **Runtime API hash parameters**: the MurmurHash3 parameters used for Zero-IAT resolution are
+  rebuilt at runtime from a masked per-build blob instead of being baked in as literals.
+- **Opaque control-flow state**: the CFF dispatcher state is stored XOR-masked under a runtime-only
+  mask, so neither the optimizer nor a decompiler can fold the state graph into straight-line code.
+- **Uniform-entropy framing**: the ciphertext is interleaved with a full-length random filler (no
+  repeating pool) and the lane that carries the ciphertext is chosen per build.
+- **On-disk image validation**: protected CPython entry points are compared against the module file
+  on disk, which detects inline hooks that patch deeper than the first opcode.
+- **Masked metadata**: the author banner, the payload sizes and the API hash blob are stored masked,
+  so no plaintext fingerprint survives in the image.
+
+Usage:
+
+```powershell
+# Build (a password is mandatory for native-exe)
+python main.py -i app.py -o app.exe --out-format native-exe -m 2 --password "S3cret-Pass"
+
+# Run: the password comes from the environment or from an interactive prompt
+$env:TR0NGX_PASSWORD = "S3cret-Pass"; .\app.exe
+
+# A .pyd (library) never prompts on import - the host process must provide the secret
+$env:TR0NGX_PASSWORD = "S3cret-Pass"; python -c "import app_mod"
+```
+
+**Security reality (read before marketing this loader)**
+- `native-exe` **requires** a password. A password-less native build cannot provide confidentiality:
+  any key that can be recomputed from the binary is not a secret.
+- A wrong password and a tampered environment both end in the same generic failure (exit code
+  `0x11`, no distinguishing message), so the loader leaks nothing about the secret.
+- Hashed / Zero-IAT API resolution, CFF and framing raise the cost of *casual* static analysis.
+  They are not a security boundary against a determined reverse engineer with the password in hand.
+
 ### 8. Resource Management & Diagnostic Profiling
 - **RAM & CPU Core Limits**: Built-in `--max-ram` (MB) and `--cores` limiter prevents memory exhaustion during heavy obfuscation passes.
 - **Micro-Stage Profiler & Debug Map**: High-resolution performance timer tracking and optional JSON mapping export (`--debug-map`).
@@ -224,7 +268,7 @@ python main.py -i input.py -o output.py -m 3 \
 | `-r`, `--recursive` | Recursively scan all subdirectories when batch obfuscating | Flag |
 | `-w`, `--workers`, `-j` | Number of parallel worker threads for concurrent batch obfuscation | e.g. `4`, `8` |
 | `-o`, `--output` | Custom destination output path (or destination folder for batch) | `<filepath / dirpath>` |
-| `--out-format` | Output artifact format: `py`, `pyc`, `exe`, `pyd` / `native`, `native-exe` | `py`, `pyc`, `exe`, `pyd`, `native`, `native-exe` |
+| `--out-format` | Output artifact format: `py`, `pyc`, `exe`, `pyd` / `native`, `native-exe` (`native-exe` REQUIRES `--password`; `pyd` / `native` accept it optionally) | `py`, `pyc`, `exe`, `pyd`, `native`, `native-exe` |
 | `--native` | Direct native C/C++ AOT compilation flag (aliases `--out-format native-exe` or `pyd`) | Flag |
 | `--stealth-pe` | Hostile Native PE Armor: Anti-IDA Hex-Rays F5 & Anti-Ghidra crashers (giant RSP stack offset bomb, flow overlaps), dynamic PEB EAT MurmurHash3 API resolver, VEH trap dispatcher (`ud2`), silent poison matrix, and binary PE armorer | `y` / `n` |
 | `-m`, `--mode` | Obfuscation complexity level | `1`, `2`, `3` |
@@ -241,7 +285,7 @@ python main.py -i input.py -o output.py -m 3 \
 | `--debug-poison` | Deceptive debug poison state machine (silent key degradation on debugger/sandbox detection) | `y` / `n` |
 | `--spoof-meta` | Metadata & `co_filename` spoofing (camouflages stack traces to stdlib modules) | `y` / `n` |
 | `--compile` | Authenticated AEAD v3 bytecode compilation (ChaCha20-Poly1305) | `y` / `n` |
-| `--password` | Password for Argon2id + ChaCha20-Poly1305 / PBKDF2 authenticated payload encryption (required for real AEAD; `cryptography` package mandatory, no silent downgrade) | `<string>` |
+| `--password` | Password for Argon2id + ChaCha20-Poly1305 / PBKDF2 authenticated payload encryption (required for real AEAD; `cryptography` package mandatory, no silent downgrade). For `--out-format native-exe` it is **mandatory**: the native key is derived from it at runtime | `<string>` |
 | `--password-file` | File path containing encryption password (missing/empty file now hard-fails with exit 2) | `<filepath>` |
 | `--exotic-pools` | Identifiers from rare Unicode script pools (Tangut/Egyptian/CJK Ext-G/H/Anatolian/Bamum/Glagolitic/Miao), XID+NFKC validated | `y` / `n` |
 | `--base4096` | Encode payload as 12-bit astral glyph stream (Base4096 exotic alphabet) | `y` / `n` |

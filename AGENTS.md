@@ -83,7 +83,7 @@ graph TD
 | `-r`, `--recursive` | IO | Recursively scan all subdirectories when batch obfuscating | Flag |
 | `-w`, `--workers`, `-j` | Resource | Number of parallel worker threads for concurrent batch obfuscation | e.g. `4`, `8` |
 | `-o`, `--output` | IO | Custom output file destination (or output directory for batch) | `<filepath / dirpath>` |
-| `--out-format` | Packager | Output artifact format: `py`, `pyc`, `exe`, `pyd` / `native`, `native-exe` | `py`, `pyc`, `exe`, `pyd`, `native`, `native-exe` |
+| `--out-format` | Packager | Output artifact format: `py`, `pyc`, `exe`, `pyd` / `native`, `native-exe` (`native-exe` REQUIRES `--password`; `pyd` / `native` accept it optionally) | `py`, `pyc`, `exe`, `pyd`, `native`, `native-exe` |
 | `--native` | Packager | Direct native C/C++ AOT compilation flag (aliases `--out-format native-exe` or `pyd`) | Flag |
 | `--stealth-pe` | Protection | Hostile Native PE Armor: Anti-IDA Hex-Rays F5 & Anti-Ghidra crashers (giant RSP stack offset bomb, flow overlaps), dynamic PEB EAT MurmurHash3 API resolver, VEH trap dispatcher (`ud2`), silent poison matrix, and binary PE armorer | `y` / `n` |
 | `-m`, `--mode` | Core AST | AST obfuscation complexity level | `1`, `2`, `3` |
@@ -100,7 +100,7 @@ graph TD
 | `--debug-poison` | Protection | Deceptive debug poison state machine (silent key degradation on debugger/sandbox detection) | `y` / `n` |
 | `--spoof-meta` | Protection | Metadata & `co_filename` spoofing (camouflages stack traces to stdlib modules) | `y` / `n` |
 | `--compile` | Crypto | Multi-layer authenticated AEAD compilation (Marshal + XOR + Zlib + Bz2) | `y` / `n` |
-| `--password` | Crypto | Password for Argon2id + ChaCha20-Poly1305 AEAD / PBKDF2 (600k) payload encryption. Password mode REQUIRES the `cryptography` package and hard-fails otherwise (no silent downgrade) | `<string>` |
+| `--password` | Crypto | Password for Argon2id + ChaCha20-Poly1305 AEAD / PBKDF2 (600k) payload encryption. Password mode REQUIRES the `cryptography` package and hard-fails otherwise (no silent downgrade). For `--out-format native-exe` it is MANDATORY - the native key is derived from it at runtime and never embedded | `<string>` |
 | `--password-file` | Crypto | Path to external file containing encryption password (missing/empty file aborts with exit 2) | `<filepath>` |
 | `--exotic-pools` | Identifiers | Identifiers drawn from rare Unicode script pools (Tangut, Egyptian Hieroglyphs+Ext-A, CJK Ext-G/H, Anatolian, Bamum, Glagolitic, Miao, Vedic); XID + NFKC validated via `tr0ngx_exotic.py` | `y` / `n` |
 | `--base4096` | Exotic Encoding | Pack payload into 12-bit groups mapped to a 4096-glyph exotic alphabet with standalone inline decoder | `y` / `n` |
@@ -288,13 +288,60 @@ powershell -Command "Remove-Item -Force -ErrorAction SilentlyContinue test_full_
 - Default worker count is **1** (repo policy). `-w N>1` remains available but requires explicit opt-in.
 - Phase 2 performs a real **semantic differential**: native stdout (captured in Phase 1) must byte-match obfuscated output (`SEMANTIC_DIFF` failure otherwise).
 - Every subprocess carries a hard timeout: build 420s, runtime 120s, native suites 600s.
-- Suites wired into the harness: `test_01..test_05`, `test_10`, `test_11_negative_inputs`, `test_12_combo_matrix`, `test_13_debugmap_roundtrip` (Phase 1/2); `test_06..test_09`, `test_14_exotic_module`, `test_vm_oracle_semantic`, `test_qa_fuzz_semantic` (Phase 3 standalone).
+- Suites wired into the harness: `test_01..test_05`, `test_10`, `test_11_negative_inputs`, `test_12_combo_matrix`, `test_13_debugmap_roundtrip`, `test_native_payload_extraction` (Phase 1/2); `test_06..test_09`, `test_14_exotic_module`, `test_vm_oracle_semantic`, `test_qa_fuzz_semantic` (Phase 3 standalone).
 - `test_qa_fuzz_semantic.py` runs a REAL mutation fuzzer (>=300 malformed VM packets per run, seeded) and FAILS the suite on any unhandled crash.
+
+### 4.10 Native Fortress V5 Hardening (2026-10-20, post reverse-engineering audit)
+
+The 2026-10-20 audit (`2026-10-20_reverse-hello_tr0ngx_apex_10of10-v3-report.md`) extracted the
+complete payload from a native build with a *public, static* script. Root cause: every secret the
+native loader needed could be recomputed from the image itself. The hardening therefore follows one
+rule - **a value that can be recomputed from the binary is not a secret**.
+
+- **F-01 - password-derived key**: `package_native_exe` now REQUIRES a password and derives the
+  ChaCha20-Poly1305 key with `native_derive_key()` (Argon2id via `cryptography`, else PBKDF2-HMAC-
+  SHA256 600k via stdlib `hashlib`). The key is **never embedded**. A masked, marshalled stub
+  (`native_key_stub_blob`) is embedded instead and is evaluated by the target CPython at runtime; it
+  re-derives the identical key and hands it to the loader. Runtime input order:
+  `TR0NGX_PASSWORD` -> interactive console prompt (only when a real console is attached) -> fail.
+  The old EDKD XOR schedule (`_trx_derive_key`, `_trx_seed_a`/`_trx_seed_b`) is gone.
+- **F-01 - tamper != key**: the anti-hook / anti-debug flags only decide *behaviour* (abort vs.
+  silent failure). A wrong password and a tampered environment both end in exit code `0x11` with no
+  distinguishing message, so there is no oracle.
+- **F-02**: the marshal descramble seed is derived from the runtime key (`key[0:4]`); the static
+  `_TRX_MARSHAL_SEED` constant is gone.
+- **F-03**: the API hash parameters (`c1/c2/r1/r2/seed`) are derived at runtime from a masked blob
+  (`native_hash_params` + `_trx_splitmix32`); no hash parameter is a literal or a `.rdata` constant.
+- **F-04**: the CFF state is stored XOR-masked under a runtime-only mask (`_trx_cff_mask`), so the
+  optimizer cannot fold the state graph and a decompiler cannot resolve the case order.
+- **F-05**: `interleave_low_entropy()` fills the whole frame with fresh randomness (no repeating
+  pool) and returns a per-build parity that selects the ciphertext lane.
+- **F-06**: `_trx_verify_module_image()` compares the protected CPython entry points against the
+  module file on disk (base relocations tolerated) - this catches inline hooks deeper than byte 0.
+- **F-07/F-08**: the author banner, the payload sizes and the hash blob are stored masked.
+- The `.pyd` path shares the AEAD implementation (`_TRX_C_AEAD_LIB`) and the same key model. A
+  password-protected `.pyd` never prompts on import (env var only); a password-less `.pyd` is
+  explicitly labelled tamper-resistance-only.
+- `pe_armorer.armor_pe_binary()` now protects live import metadata while scrubbing: the `python3`
+  marker used to wipe `python312.dll` from the import table and break every `.pyd`.
+
+Invariants for future edits:
+- Never reintroduce a key, a seed, a hash parameter or a length as a plaintext constant in the
+  native templates; everything that is not public must be masked or derived at runtime.
+- `tests/test_native_payload_extraction.py` is the regression net for the audit findings. Keep it
+  green: it asserts that the AEAD key is absent from the artifact, that the artifact refuses to run
+  without the password, and that the framing/metadata invariants hold.
 
 ### 5.2 Crypto Reality Check (post-hardening)
 - `TRXA` payload magic = ChaCha20-Poly1305 AEAD; `TRXH` = legacy HMAC-SHA256-CTR fallback (obfuscation-only, no-password builds without `cryptography`).
 - Argon2id t=3 m=64MiB p=2; PBKDF2-HMAC-SHA256 600,000 iterations.
 - No-password mode derives keys from interpreter environment: tamper-resistance, NOT confidentiality.
+- Native builds are stricter: `native-exe` REQUIRES a password (build fails otherwise), `pyd` /
+  `native` accept one optionally. Without a password the native payload key is embedded and
+  therefore recoverable - that mode is integrity only, never confidentiality.
+- The native loader derives its key inside the *target* interpreter, so the runtime needs the
+  `cryptography` package when Argon2id was used at build time. There is no silent downgrade: a
+  missing package fails loudly instead of switching KDFs.
 
 ---
 

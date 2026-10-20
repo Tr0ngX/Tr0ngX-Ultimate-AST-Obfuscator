@@ -103,18 +103,35 @@ def _write_final_output(output_file: str, code: str, out_format: str, src_file: 
         from .packagers_native import package_native_pyd
         mod_name = os.path.splitext(os.path.basename(output_file))[0]
         stealth_pe = True
+        native_password = None
         if options and "stealth_pe" in options:
             stealth_pe = str(options["stealth_pe"]).upper() == "Y"
-        package_native_pyd(str(code), output_file, module_name=mod_name, stealth_pe=stealth_pe)
+        if options and options.get("password"):
+            native_password = str(options["password"])
+        package_native_pyd(str(code), output_file, module_name=mod_name, stealth_pe=stealth_pe,
+                           password=native_password)
         return
 
     if out_format == "native-exe":
         from .packagers_native import package_native_exe
+        from .diagnostics import _v
         app_name = os.path.splitext(os.path.basename(output_file))[0]
         stealth_pe = True
+        native_password = None
         if options and "stealth_pe" in options:
             stealth_pe = str(options["stealth_pe"]).upper() == "Y"
-        package_native_exe(str(code), output_file, app_name=app_name, stealth_pe=stealth_pe)
+        if options and options.get("password"):
+            native_password = str(options["password"])
+        if not native_password:
+            raise RuntimeError(
+                "Native executable output (--out-format native-exe) requires a password "
+                "(--password / --password-file / TR0NGX_PASSWORD). A password-less native "
+                "build cannot provide confidentiality: any key recomputable from the binary "
+                "is readable by an analyst."
+            )
+        _v(" [NATIVE] Compiling x86_64 PE Binary via GCC (Zero-IAT + CFF + AEAD)...")
+        package_native_exe(str(code), output_file, app_name=app_name, stealth_pe=stealth_pe,
+                           password=native_password)
         return
 
     # default: py
@@ -459,9 +476,9 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
         if moreobf.upper() == "Y":
             try: code = __moreobf(code)
             except Exception: pass
-        code = ANTI_PYCDC + code
+        is_native_binary = out_format in ("native-exe", "native", "pyd")
 
-        if double_compile.upper() == "Y":
+        if double_compile.upper() == "Y" and not is_native_binary:
             if not quiet_progress: _v_step(7, 8, "DOUBLE COMPILE (Tr0ngX + Velimatix)...")
             try:
                 code = _double_compile(_var_template + code, target_ver=target_ver_str, password=encryption_password)
@@ -470,7 +487,12 @@ def _obfuscate_single_target_core(src_file: str, output_file: str, options: dict
                 _log_stage_error("7_double_compile_packaging", e)
                 double_compile = "N"
 
-        if double_compile.upper() != "Y":
+        if is_native_binary:
+            # Native binary (PE/DLL): Code has passed TVM L3 + Velimatix + 3-Layer + Anti-Debug/VM
+            # Bypass slow text double-compile string wraps because native loader wraps via ChaCha20-Poly1305 + AOT + CFF
+            code = _var_template + code
+            _track_debug_stage("7_native_streamline_packaging", time.time() - t0, sz0, len(code))
+        elif double_compile.upper() != "Y":
             try:
                 compiled_bytes = marshal.dumps(compile(code, "<tr0ngx>", "exec"))
             except SyntaxError as e:
@@ -687,7 +709,9 @@ except Exception as _e:
         except Exception as e:
             _log_stage_error("11.5_exotic_payload_wrap", e)
 
-    if is_fused_shield:
+    is_native_binary = out_format in ("native-exe", "native", "pyd")
+
+    if is_fused_shield and not is_native_binary:
         if not quiet_progress: _v(" [9/9] Applying Fused Matrix Shield (Kyrie + Emoji + Whitespace Symbiotic)...")
         try:
             t0 = time.time()
@@ -696,7 +720,7 @@ except Exception as _e:
             _track_debug_stage("8_fused_matrix_shield", time.time() - t0, sz0, len(code))
         except Exception as e:
             _log_stage_error("8_fused_matrix_shield", e)
-    else:
+    elif not is_native_binary:
         if kramer_wrap_choice.upper() == "Y":
             if not quiet_progress: _v(" [9/9] Applying Kramer Outer Shield (Kyrie Eleison)...")
             try:
@@ -735,8 +759,10 @@ except Exception as _e:
         except Exception as e:
             _log_stage_error("12.5_spoof_meta_shield", e)
 
-    _blank_pad = ("\n" * 300) if blank_padding_choice.upper() == "Y" else ""
-    if zalgo_choice.upper() == "Y":
+    _blank_pad = ("\n" * 300) if (blank_padding_choice.upper() == "Y" and not is_native_binary) else ""
+    if is_native_binary:
+        code = _gen_tr0ngx_header() + "\n" + code
+    elif zalgo_choice.upper() == "Y":
         code = _gen_tr0ngx_header() + "\n" + _blank_pad + _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=6, chars_per_line=12, marks_per_char=50) + "\n" + code + "\n" + _gen_zalgo_cascade_docstring(paragraphs=1, lines_per_p=4, chars_per_line=12, marks_per_char=50)
     elif cjk_choice.upper() == "Y" or matrix_choice.upper() == "Y" or rare_unicode_choice.upper() == "Y":
         code = _gen_tr0ngx_header() + "\n" + _blank_pad + _gen_cjk_docstring(paragraphs=1, lines_per_p=5, chars_per_line=36) + "\n" + code + "\n" + _gen_cjk_docstring(paragraphs=1, lines_per_p=4, chars_per_line=36)

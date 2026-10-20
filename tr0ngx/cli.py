@@ -605,6 +605,19 @@ any preset. Docs: README.md / AGENTS.md""",
         pwd_inp = ask_encryption_password()
         if pwd_inp:
             password = pwd_inp
+    # Native executables derive their payload key from a password at runtime - without one the
+    # key would have to live in the binary, which means no confidentiality at all.
+    if not password and out_format_resolved == "native-exe":
+        if is_cli_mode:
+            print("[-] ERROR: --out-format native-exe requires a password "
+                  "(--password / --password-file / TR0NGX_PASSWORD).", file=sys.stderr)
+            sys.exit(2)
+        pwd_inp = ask_encryption_password()
+        if pwd_inp:
+            password = pwd_inp
+        else:
+            print("[-] ERROR: --out-format native-exe requires a password.", file=sys.stderr)
+            sys.exit(2)
     _trx_cfg._EngineState.encryption_password = password
     if _trx_cfg._EngineState.env_key_lock and password:
         # Mutually exclusive trust roots: password = portable secret, env-key =
